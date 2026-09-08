@@ -1,0 +1,12 @@
+{
+  "name": "@aether/web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "echo Web app pending bootstrap",
+    "build": "echo Web app pending bootstrap",
+    "lint": "echo Web lint pending bootstrap",
+    "typecheck": "tsc --noEmit",
+    "test": "echo Web tests pending bootstrap"
+  }
+}

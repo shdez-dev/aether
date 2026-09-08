@@ -1,0 +1,505 @@
+openapi: 3.1.1
+info:
+  title: Aether API
+  version: 0.1.0
+  description: >-
+    Contrato inicial de la primera rebanada institucional. Toda operación protegida
+    usa sesión de servidor y conserva un identificador de correlación.
+  license:
+    name: Proprietary
+    identifier: LicenseRef-Aether-Proprietary
+servers:
+  - url: http://127.0.0.1:4000
+    description: Desarrollo local
+tags:
+  - name: Health
+    description: Disponibilidad del servicio.
+  - name: Authentication
+    description: Inicio OIDC, sesión opaca y cierre de sesión.
+  - name: Organizations
+    description: Contexto organizacional institucional.
+  - name: Workspaces
+    description: Espacios de trabajo con alcance explícito.
+  - name: Initiatives
+    description: Ciclo de vida de iniciativas antes de convertirse en proyectos.
+  - name: Audit
+    description: Línea temporal autorizada de acciones y eventos.
+paths:
+  /health:
+    get:
+      tags: [Health]
+      operationId: getHealth
+      summary: Consultar disponibilidad del servicio
+      security: []
+      responses:
+        "200":
+          description: Servicio disponible
+          headers:
+            X-Correlation-ID:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    const: ok
+        "429":
+          $ref: "#/components/responses/Problem"
+  /auth/login:
+    get:
+      tags: [Authentication]
+      operationId: beginLogin
+      summary: Iniciar autorización OIDC con PKCE
+      security: []
+      responses:
+        "302":
+          description: Redirección al proveedor OIDC.
+          headers:
+            Location:
+              required: true
+              schema: { type: string, format: uri }
+        "429":
+          $ref: "#/components/responses/Problem"
+  /auth/callback:
+    get:
+      tags: [Authentication]
+      operationId: completeLogin
+      summary: Completar callback OIDC de un solo uso
+      security: []
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema: { type: string, minLength: 1 }
+        - name: state
+          in: query
+          required: true
+          schema: { type: string, minLength: 1 }
+      responses:
+        "302":
+          description: Sesión creada y redirección al cliente web.
+          headers:
+            Location:
+              required: true
+              schema: { type: string, format: uri }
+            X-Correlation-ID:
+              $ref: "#/components/headers/CorrelationId"
+        "400":
+          $ref: "#/components/responses/Problem"
+  /auth/session:
+    get:
+      tags: [Authentication]
+      operationId: getSession
+      summary: Consultar la sesión actual
+      security: [{ cookieSession: [] }]
+      responses:
+        "200":
+          description: Sesión activa.
+          headers:
+            X-Correlation-ID:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "401":
+          $ref: "#/components/responses/Problem"
+  /auth/logout:
+    post:
+      tags: [Authentication]
+      operationId: logout
+      summary: Revocar la sesión actual
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "204":
+          description: Sesión revocada.
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /v1/organizations:
+    post:
+      tags: [Organizations]
+      operationId: createOrganization
+      summary: Crear una organización
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateOrganizationRequest"
+      responses:
+        "201":
+          description: Organización creada
+          headers:
+            X-Correlation-ID:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Organization"
+        "401":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /v1/workspaces:
+    post:
+      tags: [Workspaces]
+      operationId: createWorkspace
+      summary: Crear un workspace
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWorkspaceRequest"
+      responses:
+        "201":
+          description: Workspace creado
+          headers:
+            X-Correlation-ID:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workspace"
+        "401":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /v1/initiatives:
+    post:
+      tags: [Initiatives]
+      operationId: createInitiativeDraft
+      summary: Crear un borrador de iniciativa
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateInitiativeDraftRequest"
+      responses:
+        "201":
+          description: Borrador de iniciativa creado
+          headers:
+            X-Correlation-ID:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Initiative"
+        "401":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /v1/initiatives/{initiativeId}:
+    get:
+      tags: [Initiatives]
+      operationId: getInitiative
+      summary: Obtener una iniciativa autorizada
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/InitiativeId"
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: Iniciativa autorizada
+          headers:
+            X-Correlation-ID:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Initiative"
+        "401":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /v1/initiatives/{initiativeId}/submit:
+    post:
+      tags: [Initiatives]
+      operationId: submitInitiative
+      summary: Presentar una iniciativa para triage
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/InitiativeId"
+        - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitInitiativeRequest"
+      responses:
+        "200":
+          description: Iniciativa presentada
+          headers:
+            X-Correlation-ID:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Initiative"
+        "401":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /v1/audit-events:
+    get:
+      tags: [Audit]
+      operationId: listAuditEvents
+      summary: Consultar la línea temporal de auditoría
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+        - name: resourceId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Línea temporal autorizada
+          headers:
+            X-Correlation-ID:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuditEvent"
+        "401":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+components:
+  securitySchemes:
+    cookieSession:
+      type: apiKey
+      in: cookie
+      name: aether_session
+  parameters:
+    CorrelationId:
+      name: X-Correlation-ID
+      in: header
+      required: false
+      schema:
+        type: string
+        format: uuid
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 255
+    InitiativeId:
+      name: initiativeId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    CsrfToken:
+      name: X-CSRF-Token
+      in: header
+      required: true
+      description: Debe coincidir con la cookie no autenticante `aether_csrf`.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 255
+  headers:
+    CorrelationId:
+      description: Identificador que conecta solicitud, logs, auditoría y eventos.
+      schema:
+        type: string
+        format: uuid
+  responses:
+    Problem:
+      description: Error estructurado y seguro.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ApiProblem"
+  schemas:
+    CreateOrganizationRequest:
+      type: object
+      additionalProperties: false
+      required: [name, timezone, locale]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 255 }
+        timezone: { type: string, minLength: 1, maxLength: 64 }
+        locale: { type: string, minLength: 2, maxLength: 16 }
+    Organization:
+      type: object
+      required: [id, name, timezone, locale, version]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        timezone: { type: string }
+        locale: { type: string }
+        version: { type: integer, minimum: 0 }
+    CreateWorkspaceRequest:
+      type: object
+      additionalProperties: false
+      required: [organizationId, name, mode]
+      properties:
+        organizationId: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 255 }
+        mode: { type: string, enum: [personal, team, institutional] }
+    Workspace:
+      type: object
+      required: [id, organizationId, name, mode, version]
+      properties:
+        id: { type: string, format: uuid }
+        organizationId: { type: string, format: uuid }
+        name: { type: string }
+        mode: { type: string, enum: [personal, team, institutional] }
+        version: { type: integer, minimum: 0 }
+    CreateInitiativeDraftRequest:
+      type: object
+      additionalProperties: false
+      required:
+        [workspaceId, title, problemStatement, expectedOutcome, classification]
+      properties:
+        workspaceId: { type: string, format: uuid }
+        title: { type: string, minLength: 1, maxLength: 255 }
+        problemStatement: { type: string, minLength: 1, maxLength: 10000 }
+        expectedOutcome: { type: string, minLength: 1, maxLength: 10000 }
+        classification: { type: string, enum: [internal, confidential] }
+    SubmitInitiativeRequest:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion]
+      properties:
+        expectedVersion: { type: integer, minimum: 0 }
+    Initiative:
+      type: object
+      required:
+        [
+          id,
+          organizationId,
+          workspaceId,
+          title,
+          problemStatement,
+          expectedOutcome,
+          classification,
+          status,
+          version,
+          createdAt,
+          updatedAt,
+        ]
+      properties:
+        id: { type: string, format: uuid }
+        organizationId: { type: string, format: uuid }
+        workspaceId: { type: string, format: uuid }
+        title: { type: string }
+        problemStatement: { type: string }
+        expectedOutcome: { type: string }
+        classification: { type: string, enum: [internal, confidential] }
+        status:
+          type: string
+          enum:
+            [
+              draft,
+              presented,
+              in_triage,
+              in_evaluation,
+              pending_decision,
+              approved,
+              rejected,
+              paused,
+              converted,
+              withdrawn,
+            ]
+        version: { type: integer, minimum: 0 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    AuditEvent:
+      type: object
+      required:
+        [
+          eventId,
+          eventType,
+          occurredAt,
+          aggregateId,
+          aggregateType,
+          aggregateVersion,
+          organizationId,
+          correlationId,
+          schemaVersion,
+          payload,
+        ]
+      properties:
+        eventId: { type: string, format: uuid }
+        eventType: { type: string, example: initiative.submitted.v1 }
+        occurredAt: { type: string, format: date-time }
+        aggregateId: { type: string, format: uuid }
+        aggregateType: { type: string, example: initiative }
+        aggregateVersion: { type: integer, minimum: 1 }
+        organizationId: { type: string, format: uuid }
+        correlationId: { type: string, format: uuid }
+        causationId: { type: string, format: uuid }
+        schemaVersion: { type: integer, minimum: 1 }
+        payload: { type: object, additionalProperties: true }
+    Session:
+      type: object
+      required: [actorId, expiresAt]
+      properties:
+        actorId: { type: string }
+        expiresAt: { type: string, format: date-time }
+    ApiProblem:
+      type: object
+      additionalProperties: false
+      required: [type, title, status, code, correlationId]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer, minimum: 400, maximum: 599 }
+        code:
+          type: string
+          enum:
+            [
+              VALIDATION_ERROR,
+              UNAUTHENTICATED,
+              FORBIDDEN,
+              NOT_FOUND,
+              CONFLICT,
+              PRECONDITION_FAILED,
+              RATE_LIMITED,
+              DEPENDENCY_UNAVAILABLE,
+              INTERNAL_ERROR,
+            ]
+        detail: { type: string }
+        instance: { type: string }
+        correlationId: { type: string, format: uuid }
+        errors:
+          type: array
+          items:
+            type: object
+            required: [field, code, message]
+            properties:
+              field: { type: string }
+              code: { type: string }
+              message: { type: string }

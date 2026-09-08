@@ -1,0 +1,12 @@
+{
+  "name": "@aether/worker",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "echo Worker app pending bootstrap",
+    "build": "echo Worker app pending bootstrap",
+    "lint": "echo Worker lint pending bootstrap",
+    "typecheck": "tsc --noEmit",
+    "test": "echo Worker tests pending bootstrap"
+  }
+}

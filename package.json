@@ -1,0 +1,31 @@
+{
+  "name": "aether",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Aether institutional initiative and project governance platform",
+  "packageManager": "pnpm@11.24.0",
+  "engines": {
+    "node": ">=24.0.0",
+    "pnpm": ">=11.24.0"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck && tsc --noEmit --project tsconfig.json",
+    "test": "turbo run test",
+    "test:e2e": "turbo run test:e2e",
+    "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "db:migrate": "pnpm --filter @aether/database migrate"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/pg": "^8.0.0",
+    "prettier": "^3.0.0",
+    "tsx": "^4.0.0",
+    "turbo": "^2.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^4.0.0"
+  }
+}
