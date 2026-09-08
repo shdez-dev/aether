@@ -34,3 +34,11 @@ La primera rebanada vertical será: invitación, sesión segura, organización, 
 - [Estado y alcance del repositorio](docs/governance/repository-baseline.md)
 - [Estrategia de ramas, commits, releases y versiones](docs/governance/source-control-and-releases.md)
 - [Política de variables de entorno y secretos](docs/governance/environment-and-secrets.md)
+
+## Contratos y límites
+
+- [Reglas de dependencia](docs/architecture/dependency-rules.md)
+- [Convenciones de aplicación y puertos](docs/architecture/application-conventions.md)
+- [Contratos HTTP, errores y correlación](docs/architecture/api-contracts.md)
+- [OpenAPI 3.1 inicial](packages/contracts/openapi/aether.v1.yaml)
+- [Autenticación OIDC y sesiones](docs/architecture/authentication-and-sessions.md)

@@ -1,0 +1,39 @@
+{
+  "realm": "aether-local",
+  "enabled": true,
+  "displayName": "Aether Local",
+  "registrationAllowed": false,
+  "clients": [
+    {
+      "clientId": "aether-local",
+      "name": "Aether local server",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "aether_local_only_client_secret",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": ["http://127.0.0.1:4000/auth/callback"],
+      "webOrigins": ["http://127.0.0.1:3000"],
+      "attributes": { "pkce.code.challenge.method": "S256" }
+    }
+  ],
+  "users": [
+    {
+      "username": "aether-admin",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Aether",
+      "lastName": "Administrator",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "change-me-after-first-login",
+          "temporary": true
+        }
+      ]
+    }
+  ]
+}

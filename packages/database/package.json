@@ -1,0 +1,16 @@
+{
+  "name": "@aether/database",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "migrate": "echo Apply packages/database/migrations through the deployment migrator"
+  },
+  "dependencies": {
+    "@aether/auth": "workspace:*",
+    "pg": "^8.0.0"
+  }
+}
