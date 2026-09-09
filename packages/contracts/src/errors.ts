@@ -11,6 +11,7 @@ export const ApiProblemCodeSchema = z.enum([
   "PRECONDITION_FAILED",
   "RATE_LIMITED",
   "DEPENDENCY_UNAVAILABLE",
+  "INVITATION_INVALID_OR_EXPIRED",
   "INTERNAL_ERROR",
 ]);
 

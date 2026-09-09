@@ -5,8 +5,12 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "scripts": {
+    "test": "vitest run"
+  },
   "dependencies": {
     "@aether/application": "workspace:*",
-    "@aether/contracts": "workspace:*"
+    "@aether/contracts": "workspace:*",
+    "@aether/domain": "workspace:*"
   }
 }

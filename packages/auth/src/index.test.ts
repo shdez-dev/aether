@@ -69,7 +69,7 @@ const fakeOidc: OidcProvider = {
     return `https://identity.example/authorize?state=${state}`;
   },
   async exchangeAuthorizationCode() {
-    return { subject: "actor-123" };
+    return { subject: "actor-123", email: "actor@example.test" };
   },
 };
 

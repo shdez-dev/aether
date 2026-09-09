@@ -7,6 +7,9 @@
     "build": "echo Web app pending bootstrap",
     "lint": "echo Web lint pending bootstrap",
     "typecheck": "tsc --noEmit",
-    "test": "echo Web tests pending bootstrap"
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aether/contracts": "workspace:*"
   }
 }

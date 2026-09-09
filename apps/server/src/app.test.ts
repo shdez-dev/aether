@@ -8,6 +8,8 @@ import {
   type LoginTransaction,
   type OidcProvider,
 } from "@aether/auth";
+import { TenantService } from "@aether/application";
+import { InMemoryTenantStore } from "@aether/testkit";
 
 import { buildServer } from "./app.js";
 import type { ServerConfig } from "./config.js";
@@ -86,7 +88,7 @@ const oidc: OidcProvider = {
     return `https://identity.example/authorize?state=${state}`;
   },
   async exchangeAuthorizationCode() {
-    return { subject: "actor-123" };
+    return { subject: "actor-123", email: "actor@example.test" };
   },
 };
 
@@ -116,7 +118,16 @@ describe("HTTP authentication boundary", () => {
       sessionTtlSeconds: 3600,
       sessionRenewalWindowSeconds: 600,
     });
-    const app = await buildServer({ config, auth });
+    const tenants = new TenantService({
+      store: new InMemoryTenantStore(),
+      ids: { next: () => crypto.randomUUID() },
+      tokens: {
+        generate: () => "x".repeat(43),
+        hash: (value) => `hash:${value}`,
+      },
+      clock: { now: () => new Date() },
+    });
+    const app = await buildServer({ config, auth, tenants });
     const login = await app.inject({ method: "GET", url: "/auth/login" });
     const loginCookies = responseCookies(login);
     expect(
@@ -142,6 +153,24 @@ describe("HTTP authentication boundary", () => {
     expect(sessionHeader).not.toContain("access_token");
     const session = cookieValue(callbackCookies, "aether_session");
     const csrf = cookieValue(callbackCookies, "aether_csrf");
+    const mutationWithoutCsrf = await app.inject({
+      method: "POST",
+      url: "/v1/organizations",
+      headers: { cookie: `aether_session=${session}; aether_csrf=${csrf}` },
+      payload: { name: "Aether Test", timezone: "UTC", locale: "es-CL" },
+    });
+    expect(mutationWithoutCsrf.statusCode).toBe(403);
+    const organization = await app.inject({
+      method: "POST",
+      url: "/v1/organizations",
+      headers: {
+        origin: config.webOrigin,
+        "x-csrf-token": csrf,
+        cookie: `aether_session=${session}; aether_csrf=${csrf}`,
+      },
+      payload: { name: "Aether Test", timezone: "UTC", locale: "es-CL" },
+    });
+    expect(organization.statusCode).toBe(201);
     const rejected = await app.inject({
       method: "POST",
       url: "/auth/logout",

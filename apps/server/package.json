@@ -11,11 +11,16 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@aether/application": "workspace:*",
     "@aether/auth": "workspace:*",
+    "@aether/contracts": "workspace:*",
     "@aether/database": "workspace:*",
     "@fastify/cookie": "^11.0.0",
     "fastify": "^5.0.0",
     "pg": "^8.0.0",
     "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@aether/testkit": "workspace:*"
   }
 }

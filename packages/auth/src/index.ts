@@ -18,6 +18,7 @@ export type AuthSession = Readonly<{
   id: string;
   tokenHash: string;
   actorId: string;
+  actorEmail: string | null;
   issuer: string;
   createdAt: Date;
   lastSeenAt: Date;
@@ -67,7 +68,7 @@ export interface OidcProvider {
     state: string;
     nonce: string;
     codeVerifier: string;
-  }): Promise<{ subject: string }>;
+  }): Promise<{ subject: string; email: string | null }>;
 }
 
 export type AuthServiceOptions = Readonly<{
@@ -150,6 +151,7 @@ export class AuthService {
       id: randomUUID(),
       tokenHash: hashOpaqueToken(sessionToken),
       actorId: identity.subject,
+      actorEmail: identity.email,
       issuer: this.options.issuer,
       createdAt: now,
       lastSeenAt: now,
@@ -283,7 +285,8 @@ export function createKeycloakOidcProvider(config: {
       const subject = tokens.claims()?.sub;
       if (typeof subject !== "string" || subject.length === 0)
         throw new Error("OIDC subject missing");
-      return { subject };
+      const email = tokens.claims()?.email;
+      return { subject, email: typeof email === "string" ? email : null };
     },
   };
 }

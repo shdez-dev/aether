@@ -130,6 +130,7 @@ paths:
       summary: Crear una organización
       security: [{ cookieSession: [] }]
       parameters:
+        - $ref: "#/components/parameters/CsrfToken"
         - $ref: "#/components/parameters/CorrelationId"
       requestBody:
         required: true
@@ -158,6 +159,7 @@ paths:
       summary: Crear un workspace
       security: [{ cookieSession: [] }]
       parameters:
+        - $ref: "#/components/parameters/CsrfToken"
         - $ref: "#/components/parameters/CorrelationId"
       requestBody:
         required: true
@@ -179,6 +181,110 @@ paths:
           $ref: "#/components/responses/Problem"
         default:
           $ref: "#/components/responses/Problem"
+  /v1/workspaces/{workspaceId}:
+    get:
+      tags: [Workspaces]
+      operationId: getWorkspace
+      summary: Obtener un workspace dentro de su organización
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/OrganizationContextId"
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: Workspace autorizado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workspace"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /v1/organizations/{organizationId}/capabilities:
+    get:
+      tags: [Organizations]
+      operationId: getAccessCapabilities
+      summary: Consultar capacidades calculadas para un contexto
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationId"
+        - name: workspaceId
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: Capacidades calculadas por el servidor.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccessCapabilities"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /v1/organizations/{organizationId}/invitations:
+    post:
+      tags: [Organizations]
+      operationId: createInvitation
+      summary: Invitar una persona a la organización y workspaces acotados
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationId"
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateInvitationRequest"
+      responses:
+        "201":
+          description: Invitación creada; el token se entrega exclusivamente por el canal de correo.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Invitation"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /v1/invitations/accept:
+    post:
+      tags: [Organizations]
+      operationId: acceptInvitation
+      summary: Aceptar una invitación vigente asociada al correo autenticado
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AcceptInvitationRequest"
+      responses:
+        "200":
+          description: Membresías otorgadas.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Invitation"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
   /v1/initiatives:
     post:
       tags: [Initiatives]
@@ -186,6 +292,7 @@ paths:
       summary: Crear un borrador de iniciativa
       security: [{ cookieSession: [] }]
       parameters:
+        - $ref: "#/components/parameters/CsrfToken"
         - $ref: "#/components/parameters/CorrelationId"
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -320,6 +427,27 @@ components:
       schema:
         type: string
         format: uuid
+    OrganizationId:
+      name: organizationId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    OrganizationContextId:
+      name: organizationId
+      in: query
+      required: true
+      schema:
+        type: string
+        format: uuid
+    WorkspaceId:
+      name: workspaceId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
     CsrfToken:
       name: X-CSRF-Token
       in: header
@@ -377,6 +505,67 @@ components:
         name: { type: string }
         mode: { type: string, enum: [personal, team, institutional] }
         version: { type: integer, minimum: 0 }
+    CreateInvitationRequest:
+      type: object
+      additionalProperties: false
+      required: [email, organizationRole]
+      properties:
+        email: { type: string, format: email, maxLength: 320 }
+        organizationRole: { type: string, enum: [admin, member] }
+        workspaceIds:
+          type: array
+          maxItems: 100
+          items: { type: string, format: uuid }
+        workspaceRole:
+          { type: string, enum: [admin, member, viewer], default: member }
+        expiresInDays: { type: integer, minimum: 1, maximum: 30, default: 7 }
+    AcceptInvitationRequest:
+      type: object
+      additionalProperties: false
+      required: [token]
+      properties:
+        token: { type: string, minLength: 32, maxLength: 255 }
+    Invitation:
+      type: object
+      required:
+        [
+          id,
+          organizationId,
+          email,
+          organizationRole,
+          workspaceIds,
+          workspaceRole,
+          expiresAt,
+        ]
+      properties:
+        id: { type: string, format: uuid }
+        organizationId: { type: string, format: uuid }
+        email: { type: string, format: email }
+        organizationRole: { type: string, enum: [owner, admin, member] }
+        workspaceIds:
+          type: array
+          items: { type: string, format: uuid }
+        workspaceRole: { type: string, enum: [admin, member, viewer] }
+        expiresAt: { type: string, format: date-time }
+    AccessCapabilities:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          canReadOrganization,
+          canManageOrganization,
+          canCreateWorkspace,
+          canReadWorkspace,
+          canManageWorkspace,
+          canInviteMembers,
+        ]
+      properties:
+        canReadOrganization: { type: boolean }
+        canManageOrganization: { type: boolean }
+        canCreateWorkspace: { type: boolean }
+        canReadWorkspace: { type: boolean }
+        canManageWorkspace: { type: boolean }
+        canInviteMembers: { type: boolean }
     CreateInitiativeDraftRequest:
       type: object
       additionalProperties: false
@@ -489,6 +678,7 @@ components:
               PRECONDITION_FAILED,
               RATE_LIMITED,
               DEPENDENCY_UNAVAILABLE,
+              INVITATION_INVALID_OR_EXPIRED,
               INTERNAL_ERROR,
             ]
         detail: { type: string }

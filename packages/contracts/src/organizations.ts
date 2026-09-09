@@ -30,6 +30,36 @@ export const WorkspaceResponseSchema = z.object({
   version: z.number().int().nonnegative(),
 });
 
+export const OrganizationRoleSchema = z.enum(["owner", "admin", "member"]);
+export const WorkspaceRoleSchema = z.enum(["admin", "member", "viewer"]);
+
+export const CreateInvitationRequestSchema = z.object({
+  email: z.string().trim().email().max(320),
+  organizationRole: z.enum(["admin", "member"]),
+  workspaceIds: z.array(UuidSchema).max(100).default([]),
+  workspaceRole: WorkspaceRoleSchema.default("member"),
+  expiresInDays: z.number().int().min(1).max(30).default(7),
+});
+
+export const InvitationResponseSchema = z.object({
+  id: UuidSchema,
+  organizationId: UuidSchema,
+  email: z.string().email(),
+  organizationRole: OrganizationRoleSchema,
+  workspaceIds: z.array(UuidSchema),
+  workspaceRole: WorkspaceRoleSchema,
+  expiresAt: z.string().datetime(),
+});
+
+export const AccessCapabilitiesResponseSchema = z.object({
+  canReadOrganization: z.boolean(),
+  canManageOrganization: z.boolean(),
+  canCreateWorkspace: z.boolean(),
+  canReadWorkspace: z.boolean(),
+  canManageWorkspace: z.boolean(),
+  canInviteMembers: z.boolean(),
+});
+
 export type CreateOrganizationRequest = z.infer<
   typeof CreateOrganizationRequestSchema
 >;
@@ -38,3 +68,10 @@ export type CreateWorkspaceRequest = z.infer<
   typeof CreateWorkspaceRequestSchema
 >;
 export type WorkspaceResponse = z.infer<typeof WorkspaceResponseSchema>;
+export type CreateInvitationRequest = z.infer<
+  typeof CreateInvitationRequestSchema
+>;
+export type InvitationResponse = z.infer<typeof InvitationResponseSchema>;
+export type AccessCapabilitiesResponse = z.infer<
+  typeof AccessCapabilitiesResponseSchema
+>;

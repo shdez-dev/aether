@@ -42,3 +42,4 @@ La primera rebanada vertical será: invitación, sesión segura, organización, 
 - [Contratos HTTP, errores y correlación](docs/architecture/api-contracts.md)
 - [OpenAPI 3.1 inicial](packages/contracts/openapi/aether.v1.yaml)
 - [Autenticación OIDC y sesiones](docs/architecture/authentication-and-sessions.md)
+- [Organizaciones, workspaces y autorización](docs/architecture/tenancy-and-authorization.md)

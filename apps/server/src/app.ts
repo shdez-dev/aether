@@ -1,6 +1,17 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 
 import { AuthService } from "@aether/auth";
+import {
+  AccessDeniedError,
+  InvitationError,
+  ResourceNotFoundError,
+  TenantService,
+} from "@aether/application";
+import {
+  CreateInvitationRequestSchema,
+  CreateOrganizationRequestSchema,
+  CreateWorkspaceRequestSchema,
+} from "@aether/contracts";
 import cookie from "@fastify/cookie";
 import Fastify, {
   type FastifyInstance,
@@ -23,6 +34,7 @@ const callbackQuery = z.object({
 export async function buildServer(input: {
   config: ServerConfig;
   auth: AuthService;
+  tenants: TenantService;
 }): Promise<FastifyInstance> {
   const app = Fastify({
     logger: input.config.nodeEnv !== "test",
@@ -38,9 +50,10 @@ export async function buildServer(input: {
     );
   });
   app.addHook("preHandler", async (request, reply) => {
+    const path = request.url.split("?")[0] ?? "";
     if (
       request.method === "POST" &&
-      request.routeOptions.url === "/auth/logout"
+      (path === "/auth/logout" || path.startsWith("/v1/"))
     ) {
       assertCsrf(request, input.config);
     }
@@ -49,9 +62,13 @@ export async function buildServer(input: {
     const status =
       error instanceof UnauthenticatedError
         ? 401
-        : error instanceof CsrfError
+        : error instanceof CsrfError ||
+            error instanceof AccessDeniedError ||
+            error instanceof IdentityEmailRequiredError
           ? 403
-          : 400;
+          : error instanceof ResourceNotFoundError
+            ? 404
+            : 400;
     reply
       .code(status)
       .type("application/problem+json")
@@ -62,14 +79,22 @@ export async function buildServer(input: {
             ? "Sesión requerida"
             : status === 403
               ? "Solicitud rechazada"
-              : "Solicitud inválida",
+              : status === 404
+                ? "Recurso no encontrado"
+                : "Solicitud inválida",
         status,
         code:
           error instanceof UnauthenticatedError
             ? "UNAUTHENTICATED"
-            : error instanceof CsrfError
+            : error instanceof CsrfError ||
+                error instanceof AccessDeniedError ||
+                error instanceof IdentityEmailRequiredError
               ? "FORBIDDEN"
-              : "VALIDATION_ERROR",
+              : error instanceof ResourceNotFoundError
+                ? "NOT_FOUND"
+                : error instanceof InvitationError
+                  ? "INVITATION_INVALID_OR_EXPIRED"
+                  : "VALIDATION_ERROR",
         correlationId: reply.getHeader("X-Correlation-ID"),
         instance: request.url,
       });
@@ -139,6 +164,120 @@ export async function buildServer(input: {
     reply.clearCookie(csrfCookie, csrfCookieOptions(input.config));
     return reply.code(204).send();
   });
+  app.post("/v1/organizations", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    const body = CreateOrganizationRequestSchema.parse(request.body);
+    const organization = await input.tenants.createOrganization({
+      actorId: session.actorId,
+      actorEmail: requireActorEmail(session.actorEmail),
+      ...body,
+    });
+    return reply.code(201).send(organization);
+  });
+  app.post("/v1/workspaces", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    const body = CreateWorkspaceRequestSchema.parse(request.body);
+    const workspace = await input.tenants.createWorkspace({
+      actorId: session.actorId,
+      ...body,
+    });
+    return reply.code(201).send(workspace);
+  });
+  app.get("/v1/workspaces/:workspaceId", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    const params = z
+      .object({ workspaceId: z.string().uuid() })
+      .parse(request.params);
+    const query = z
+      .object({ organizationId: z.string().uuid() })
+      .parse(request.query);
+    return input.tenants.getWorkspace({
+      actorId: session.actorId,
+      ...params,
+      ...query,
+    });
+  });
+  app.get(
+    "/v1/organizations/:organizationId/capabilities",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      const params = z
+        .object({ organizationId: z.string().uuid() })
+        .parse(request.params);
+      const query = z
+        .object({ workspaceId: z.string().uuid().optional() })
+        .parse(request.query);
+      return input.tenants.capabilities({
+        actorId: session.actorId,
+        ...params,
+        ...(query.workspaceId ? { workspaceId: query.workspaceId } : {}),
+      });
+    },
+  );
+  app.post(
+    "/v1/organizations/:organizationId/invitations",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      const params = z
+        .object({ organizationId: z.string().uuid() })
+        .parse(request.params);
+      const body = CreateInvitationRequestSchema.parse(request.body);
+      const result = await input.tenants.invite({
+        actorId: session.actorId,
+        ...params,
+        ...body,
+      });
+      // La entrega del token queda delimitada para el adaptador de correo/outbox.
+      return reply.code(201).send({
+        ...result.invitation,
+        expiresAt: result.invitation.expiresAt.toISOString(),
+      });
+    },
+  );
+  app.post("/v1/invitations/accept", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    const body = z
+      .object({ token: z.string().min(32).max(255) })
+      .parse(request.body);
+    const invitation = await input.tenants.acceptInvitation({
+      token: body.token,
+      actorId: session.actorId,
+      actorEmail: requireActorEmail(session.actorEmail),
+    });
+    return reply
+      .code(200)
+      .send({ ...invitation, expiresAt: invitation.expiresAt.toISOString() });
+  });
   return app;
 }
 
@@ -160,6 +299,11 @@ async function requireSession(
 
 class CsrfError extends Error {}
 class UnauthenticatedError extends Error {}
+class IdentityEmailRequiredError extends Error {}
+function requireActorEmail(email: string | null): string {
+  if (!email) throw new IdentityEmailRequiredError();
+  return email;
+}
 function assertCsrf(request: FastifyRequest, config: ServerConfig): void {
   const origin = request.headers.origin;
   if (

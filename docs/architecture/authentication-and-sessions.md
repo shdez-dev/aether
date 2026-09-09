@@ -35,4 +35,4 @@ No se utiliza `localStorage`, `sessionStorage` ni cookies legibles para tokens O
 
 `apps/server/.env.example` enumera las variables obligatorias. `OIDC_ISSUER_URL`, client ID, secreto, redirect URI y clave de cifrado cambian por entorno. La clave `SESSION_ENCRYPTION_KEY` debe ser única por entorno, codificar exactamente 32 bytes y rotarse con un plan que invalide de manera controlada las transacciones activas.
 
-El perfil local se inicia con `docker compose up -d` e importa el realm de `infra/keycloak/aether-local-realm.json`. Sus credenciales son de desarrollo y no pueden desplegarse fuera de local.
+El perfil local se inicia con `docker compose up -d`, seguido de `pnpm db:migrate`, e importa el realm de `infra/keycloak/aether-local-realm.json`. Sus credenciales son de desarrollo y no pueden desplegarse fuera de local.

@@ -31,9 +31,15 @@ importers:
 
   apps/server:
     dependencies:
+      "@aether/application":
+        specifier: workspace:*
+        version: link:../../packages/application
       "@aether/auth":
         specifier: workspace:*
         version: link:../../packages/auth
+      "@aether/contracts":
+        specifier: workspace:*
+        version: link:../../packages/contracts
       "@aether/database":
         specifier: workspace:*
         version: link:../../packages/database
@@ -49,8 +55,16 @@ importers:
       zod:
         specifier: ^4.0.0
         version: 4.5.4
+    devDependencies:
+      "@aether/testkit":
+        specifier: workspace:*
+        version: link:../../packages/testkit
 
-  apps/web: {}
+  apps/web:
+    dependencies:
+      "@aether/contracts":
+        specifier: workspace:*
+        version: link:../../packages/contracts
 
   apps/worker: {}
 
@@ -76,9 +90,15 @@ importers:
 
   packages/database:
     dependencies:
+      "@aether/application":
+        specifier: workspace:*
+        version: link:../application
       "@aether/auth":
         specifier: workspace:*
         version: link:../auth
+      "@aether/domain":
+        specifier: workspace:*
+        version: link:../domain
       pg:
         specifier: ^8.0.0
         version: 8.23.0
@@ -95,6 +115,9 @@ importers:
       "@aether/contracts":
         specifier: workspace:*
         version: link:../contracts
+      "@aether/domain":
+        specifier: workspace:*
+        version: link:../domain
 
   packages/ui: {}
 
