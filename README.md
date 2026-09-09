@@ -45,3 +45,4 @@ La primera rebanada vertical será: invitación, sesión segura, organización, 
 - [Organizaciones, workspaces y autorización](docs/architecture/tenancy-and-authorization.md)
 - [Ciclo de vida de iniciativas institucionales](docs/architecture/initiative-lifecycle.md)
 - [Evaluación y decisión institucional](docs/architecture/evaluation-and-decision.md)
+- [Proyecto y ejecución](docs/architecture/project-execution.md)

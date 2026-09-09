@@ -71,6 +71,35 @@ export const PublishEvaluationStandardRequestSchema = z.object({
 export const ActivateEvaluationStandardRequestSchema = z.object({
   organizationId: UuidSchema,
 });
+export const ProjectParticipantSchema = z.object({
+  actorId: z.string().min(1).max(255),
+  role: z.enum(["sponsor", "lead", "contributor", "observer"]),
+});
+export const CreateProjectFromInitiativeRequestSchema = z.object({
+  organizationId: UuidSchema,
+  initiativeId: UuidSchema,
+  decisionId: UuidSchema,
+  name: NonEmptyTextSchema.max(255),
+  sponsorActorId: z.string().min(1).max(255),
+  leadActorId: z.string().min(1).max(255),
+  participants: z.array(ProjectParticipantSchema).min(2).max(100),
+});
+export const ChangeProjectStatusRequestSchema = z.object({
+  organizationId: UuidSchema,
+  expectedVersion: z.number().int().nonnegative(),
+  status: z.enum(["planned", "active", "blocked", "completed", "cancelled"]),
+});
+export const AddProjectMilestoneRequestSchema = z.object({
+  organizationId: UuidSchema,
+  title: NonEmptyTextSchema.max(255),
+  dueOn: z.string().date().nullable(),
+});
+export const AddProjectNextActionRequestSchema = z.object({
+  organizationId: UuidSchema,
+  description: NonEmptyTextSchema.max(2_000),
+  ownerActorId: z.string().min(1).max(255),
+  dueOn: z.string().date().nullable(),
+});
 
 export const InitiativeActionSchema = z.enum([
   "edit",

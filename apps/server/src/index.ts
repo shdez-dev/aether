@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import {
   EvaluationService,
   InitiativeService,
+  ProjectService,
   TenantService,
 } from "@aether/application";
 import {
@@ -16,6 +17,9 @@ import {
   PostgresAuthStore,
   PostgresInitiativeAuditStore,
   PostgresInitiativeStore,
+  PostgresProjectAuditStore,
+  PostgresProjectExecutionStore,
+  PostgresProjectStore,
   PostgresEvaluationStandardStore,
   PostgresEvaluationStore,
   PostgresTenantStore,
@@ -62,11 +66,22 @@ const evaluations = new EvaluationService({
   ids: { next: randomUUID },
   clock: { now: () => new Date() },
 });
+const projects = new ProjectService({
+  projects: new PostgresProjectStore(pool),
+  execution: new PostgresProjectExecutionStore(pool),
+  audit: new PostgresProjectAuditStore(pool),
+  decisions: new PostgresEvaluationStore(pool),
+  initiatives: new PostgresInitiativeStore(pool),
+  tenancy: new PostgresTenantStore(pool),
+  ids: { next: randomUUID },
+  clock: { now: () => new Date() },
+});
 const app = await buildServer({
   config,
   auth,
   tenants,
   initiatives,
   evaluations,
+  projects,
 });
 await app.listen({ port: config.port, host: "0.0.0.0" });

@@ -11,6 +11,7 @@ import {
 import {
   EvaluationService,
   InitiativeService,
+  ProjectService,
   TenantService,
 } from "@aether/application";
 import {
@@ -143,6 +144,7 @@ describe("HTTP authentication boundary", () => {
       tenants,
       initiatives: {} as InitiativeService,
       evaluations: {} as EvaluationService,
+      projects: {} as ProjectService,
     });
     const login = await app.inject({ method: "GET", url: "/auth/login" });
     const loginCookies = responseCookies(login);
@@ -249,6 +251,7 @@ describe("HTTP authentication boundary", () => {
       tenants,
       initiatives,
       evaluations,
+      projects: {} as ProjectService,
     });
     const login = await app.inject({ method: "GET", url: "/auth/login" });
     const state = new URL(login.headers.location!).searchParams.get("state")!;

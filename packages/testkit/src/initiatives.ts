@@ -82,7 +82,7 @@ export class InMemoryEvaluationStandardStore implements EvaluationStandardStore 
 
 export class InMemoryEvaluationStore implements EvaluationStore {
   readonly evaluations = new Map<string, InitiativeEvaluation>();
-  readonly decisions: InitiativeDecision[] = [];
+  readonly decisions = new Map<string, InitiativeDecision>();
   async createEvaluation(evaluation: InitiativeEvaluation): Promise<void> {
     this.evaluations.set(evaluation.id, evaluation);
   }
@@ -92,6 +92,9 @@ export class InMemoryEvaluationStore implements EvaluationStore {
     return this.evaluations.get(evaluationId) ?? null;
   }
   async createDecision(decision: InitiativeDecision): Promise<void> {
-    this.decisions.push(decision);
+    this.decisions.set(decision.id, decision);
+  }
+  async findDecision(decisionId: string): Promise<InitiativeDecision | null> {
+    return this.decisions.get(decisionId) ?? null;
   }
 }

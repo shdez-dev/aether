@@ -2,6 +2,7 @@
 export * from "./access.js";
 export * from "./initiative.js";
 export * from "./evaluation.js";
+export * from "./project.js";
 
 export type DomainEvent = Readonly<{
   type: string;

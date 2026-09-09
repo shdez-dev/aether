@@ -5,6 +5,10 @@ import type {
   InitiativeStore,
   EvaluationStandardStore,
   EvaluationStore,
+  ProjectAuditEvent,
+  ProjectAuditStore,
+  ProjectExecutionStore,
+  ProjectStore,
   Invitation,
   Organization,
   TenantStore,
@@ -17,6 +21,9 @@ import type {
   EvaluationStandard,
   InitiativeEvaluation,
   InitiativeDecision,
+  Project,
+  ProjectMilestone,
+  ProjectNextAction,
   OrganizationRole,
   WorkspaceRole,
 } from "@aether/domain";
@@ -542,6 +549,130 @@ export class PostgresEvaluationStore implements EvaluationStore {
       ],
     );
   }
+  async findDecision(decisionId: string): Promise<InitiativeDecision | null> {
+    const result = await this.pool.query<InitiativeDecisionRow>(
+      `SELECT id, organization_id, workspace_id, initiative_id, evaluation_id, outcome, rationale, evidence, standard_id, standard_version, coverage, decided_by_actor_id, decided_at
+       FROM initiative_decisions WHERE id = $1`,
+      [decisionId],
+    );
+    return result.rows[0] ? toInitiativeDecision(result.rows[0]) : null;
+  }
+}
+
+export class PostgresProjectStore implements ProjectStore {
+  constructor(private readonly pool: Pool) {}
+  async create(project: Project): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO projects (id, organization_id, workspace_id, source_initiative_id, source_decision_id, name, sponsor_actor_id, lead_actor_id, participants, status, version, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+      [
+        project.id,
+        project.organizationId,
+        project.workspaceId,
+        project.sourceInitiativeId,
+        project.sourceDecisionId,
+        project.name,
+        project.sponsorActorId,
+        project.leadActorId,
+        project.participants,
+        project.status,
+        project.version,
+        project.createdAt,
+        project.updatedAt,
+      ],
+    );
+  }
+  async findById(projectId: string): Promise<Project | null> {
+    const result = await this.pool.query<ProjectRow>(
+      `SELECT id, organization_id, workspace_id, source_initiative_id, source_decision_id, name, sponsor_actor_id, lead_actor_id, participants, status, version, created_at, updated_at FROM projects WHERE id = $1`,
+      [projectId],
+    );
+    return result.rows[0] ? toProject(result.rows[0]) : null;
+  }
+  async findByInitiative(initiativeId: string): Promise<Project | null> {
+    const result = await this.pool.query<ProjectRow>(
+      `SELECT id, organization_id, workspace_id, source_initiative_id, source_decision_id, name, sponsor_actor_id, lead_actor_id, participants, status, version, created_at, updated_at FROM projects WHERE source_initiative_id = $1`,
+      [initiativeId],
+    );
+    return result.rows[0] ? toProject(result.rows[0]) : null;
+  }
+  async save(input: {
+    project: Project;
+    expectedVersion: number;
+  }): Promise<boolean> {
+    const result = await this.pool.query(
+      `UPDATE projects SET status = $2, version = $3, updated_at = $4 WHERE id = $1 AND version = $5`,
+      [
+        input.project.id,
+        input.project.status,
+        input.project.version,
+        input.project.updatedAt,
+        input.expectedVersion,
+      ],
+    );
+    return result.rowCount === 1;
+  }
+}
+export class PostgresProjectExecutionStore implements ProjectExecutionStore {
+  constructor(private readonly pool: Pool) {}
+  async addMilestone(milestone: ProjectMilestone): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO project_milestones (id, project_id, title, due_on, completed_at, created_by_actor_id, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [
+        milestone.id,
+        milestone.projectId,
+        milestone.title,
+        milestone.dueOn,
+        milestone.completedAt,
+        milestone.createdByActorId,
+        milestone.createdAt,
+      ],
+    );
+  }
+  async addNextAction(action: ProjectNextAction): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO project_next_actions (id, project_id, description, owner_actor_id, due_on, completed_at, created_by_actor_id, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [
+        action.id,
+        action.projectId,
+        action.description,
+        action.ownerActorId,
+        action.dueOn,
+        action.completedAt,
+        action.createdByActorId,
+        action.createdAt,
+      ],
+    );
+  }
+}
+export class PostgresProjectAuditStore implements ProjectAuditStore {
+  constructor(private readonly pool: Pool) {}
+  async record(event: ProjectAuditEvent): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO project_audit_events (id, event_type, organization_id, workspace_id, project_id, actor_id, correlation_id, occurred_at, payload) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [
+        event.id,
+        event.eventType,
+        event.organizationId,
+        event.workspaceId,
+        event.projectId,
+        event.actorId,
+        event.correlationId,
+        event.occurredAt,
+        event.payload,
+      ],
+    );
+  }
+  async list(input: {
+    organizationId: string;
+    projectId: string;
+  }): Promise<readonly ProjectAuditEvent[]> {
+    const result = await this.pool.query<ProjectAuditRow>(
+      `SELECT id, event_type, organization_id, workspace_id, project_id, actor_id, correlation_id, occurred_at, payload FROM project_audit_events WHERE organization_id = $1 AND project_id = $2 ORDER BY occurred_at ASC`,
+      [input.organizationId, input.projectId],
+    );
+    return result.rows.map(toProjectAuditEvent);
+  }
 }
 
 type InitiativeRow = {
@@ -626,6 +757,47 @@ type InitiativeEvaluationRow = {
   evaluated_by_actor_id: string;
   evaluated_at: Date;
 };
+type InitiativeDecisionRow = {
+  id: string;
+  organization_id: string;
+  workspace_id: string;
+  initiative_id: string;
+  evaluation_id: string;
+  outcome: InitiativeDecision["outcome"];
+  rationale: string;
+  evidence: string[];
+  standard_id: string;
+  standard_version: number;
+  coverage: InitiativeDecision["coverage"];
+  decided_by_actor_id: string;
+  decided_at: Date;
+};
+type ProjectRow = {
+  id: string;
+  organization_id: string;
+  workspace_id: string;
+  source_initiative_id: string;
+  source_decision_id: string;
+  name: string;
+  sponsor_actor_id: string;
+  lead_actor_id: string;
+  participants: Project["participants"];
+  status: Project["status"];
+  version: number;
+  created_at: Date;
+  updated_at: Date;
+};
+type ProjectAuditRow = {
+  id: string;
+  event_type: string;
+  organization_id: string;
+  workspace_id: string;
+  project_id: string;
+  actor_id: string;
+  correlation_id: string;
+  occurred_at: Date;
+  payload: Record<string, unknown>;
+};
 function toEvaluationStandard(row: EvaluationStandardRow): EvaluationStandard {
   return {
     id: row.id,
@@ -653,5 +825,52 @@ function toInitiativeEvaluation(
     coverage: row.coverage,
     evaluatedByActorId: row.evaluated_by_actor_id,
     evaluatedAt: row.evaluated_at,
+  };
+}
+function toInitiativeDecision(row: InitiativeDecisionRow): InitiativeDecision {
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    workspaceId: row.workspace_id,
+    initiativeId: row.initiative_id,
+    evaluationId: row.evaluation_id,
+    outcome: row.outcome,
+    rationale: row.rationale,
+    evidence: row.evidence,
+    standardId: row.standard_id,
+    standardVersion: row.standard_version,
+    coverage: row.coverage,
+    decidedByActorId: row.decided_by_actor_id,
+    decidedAt: row.decided_at,
+  };
+}
+function toProject(row: ProjectRow): Project {
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    workspaceId: row.workspace_id,
+    sourceInitiativeId: row.source_initiative_id,
+    sourceDecisionId: row.source_decision_id,
+    name: row.name,
+    sponsorActorId: row.sponsor_actor_id,
+    leadActorId: row.lead_actor_id,
+    participants: row.participants,
+    status: row.status,
+    version: row.version,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+function toProjectAuditEvent(row: ProjectAuditRow): ProjectAuditEvent {
+  return {
+    id: row.id,
+    eventType: row.event_type,
+    organizationId: row.organization_id,
+    workspaceId: row.workspace_id,
+    projectId: row.project_id,
+    actorId: row.actor_id,
+    correlationId: row.correlation_id,
+    occurredAt: row.occurred_at,
+    payload: row.payload,
   };
 }

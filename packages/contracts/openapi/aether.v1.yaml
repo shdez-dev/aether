@@ -22,6 +22,8 @@ tags:
     description: Espacios de trabajo con alcance explícito.
   - name: Initiatives
     description: Ciclo de vida de iniciativas antes de convertirse en proyectos.
+  - name: Projects
+    description: Compromisos ejecutables con trazabilidad de iniciativa y decisión.
   - name: Audit
     description: Línea temporal autorizada de acciones y eventos.
 paths:
@@ -546,6 +548,117 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
+  /v1/projects:
+    post:
+      tags: [Projects]
+      operationId: createProjectFromInitiative
+      summary: Crear un proyecto desde una decisión aprobatoria
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              {
+                $ref: "#/components/schemas/CreateProjectFromInitiativeRequest",
+              }
+      responses:
+        "201":
+          {
+            description: Proyecto creado con trazabilidad,
+            content:
+              {
+                application/json:
+                  { schema: { $ref: "#/components/schemas/Project" } },
+              },
+          }
+        default: { $ref: "#/components/responses/Problem" }
+  /v1/projects/{projectId}/status:
+    patch:
+      tags: [Projects]
+      operationId: changeProjectStatus
+      summary: Cambiar el estado de ejecución
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChangeProjectStatusRequest" }
+      responses:
+        "200":
+          {
+            description: Estado actualizado,
+            content:
+              {
+                application/json:
+                  { schema: { $ref: "#/components/schemas/Project" } },
+              },
+          }
+        default: { $ref: "#/components/responses/Problem" }
+  /v1/projects/{projectId}/milestones:
+    post:
+      tags: [Projects]
+      operationId: addProjectMilestone
+      summary: Añadir un hito de ejecución
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AddProjectMilestoneRequest" }
+      responses:
+        "201": { description: Hito creado }
+        default: { $ref: "#/components/responses/Problem" }
+  /v1/projects/{projectId}/next-actions:
+    post:
+      tags: [Projects]
+      operationId: addProjectNextAction
+      summary: Añadir una próxima acción
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AddProjectNextActionRequest" }
+      responses:
+        "201": { description: Acción creada }
+        default: { $ref: "#/components/responses/Problem" }
+  /v1/projects/{projectId}/audit-events:
+    get:
+      tags: [Audit]
+      operationId: listProjectAuditEvents
+      summary: Consultar auditoría de un proyecto autorizado
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/OrganizationContextId"
+      responses:
+        "200": { description: Bitácora de proyecto }
+        default: { $ref: "#/components/responses/Problem" }
   /v1/audit-events:
     get:
       tags: [Audit]
@@ -930,6 +1043,107 @@ components:
         coverage: { type: object }
         decidedByActorId: { type: string }
         decidedAt: { type: string, format: date-time }
+    ProjectParticipant:
+      type: object
+      required: [actorId, role]
+      properties:
+        actorId: { type: string }
+        role: { type: string, enum: [sponsor, lead, contributor, observer] }
+    CreateProjectFromInitiativeRequest:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          organizationId,
+          initiativeId,
+          decisionId,
+          name,
+          sponsorActorId,
+          leadActorId,
+          participants,
+        ]
+      properties:
+        organizationId: { type: string, format: uuid }
+        initiativeId: { type: string, format: uuid }
+        decisionId: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 255 }
+        sponsorActorId: { type: string }
+        leadActorId: { type: string }
+        participants:
+          {
+            type: array,
+            minItems: 2,
+            items: { $ref: "#/components/schemas/ProjectParticipant" },
+          }
+    ChangeProjectStatusRequest:
+      type: object
+      additionalProperties: false
+      required: [organizationId, expectedVersion, status]
+      properties:
+        organizationId: { type: string, format: uuid }
+        expectedVersion: { type: integer, minimum: 0 }
+        status:
+          {
+            type: string,
+            enum: [planned, active, blocked, completed, cancelled],
+          }
+    AddProjectMilestoneRequest:
+      type: object
+      additionalProperties: false
+      required: [organizationId, title, dueOn]
+      properties:
+        organizationId: { type: string, format: uuid }
+        title: { type: string, minLength: 1, maxLength: 255 }
+        dueOn: { type: [string, "null"], format: date }
+    AddProjectNextActionRequest:
+      type: object
+      additionalProperties: false
+      required: [organizationId, description, ownerActorId, dueOn]
+      properties:
+        organizationId: { type: string, format: uuid }
+        description: { type: string, minLength: 1, maxLength: 2000 }
+        ownerActorId: { type: string }
+        dueOn: { type: [string, "null"], format: date }
+    Project:
+      type: object
+      required:
+        [
+          id,
+          organizationId,
+          workspaceId,
+          sourceInitiativeId,
+          sourceDecisionId,
+          name,
+          sponsorActorId,
+          leadActorId,
+          participants,
+          status,
+          version,
+          createdAt,
+          updatedAt,
+        ]
+      properties:
+        id: { type: string, format: uuid }
+        organizationId: { type: string, format: uuid }
+        workspaceId: { type: string, format: uuid }
+        sourceInitiativeId: { type: string, format: uuid }
+        sourceDecisionId: { type: string, format: uuid }
+        name: { type: string }
+        sponsorActorId: { type: string }
+        leadActorId: { type: string }
+        participants:
+          {
+            type: array,
+            items: { $ref: "#/components/schemas/ProjectParticipant" },
+          }
+        status:
+          {
+            type: string,
+            enum: [planned, active, blocked, completed, cancelled],
+          }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
     Initiative:
       type: object
       required:

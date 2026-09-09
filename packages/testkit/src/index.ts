@@ -3,4 +3,5 @@ export * from "./builders.js";
 export * from "./fixed-clock.js";
 export * from "./ids.js";
 export * from "./initiatives.js";
+export * from "./projects.js";
 export * from "./tenancy.js";

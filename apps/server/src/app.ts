@@ -7,6 +7,9 @@ import {
   InitiativeService,
   InitiativeVersionConflictError,
   EvaluationService,
+  ProjectService,
+  ProjectDomainError,
+  ProjectVersionConflictError,
   InvitationError,
   ResourceNotFoundError,
   TenantService,
@@ -18,6 +21,10 @@ import {
   CreateWorkspaceRequestSchema,
   DecideInitiativeRequestSchema,
   ActivateEvaluationStandardRequestSchema,
+  AddProjectMilestoneRequestSchema,
+  AddProjectNextActionRequestSchema,
+  ChangeProjectStatusRequestSchema,
+  CreateProjectFromInitiativeRequestSchema,
   PublishEvaluationStandardRequestSchema,
   StartReviewRequestSchema,
   SubmitInitiativeRequestSchema,
@@ -48,6 +55,7 @@ export async function buildServer(input: {
   tenants: TenantService;
   initiatives: InitiativeService;
   evaluations: EvaluationService;
+  projects: ProjectService;
 }): Promise<FastifyInstance> {
   const app = Fastify({
     logger: input.config.nodeEnv !== "test",
@@ -81,7 +89,8 @@ export async function buildServer(input: {
           ? 403
           : error instanceof ResourceNotFoundError
             ? 404
-            : error instanceof InitiativeVersionConflictError
+            : error instanceof InitiativeVersionConflictError ||
+                error instanceof ProjectVersionConflictError
               ? 409
               : 400;
     reply
@@ -109,9 +118,11 @@ export async function buildServer(input: {
               ? "FORBIDDEN"
               : error instanceof ResourceNotFoundError
                 ? "NOT_FOUND"
-                : error instanceof InitiativeVersionConflictError
+                : error instanceof InitiativeVersionConflictError ||
+                    error instanceof ProjectVersionConflictError
                   ? "CONFLICT"
-                  : error instanceof InitiativeDomainError
+                  : error instanceof InitiativeDomainError ||
+                      error instanceof ProjectDomainError
                     ? "PRECONDITION_FAILED"
                     : error instanceof InvitationError
                       ? "INVITATION_INVALID_OR_EXPIRED"
@@ -337,6 +348,105 @@ export async function buildServer(input: {
     return reply
       .code(201)
       .send({ ...standard, publishedAt: standard.publishedAt.toISOString() });
+  });
+  app.post("/v1/projects", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    const body = CreateProjectFromInitiativeRequestSchema.parse(request.body);
+    const project = await input.projects.createFromInitiative({
+      actorId: session.actorId,
+      correlationId: correlationId(reply),
+      ...body,
+    });
+    return reply.code(201).send(toProjectResponse(project));
+  });
+  app.patch("/v1/projects/:projectId/status", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    const params = z
+      .object({ projectId: z.string().uuid() })
+      .parse(request.params);
+    const body = ChangeProjectStatusRequestSchema.parse(request.body);
+    const project = await input.projects.changeStatus({
+      actorId: session.actorId,
+      correlationId: correlationId(reply),
+      projectId: params.projectId,
+      ...body,
+    });
+    return toProjectResponse(project);
+  });
+  app.post("/v1/projects/:projectId/milestones", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    const params = z
+      .object({ projectId: z.string().uuid() })
+      .parse(request.params);
+    const body = AddProjectMilestoneRequestSchema.parse(request.body);
+    const milestone = await input.projects.addMilestone({
+      actorId: session.actorId,
+      correlationId: correlationId(reply),
+      projectId: params.projectId,
+      ...body,
+    });
+    return reply
+      .code(201)
+      .send({ ...milestone, createdAt: milestone.createdAt.toISOString() });
+  });
+  app.post("/v1/projects/:projectId/next-actions", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    const params = z
+      .object({ projectId: z.string().uuid() })
+      .parse(request.params);
+    const body = AddProjectNextActionRequestSchema.parse(request.body);
+    const action = await input.projects.addNextAction({
+      actorId: session.actorId,
+      correlationId: correlationId(reply),
+      projectId: params.projectId,
+      ...body,
+    });
+    return reply
+      .code(201)
+      .send({ ...action, createdAt: action.createdAt.toISOString() });
+  });
+  app.get("/v1/projects/:projectId/audit-events", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    const params = z
+      .object({ projectId: z.string().uuid() })
+      .parse(request.params);
+    const query = z
+      .object({ organizationId: z.string().uuid() })
+      .parse(request.query);
+    const events = await input.projects.auditTrail({
+      actorId: session.actorId,
+      projectId: params.projectId,
+      ...query,
+    });
+    return events.map((event) => ({
+      ...event,
+      occurredAt: event.occurredAt.toISOString(),
+    }));
   });
   app.post(
     "/v1/evaluation-standards/:standardId/activate",
@@ -570,6 +680,15 @@ function toDecisionResponse(
   decision: { decidedAt: Date } & Record<string, unknown>,
 ) {
   return { ...decision, decidedAt: decision.decidedAt.toISOString() };
+}
+function toProjectResponse(
+  project: { createdAt: Date; updatedAt: Date } & Record<string, unknown>,
+) {
+  return {
+    ...project,
+    createdAt: project.createdAt.toISOString(),
+    updatedAt: project.updatedAt.toISOString(),
+  };
 }
 function correlationId(reply: FastifyReply): string {
   const value = reply.getHeader("X-Correlation-ID");

@@ -30,6 +30,7 @@ export interface EvaluationStore {
   createEvaluation(evaluation: InitiativeEvaluation): Promise<void>;
   findEvaluation(evaluationId: string): Promise<InitiativeEvaluation | null>;
   createDecision(decision: InitiativeDecision): Promise<void>;
+  findDecision(decisionId: string): Promise<InitiativeDecision | null>;
 }
 export interface EvaluationIdGenerator {
   next(): string;
