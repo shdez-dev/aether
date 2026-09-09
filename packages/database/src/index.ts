@@ -1,11 +1,20 @@
 import type { AuthSession, AuthStore, LoginTransaction } from "@aether/auth";
 import type {
+  InitiativeAuditEvent,
+  InitiativeAuditStore,
+  InitiativeStore,
   Invitation,
   Organization,
   TenantStore,
   Workspace,
 } from "@aether/application";
-import type { OrganizationRole, WorkspaceRole } from "@aether/domain";
+import type {
+  Initiative,
+  InitiativeClassification,
+  InitiativeStatus,
+  OrganizationRole,
+  WorkspaceRole,
+} from "@aether/domain";
 import type { Pool } from "pg";
 
 /** Adaptador PostgreSQL para transacciones OIDC y sesiones opacas. */
@@ -321,5 +330,164 @@ function toInvitation(row: InvitationRow): Invitation {
     workspaceIds: row.workspace_ids,
     workspaceRole: row.workspace_role,
     expiresAt: row.expires_at,
+  };
+}
+
+/** Persistencia PostgreSQL del agregado Initiative con control optimista de versión. */
+export class PostgresInitiativeStore implements InitiativeStore {
+  constructor(private readonly pool: Pool) {}
+
+  async create(initiative: Initiative): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO initiatives (id, organization_id, workspace_id, created_by_actor_id, title, problem_statement, expected_outcome, classification, status, version, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+      [
+        initiative.id,
+        initiative.organizationId,
+        initiative.workspaceId,
+        initiative.createdByActorId,
+        initiative.title,
+        initiative.problemStatement,
+        initiative.expectedOutcome,
+        initiative.classification,
+        initiative.status,
+        initiative.version,
+        initiative.createdAt,
+        initiative.updatedAt,
+      ],
+    );
+  }
+  async findById(initiativeId: string): Promise<Initiative | null> {
+    const result = await this.pool.query<InitiativeRow>(
+      `SELECT id, organization_id, workspace_id, created_by_actor_id, title, problem_statement, expected_outcome, classification, status, version, created_at, updated_at
+       FROM initiatives WHERE id = $1`,
+      [initiativeId],
+    );
+    return result.rows[0] ? toInitiative(result.rows[0]) : null;
+  }
+  async list(input: {
+    organizationId: string;
+    workspaceId: string;
+  }): Promise<readonly Initiative[]> {
+    const result = await this.pool.query<InitiativeRow>(
+      `SELECT id, organization_id, workspace_id, created_by_actor_id, title, problem_statement, expected_outcome, classification, status, version, created_at, updated_at
+       FROM initiatives WHERE organization_id = $1 AND workspace_id = $2 ORDER BY updated_at DESC`,
+      [input.organizationId, input.workspaceId],
+    );
+    return result.rows.map(toInitiative);
+  }
+  async save(input: {
+    initiative: Initiative;
+    expectedVersion: number;
+  }): Promise<boolean> {
+    const result = await this.pool.query(
+      `UPDATE initiatives SET title = $2, problem_statement = $3, expected_outcome = $4, classification = $5, status = $6, version = $7, updated_at = $8
+       WHERE id = $1 AND version = $9`,
+      [
+        input.initiative.id,
+        input.initiative.title,
+        input.initiative.problemStatement,
+        input.initiative.expectedOutcome,
+        input.initiative.classification,
+        input.initiative.status,
+        input.initiative.version,
+        input.initiative.updatedAt,
+        input.expectedVersion,
+      ],
+    );
+    return result.rowCount === 1;
+  }
+}
+
+export class PostgresInitiativeAuditStore implements InitiativeAuditStore {
+  constructor(private readonly pool: Pool) {}
+  async record(event: InitiativeAuditEvent): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO initiative_audit_events (id, event_type, organization_id, workspace_id, initiative_id, actor_id, correlation_id, occurred_at, from_status, to_status, payload)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      [
+        event.id,
+        event.eventType,
+        event.organizationId,
+        event.workspaceId,
+        event.initiativeId,
+        event.actorId,
+        event.correlationId,
+        event.occurredAt,
+        event.fromStatus,
+        event.toStatus,
+        event.payload,
+      ],
+    );
+  }
+  async list(input: {
+    organizationId: string;
+    initiativeId: string;
+  }): Promise<readonly InitiativeAuditEvent[]> {
+    const result = await this.pool.query<InitiativeAuditRow>(
+      `SELECT id, event_type, organization_id, workspace_id, initiative_id, actor_id, correlation_id, occurred_at, from_status, to_status, payload
+       FROM initiative_audit_events WHERE organization_id = $1 AND initiative_id = $2 ORDER BY occurred_at ASC`,
+      [input.organizationId, input.initiativeId],
+    );
+    return result.rows.map(toInitiativeAuditEvent);
+  }
+}
+
+type InitiativeRow = {
+  id: string;
+  organization_id: string;
+  workspace_id: string;
+  created_by_actor_id: string;
+  title: string;
+  problem_statement: string;
+  expected_outcome: string;
+  classification: InitiativeClassification;
+  status: InitiativeStatus;
+  version: number;
+  created_at: Date;
+  updated_at: Date;
+};
+type InitiativeAuditRow = {
+  id: string;
+  event_type: string;
+  organization_id: string;
+  workspace_id: string;
+  initiative_id: string;
+  actor_id: string;
+  correlation_id: string;
+  occurred_at: Date;
+  from_status: InitiativeStatus | null;
+  to_status: InitiativeStatus | null;
+  payload: Record<string, unknown>;
+};
+function toInitiative(row: InitiativeRow): Initiative {
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    workspaceId: row.workspace_id,
+    createdByActorId: row.created_by_actor_id,
+    title: row.title,
+    problemStatement: row.problem_statement,
+    expectedOutcome: row.expected_outcome,
+    classification: row.classification,
+    status: row.status,
+    version: row.version,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+function toInitiativeAuditEvent(row: InitiativeAuditRow): InitiativeAuditEvent {
+  return {
+    id: row.id,
+    eventType: row.event_type,
+    organizationId: row.organization_id,
+    workspaceId: row.workspace_id,
+    initiativeId: row.initiative_id,
+    actorId: row.actor_id,
+    correlationId: row.correlation_id,
+    occurredAt: row.occurred_at,
+    fromStatus: row.from_status,
+    toStatus: row.to_status,
+    payload: row.payload,
   };
 }

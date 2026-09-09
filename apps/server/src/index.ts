@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { TenantService } from "@aether/application";
+import { InitiativeService, TenantService } from "@aether/application";
 import {
   AuthService,
   createAesGcmCipher,
@@ -8,7 +8,12 @@ import {
   hashOpaqueToken,
   randomOpaqueToken,
 } from "@aether/auth";
-import { PostgresAuthStore, PostgresTenantStore } from "@aether/database";
+import {
+  PostgresAuthStore,
+  PostgresInitiativeAuditStore,
+  PostgresInitiativeStore,
+  PostgresTenantStore,
+} from "@aether/database";
 import { Pool } from "pg";
 
 import { buildServer } from "./app.js";
@@ -35,5 +40,12 @@ const tenants = new TenantService({
   tokens: { generate: randomOpaqueToken, hash: hashOpaqueToken },
   clock: { now: () => new Date() },
 });
-const app = await buildServer({ config, auth, tenants });
+const initiatives = new InitiativeService({
+  store: new PostgresInitiativeStore(pool),
+  audit: new PostgresInitiativeAuditStore(pool),
+  tenancy: new PostgresTenantStore(pool),
+  ids: { next: randomUUID },
+  clock: { now: () => new Date() },
+});
+const app = await buildServer({ config, auth, tenants, initiatives });
 await app.listen({ port: config.port, host: "0.0.0.0" });

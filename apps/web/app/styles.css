@@ -1,0 +1,68 @@
+:root {
+  color: #172033;
+  font-family: Arial, sans-serif;
+  background: #f4f6fa;
+}
+body {
+  margin: 0;
+}
+main {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 3rem 1.25rem;
+}
+section,
+form,
+article {
+  background: white;
+  border: 1px solid #d9deea;
+  border-radius: 10px;
+  padding: 1.25rem;
+  margin: 1rem 0;
+}
+.context,
+form {
+  display: grid;
+  gap: 0.75rem;
+}
+label {
+  display: grid;
+  gap: 0.35rem;
+  font-weight: 600;
+}
+input,
+textarea,
+select,
+button {
+  font: inherit;
+  padding: 0.6rem;
+}
+textarea {
+  min-height: 4rem;
+  resize: vertical;
+}
+button {
+  width: fit-content;
+  background: #193c78;
+  color: white;
+  border: 0;
+  border-radius: 5px;
+  cursor: pointer;
+}
+article > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+[data-status] {
+  background: #e6edff;
+  border-radius: 999px;
+  padding: 0.25rem 0.6rem;
+  white-space: nowrap;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}

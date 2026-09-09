@@ -286,6 +286,28 @@ paths:
         "403":
           $ref: "#/components/responses/Problem"
   /v1/initiatives:
+    get:
+      tags: [Initiatives]
+      operationId: listInitiatives
+      summary: Listar iniciativas autorizadas de un workspace
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationContextId"
+        - name: workspaceId
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: Iniciativas visibles en el contexto.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Initiative" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
     post:
       tags: [Initiatives]
       operationId: createInitiativeDraft
@@ -323,6 +345,7 @@ paths:
       security: [{ cookieSession: [] }]
       parameters:
         - $ref: "#/components/parameters/InitiativeId"
+        - $ref: "#/components/parameters/OrganizationContextId"
         - $ref: "#/components/parameters/CorrelationId"
       responses:
         "200":
@@ -338,6 +361,31 @@ paths:
           $ref: "#/components/responses/Problem"
         default:
           $ref: "#/components/responses/Problem"
+    patch:
+      tags: [Initiatives]
+      operationId: editInitiative
+      summary: Editar un borrador de iniciativa
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/InitiativeId"
+        - $ref: "#/components/parameters/OrganizationContextId"
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateInitiativeRequest" }
+      responses:
+        "200":
+          description: Borrador actualizado.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Initiative" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
   /v1/initiatives/{initiativeId}/submit:
     post:
       tags: [Initiatives]
@@ -346,8 +394,10 @@ paths:
       security: [{ cookieSession: [] }]
       parameters:
         - $ref: "#/components/parameters/InitiativeId"
+        - $ref: "#/components/parameters/OrganizationContextId"
         - $ref: "#/components/parameters/CorrelationId"
         - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/CsrfToken"
       requestBody:
         required: true
         content:
@@ -368,6 +418,79 @@ paths:
           $ref: "#/components/responses/Problem"
         default:
           $ref: "#/components/responses/Problem"
+  /v1/initiatives/{initiativeId}/review:
+    post:
+      tags: [Initiatives]
+      operationId: startInitiativeReview
+      summary: Iniciar revisión institucional de una iniciativa presentada
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/InitiativeId"
+        - $ref: "#/components/parameters/OrganizationContextId"
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StartReviewRequest" }
+      responses:
+        "200":
+          description: Iniciativa en revisión.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Initiative" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+  /v1/initiatives/{initiativeId}/decide:
+    post:
+      tags: [Initiatives]
+      operationId: decideInitiative
+      summary: Aprobar o rechazar una iniciativa en revisión
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/InitiativeId"
+        - $ref: "#/components/parameters/OrganizationContextId"
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DecideInitiativeRequest" }
+      responses:
+        "200":
+          description: Decisión registrada.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Initiative" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+  /v1/initiatives/{initiativeId}/audit-events:
+    get:
+      tags: [Audit]
+      operationId: listInitiativeAuditEvents
+      summary: Consultar la bitácora de una iniciativa autorizada
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/InitiativeId"
+        - $ref: "#/components/parameters/OrganizationContextId"
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: Eventos de creación, edición y cambios de estado.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/InitiativeAuditEvent" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
   /v1/audit-events:
     get:
       tags: [Audit]
@@ -570,8 +693,16 @@ components:
       type: object
       additionalProperties: false
       required:
-        [workspaceId, title, problemStatement, expectedOutcome, classification]
+        [
+          organizationId,
+          workspaceId,
+          title,
+          problemStatement,
+          expectedOutcome,
+          classification,
+        ]
       properties:
+        organizationId: { type: string, format: uuid }
         workspaceId: { type: string, format: uuid }
         title: { type: string, minLength: 1, maxLength: 255 }
         problemStatement: { type: string, minLength: 1, maxLength: 10000 }
@@ -583,6 +714,36 @@ components:
       required: [expectedVersion]
       properties:
         expectedVersion: { type: integer, minimum: 0 }
+    UpdateInitiativeRequest:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          expectedVersion,
+          title,
+          problemStatement,
+          expectedOutcome,
+          classification,
+        ]
+      properties:
+        expectedVersion: { type: integer, minimum: 0 }
+        title: { type: string, minLength: 1, maxLength: 255 }
+        problemStatement: { type: string, minLength: 1, maxLength: 10000 }
+        expectedOutcome: { type: string, minLength: 1, maxLength: 10000 }
+        classification: { type: string, enum: [internal, confidential] }
+    StartReviewRequest:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion]
+      properties:
+        expectedVersion: { type: integer, minimum: 0 }
+    DecideInitiativeRequest:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion, decision]
+      properties:
+        expectedVersion: { type: integer, minimum: 0 }
+        decision: { type: string, enum: [approved, rejected] }
     Initiative:
       type: object
       required:
@@ -598,6 +759,7 @@ components:
           version,
           createdAt,
           updatedAt,
+          allowedActions,
         ]
       properties:
         id: { type: string, format: uuid }
@@ -609,22 +771,65 @@ components:
         classification: { type: string, enum: [internal, confidential] }
         status:
           type: string
-          enum:
-            [
-              draft,
-              presented,
-              in_triage,
-              in_evaluation,
-              pending_decision,
-              approved,
-              rejected,
-              paused,
-              converted,
-              withdrawn,
-            ]
+          enum: [draft, presented, under_review, approved, rejected, withdrawn]
         version: { type: integer, minimum: 0 }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+        allowedActions:
+          type: array
+          items: { type: string, enum: [edit, present, review, decide] }
+    InitiativeAuditEvent:
+      type: object
+      required:
+        [
+          id,
+          eventType,
+          organizationId,
+          workspaceId,
+          initiativeId,
+          actorId,
+          correlationId,
+          occurredAt,
+          payload,
+        ]
+      properties:
+        id: { type: string, format: uuid }
+        eventType: { type: string }
+        organizationId: { type: string, format: uuid }
+        workspaceId: { type: string, format: uuid }
+        initiativeId: { type: string, format: uuid }
+        actorId: { type: string }
+        correlationId: { type: string, format: uuid }
+        occurredAt: { type: string, format: date-time }
+        fromStatus:
+          {
+            type: [string, "null"],
+            enum:
+              [
+                draft,
+                presented,
+                under_review,
+                approved,
+                rejected,
+                withdrawn,
+                null,
+              ],
+          }
+        toStatus:
+          {
+            type: [string, "null"],
+            enum:
+              [
+                draft,
+                presented,
+                under_review,
+                approved,
+                rejected,
+                withdrawn,
+                null,
+              ],
+          }
+        payload: { type: object, additionalProperties: true }
     AuditEvent:
       type: object
       required:

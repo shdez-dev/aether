@@ -1,0 +1,51 @@
+# Ciclo de vida de la iniciativa institucional
+
+## Modelo mínimo
+
+Una iniciativa describe una necesidad que la institución puede evaluar: título,
+problema, resultado esperado, clasificación, organización y workspace. El
+agregado conserva quién la creó, versión optimista y sus marcas de tiempo.
+
+El workspace y la organización siempre se validan juntos; una iniciativa no
+puede leerse ni modificarse desde otro contexto.
+
+## Estados y transiciones
+
+```text
+draft -> presented -> under_review -> approved
+                 |                 -> rejected
+                 |
+                 +-> withdrawn
+draft -----------------> withdrawn
+presented -------------> withdrawn
+under_review ----------> withdrawn
+```
+
+`approved`, `rejected` y `withdrawn` son terminales. Solo se edita `draft`.
+No existen estados de "aprobación pendiente", "proyecto" o equivalentes: la
+conversión a proyecto es una decisión posterior y explícita (ADR-0003).
+
+## Responsabilidades explícitas
+
+| Acción             | Estado de origen | Actores permitidos                                               |
+| ------------------ | ---------------- | ---------------------------------------------------------------- |
+| Crear              | —                | `owner`/`admin` de organización, o `admin`/`member` de workspace |
+| Editar o presentar | `draft`          | Creador, `owner`/`admin` de organización o `admin` de workspace  |
+| Iniciar revisión   | `presented`      | `owner` o `admin` de organización                                |
+| Decidir            | `under_review`   | Solo `owner` de organización                                     |
+
+Estas reglas se calculan en el servidor y se entregan al cliente como
+`allowedActions`. La interfaz usa esa lista únicamente para presentar acciones;
+la autorización y las transiciones se vuelven a comprobar en el caso de uso y
+en el dominio.
+
+## Auditoría y concurrencia
+
+Crear, editar, presentar, iniciar revisión y decidir generan eventos de
+auditoría con actor, correlación, estados anterior/posterior y fecha. La tabla
+de iniciativa usa `version`; los comandos requieren `expectedVersion` y
+responden con conflicto si otra operación ya modificó el agregado.
+
+La migración `0003_initiatives.sql` conserva las iniciativas y la bitácora en
+PostgreSQL. Los contratos HTTP están en el OpenAPI 3.1 y cada solicitud mutante
+requiere la protección CSRF de la sesión.

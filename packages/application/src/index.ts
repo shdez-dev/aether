@@ -1,6 +1,7 @@
 /** Casos de uso, puertos y fronteras transaccionales. */
 
 export * from "./tenancy.js";
+export * from "./initiatives.js";
 
 export interface RequestMetadata {
   readonly actorId: string;

@@ -12,6 +12,8 @@ export type AuthorizationAction =
   | "workspace:manage"
   | "member:invite";
 
+export type InitiativeAction = "edit" | "present" | "review" | "decide";
+
 export type AccessCapabilities = Readonly<{
   canReadOrganization: boolean;
   canManageOrganization: boolean;
@@ -59,4 +61,40 @@ export function isActionAllowed(
     case "member:invite":
       return capabilities.canInviteMembers;
   }
+}
+
+export function canCreateInitiative(input: {
+  organizationRole: OrganizationRole | null;
+  workspaceRole: WorkspaceRole | null;
+}): boolean {
+  return (
+    input.organizationRole === "owner" ||
+    input.organizationRole === "admin" ||
+    input.workspaceRole === "admin" ||
+    input.workspaceRole === "member"
+  );
+}
+
+export function allowedInitiativeActions(input: {
+  organizationRole: OrganizationRole | null;
+  workspaceRole: WorkspaceRole | null;
+  actorId: string;
+  createdByActorId: string;
+  status: import("./initiative.js").InitiativeStatus;
+}): readonly InitiativeAction[] {
+  const organizationManager =
+    input.organizationRole === "owner" || input.organizationRole === "admin";
+  const workspaceManager = input.workspaceRole === "admin";
+  const authorOrManager =
+    input.actorId === input.createdByActorId ||
+    organizationManager ||
+    workspaceManager;
+  const actions: InitiativeAction[] = [];
+  if (input.status === "draft" && authorOrManager)
+    actions.push("edit", "present");
+  if (input.status === "presented" && organizationManager)
+    actions.push("review");
+  if (input.status === "under_review" && input.organizationRole === "owner")
+    actions.push("decide");
+  return actions;
 }

@@ -32,6 +32,7 @@ export function initiativeDraftBuilder(
   overrides: Partial<CreateInitiativeDraftRequest> = {},
 ): CreateInitiativeDraftRequest {
   return {
+    organizationId: nextTestId(),
     workspaceId: nextTestId(),
     title: "Reducir tiempo de espera",
     problemStatement: "Las personas esperan demasiado para recibir atención.",

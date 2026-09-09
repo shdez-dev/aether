@@ -8,8 +8,12 @@ import {
   type LoginTransaction,
   type OidcProvider,
 } from "@aether/auth";
-import { TenantService } from "@aether/application";
-import { InMemoryTenantStore } from "@aether/testkit";
+import { InitiativeService, TenantService } from "@aether/application";
+import {
+  InMemoryInitiativeAuditStore,
+  InMemoryInitiativeStore,
+  InMemoryTenantStore,
+} from "@aether/testkit";
 
 import { buildServer } from "./app.js";
 import type { ServerConfig } from "./config.js";
@@ -127,7 +131,12 @@ describe("HTTP authentication boundary", () => {
       },
       clock: { now: () => new Date() },
     });
-    const app = await buildServer({ config, auth, tenants });
+    const app = await buildServer({
+      config,
+      auth,
+      tenants,
+      initiatives: {} as InitiativeService,
+    });
     const login = await app.inject({ method: "GET", url: "/auth/login" });
     const loginCookies = responseCookies(login);
     expect(
@@ -187,6 +196,151 @@ describe("HTTP authentication boundary", () => {
       },
     });
     expect(logout.statusCode).toBe(204);
+    await app.close();
+  });
+
+  it("recorre por HTTP la iniciativa desde borrador hasta decisión y conserva su auditoría", async () => {
+    const tenancyStore = new InMemoryTenantStore();
+    const tenants = new TenantService({
+      store: tenancyStore,
+      ids: { next: () => crypto.randomUUID() },
+      tokens: {
+        generate: () => "x".repeat(43),
+        hash: (value) => `hash:${value}`,
+      },
+      clock: { now: () => new Date() },
+    });
+    const initiatives = new InitiativeService({
+      store: new InMemoryInitiativeStore(),
+      audit: new InMemoryInitiativeAuditStore(),
+      tenancy: tenancyStore,
+      ids: { next: () => crypto.randomUUID() },
+      clock: { now: () => new Date() },
+    });
+    const auth = new AuthService({
+      store: new InMemoryAuthStore(),
+      cipher: createAesGcmCipher(config.sessionEncryptionKey),
+      oidc,
+      issuer: config.oidcIssuerUrl,
+      sessionTtlSeconds: 3600,
+      sessionRenewalWindowSeconds: 600,
+    });
+    const app = await buildServer({ config, auth, tenants, initiatives });
+    const login = await app.inject({ method: "GET", url: "/auth/login" });
+    const state = new URL(login.headers.location!).searchParams.get("state")!;
+    const callback = await app.inject({
+      method: "GET",
+      url: `/auth/callback?code=code&state=${state}`,
+      headers: {
+        cookie: `aether_oidc_tx=${cookieValue(responseCookies(login), "aether_oidc_tx")}`,
+      },
+    });
+    const session = cookieValue(responseCookies(callback), "aether_session");
+    const csrf = cookieValue(responseCookies(callback), "aether_csrf");
+    const headers = {
+      origin: config.webOrigin,
+      "x-csrf-token": csrf,
+      cookie: `aether_session=${session}; aether_csrf=${csrf}`,
+    };
+
+    const organizationResponse = await app.inject({
+      method: "POST",
+      url: "/v1/organizations",
+      headers,
+      payload: { name: "Aether Test", timezone: "UTC", locale: "es-CL" },
+    });
+    expect(organizationResponse.statusCode).toBe(201);
+    const organization = organizationResponse.json() as { id: string };
+    const workspaceResponse = await app.inject({
+      method: "POST",
+      url: "/v1/workspaces",
+      headers,
+      payload: {
+        organizationId: organization.id,
+        name: "Estrategia",
+        mode: "institutional",
+      },
+    });
+    expect(workspaceResponse.statusCode).toBe(201);
+    const workspace = workspaceResponse.json() as { id: string };
+    const createdResponse = await app.inject({
+      method: "POST",
+      url: "/v1/initiatives",
+      headers,
+      payload: {
+        organizationId: organization.id,
+        workspaceId: workspace.id,
+        title: "Reducir tiempos de espera",
+        problemStatement: "La atención tarda demasiado.",
+        expectedOutcome: "Reducir la mediana de espera en el piloto.",
+        classification: "internal",
+      },
+    });
+    expect(createdResponse.statusCode).toBe(201);
+    const created = createdResponse.json() as { id: string; version: number };
+
+    const editedResponse = await app.inject({
+      method: "PATCH",
+      url: `/v1/initiatives/${created.id}?organizationId=${organization.id}`,
+      headers,
+      payload: {
+        expectedVersion: created.version,
+        title: "Reducir tiempos de espera en atención",
+        problemStatement: "La atención tarda demasiado.",
+        expectedOutcome: "Reducir la mediana de espera en el piloto.",
+        classification: "internal",
+      },
+    });
+    expect(editedResponse.statusCode).toBe(200);
+    const edited = editedResponse.json() as { version: number };
+
+    const presentedResponse = await app.inject({
+      method: "POST",
+      url: `/v1/initiatives/${created.id}/submit?organizationId=${organization.id}`,
+      headers,
+      payload: { expectedVersion: edited.version },
+    });
+    expect(presentedResponse.statusCode).toBe(200);
+    const presented = presentedResponse.json() as {
+      status: string;
+      version: number;
+    };
+    expect(presented.status).toBe("presented");
+
+    const reviewResponse = await app.inject({
+      method: "POST",
+      url: `/v1/initiatives/${created.id}/review?organizationId=${organization.id}`,
+      headers,
+      payload: { expectedVersion: presented.version },
+    });
+    expect(reviewResponse.statusCode).toBe(200);
+    const underReview = reviewResponse.json() as { version: number };
+    const decisionResponse = await app.inject({
+      method: "POST",
+      url: `/v1/initiatives/${created.id}/decide?organizationId=${organization.id}`,
+      headers,
+      payload: { expectedVersion: underReview.version, decision: "approved" },
+    });
+    expect(decisionResponse.statusCode).toBe(200);
+    expect(decisionResponse.json()).toMatchObject({
+      status: "approved",
+      allowedActions: [],
+    });
+    const auditResponse = await app.inject({
+      method: "GET",
+      url: `/v1/initiatives/${created.id}/audit-events?organizationId=${organization.id}`,
+      headers: { cookie: headers.cookie },
+    });
+    expect(auditResponse.statusCode).toBe(200);
+    expect(auditResponse.json()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ eventType: "initiative.created.v1" }),
+        expect.objectContaining({ eventType: "initiative.edited.v1" }),
+        expect.objectContaining({ eventType: "initiative.presented.v1" }),
+        expect.objectContaining({ eventType: "initiative.review_started.v1" }),
+        expect.objectContaining({ eventType: "initiative.decided.v1" }),
+      ]),
+    );
     await app.close();
   });
 });

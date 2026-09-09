@@ -3,14 +3,22 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 import { AuthService } from "@aether/auth";
 import {
   AccessDeniedError,
+  InitiativeDomainError,
+  InitiativeService,
+  InitiativeVersionConflictError,
   InvitationError,
   ResourceNotFoundError,
   TenantService,
 } from "@aether/application";
 import {
   CreateInvitationRequestSchema,
+  CreateInitiativeDraftRequestSchema,
   CreateOrganizationRequestSchema,
   CreateWorkspaceRequestSchema,
+  DecideInitiativeRequestSchema,
+  StartReviewRequestSchema,
+  SubmitInitiativeRequestSchema,
+  UpdateInitiativeRequestSchema,
 } from "@aether/contracts";
 import cookie from "@fastify/cookie";
 import Fastify, {
@@ -35,6 +43,7 @@ export async function buildServer(input: {
   config: ServerConfig;
   auth: AuthService;
   tenants: TenantService;
+  initiatives: InitiativeService;
 }): Promise<FastifyInstance> {
   const app = Fastify({
     logger: input.config.nodeEnv !== "test",
@@ -52,7 +61,7 @@ export async function buildServer(input: {
   app.addHook("preHandler", async (request, reply) => {
     const path = request.url.split("?")[0] ?? "";
     if (
-      request.method === "POST" &&
+      ["POST", "PATCH", "PUT", "DELETE"].includes(request.method) &&
       (path === "/auth/logout" || path.startsWith("/v1/"))
     ) {
       assertCsrf(request, input.config);
@@ -68,7 +77,9 @@ export async function buildServer(input: {
           ? 403
           : error instanceof ResourceNotFoundError
             ? 404
-            : 400;
+            : error instanceof InitiativeVersionConflictError
+              ? 409
+              : 400;
     reply
       .code(status)
       .type("application/problem+json")
@@ -81,7 +92,9 @@ export async function buildServer(input: {
               ? "Solicitud rechazada"
               : status === 404
                 ? "Recurso no encontrado"
-                : "Solicitud inválida",
+                : status === 409
+                  ? "Conflicto de versión"
+                  : "Solicitud inválida",
         status,
         code:
           error instanceof UnauthenticatedError
@@ -92,9 +105,13 @@ export async function buildServer(input: {
               ? "FORBIDDEN"
               : error instanceof ResourceNotFoundError
                 ? "NOT_FOUND"
-                : error instanceof InvitationError
-                  ? "INVITATION_INVALID_OR_EXPIRED"
-                  : "VALIDATION_ERROR",
+                : error instanceof InitiativeVersionConflictError
+                  ? "CONFLICT"
+                  : error instanceof InitiativeDomainError
+                    ? "PRECONDITION_FAILED"
+                    : error instanceof InvitationError
+                      ? "INVITATION_INVALID_OR_EXPIRED"
+                      : "VALIDATION_ERROR",
         correlationId: reply.getHeader("X-Correlation-ID"),
         instance: request.url,
       });
@@ -278,7 +295,228 @@ export async function buildServer(input: {
       .code(200)
       .send({ ...invitation, expiresAt: invitation.expiresAt.toISOString() });
   });
+  app.post("/v1/initiatives", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    const body = CreateInitiativeDraftRequestSchema.parse(request.body);
+    const initiative = await input.initiatives.create({
+      actorId: session.actorId,
+      correlationId: correlationId(reply),
+      ...body,
+    });
+    return reply.code(201).send(
+      await toInitiativeResponse(
+        await input.initiatives.detail({
+          actorId: session.actorId,
+          organizationId: initiative.organizationId,
+          initiativeId: initiative.id,
+        }),
+      ),
+    );
+  });
+  app.get("/v1/initiatives", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    const query = z
+      .object({
+        organizationId: z.string().uuid(),
+        workspaceId: z.string().uuid(),
+      })
+      .parse(request.query);
+    const initiatives = await input.initiatives.list({
+      actorId: session.actorId,
+      ...query,
+    });
+    return Promise.all(initiatives.map(toInitiativeResponse));
+  });
+  app.get("/v1/initiatives/:initiativeId", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    const params = z
+      .object({ initiativeId: z.string().uuid() })
+      .parse(request.params);
+    const query = z
+      .object({ organizationId: z.string().uuid() })
+      .parse(request.query);
+    return toInitiativeResponse(
+      await input.initiatives.detail({
+        actorId: session.actorId,
+        ...params,
+        ...query,
+      }),
+    );
+  });
+  app.patch("/v1/initiatives/:initiativeId", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    const params = z
+      .object({ initiativeId: z.string().uuid() })
+      .parse(request.params);
+    const query = z
+      .object({ organizationId: z.string().uuid() })
+      .parse(request.query);
+    const body = UpdateInitiativeRequestSchema.parse(request.body);
+    const initiative = await input.initiatives.edit({
+      actorId: session.actorId,
+      correlationId: correlationId(reply),
+      ...params,
+      ...query,
+      ...body,
+    });
+    return toInitiativeResponse(
+      await input.initiatives.detail({
+        actorId: session.actorId,
+        organizationId: initiative.organizationId,
+        initiativeId: initiative.id,
+      }),
+    );
+  });
+  app.post("/v1/initiatives/:initiativeId/submit", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    const params = z
+      .object({ initiativeId: z.string().uuid() })
+      .parse(request.params);
+    const query = z
+      .object({ organizationId: z.string().uuid() })
+      .parse(request.query);
+    const body = SubmitInitiativeRequestSchema.parse(request.body);
+    const initiative = await input.initiatives.present({
+      actorId: session.actorId,
+      correlationId: correlationId(reply),
+      ...params,
+      ...query,
+      ...body,
+    });
+    return toInitiativeResponse(
+      await input.initiatives.detail({
+        actorId: session.actorId,
+        organizationId: initiative.organizationId,
+        initiativeId: initiative.id,
+      }),
+    );
+  });
+  app.post("/v1/initiatives/:initiativeId/review", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    const params = z
+      .object({ initiativeId: z.string().uuid() })
+      .parse(request.params);
+    const query = z
+      .object({ organizationId: z.string().uuid() })
+      .parse(request.query);
+    const body = StartReviewRequestSchema.parse(request.body);
+    const initiative = await input.initiatives.startReview({
+      actorId: session.actorId,
+      correlationId: correlationId(reply),
+      ...params,
+      ...query,
+      ...body,
+    });
+    return toInitiativeResponse(
+      await input.initiatives.detail({
+        actorId: session.actorId,
+        organizationId: initiative.organizationId,
+        initiativeId: initiative.id,
+      }),
+    );
+  });
+  app.post("/v1/initiatives/:initiativeId/decide", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    const params = z
+      .object({ initiativeId: z.string().uuid() })
+      .parse(request.params);
+    const query = z
+      .object({ organizationId: z.string().uuid() })
+      .parse(request.query);
+    const body = DecideInitiativeRequestSchema.parse(request.body);
+    const initiative = await input.initiatives.decide({
+      actorId: session.actorId,
+      correlationId: correlationId(reply),
+      ...params,
+      ...query,
+      ...body,
+    });
+    return toInitiativeResponse(
+      await input.initiatives.detail({
+        actorId: session.actorId,
+        organizationId: initiative.organizationId,
+        initiativeId: initiative.id,
+      }),
+    );
+  });
+  app.get(
+    "/v1/initiatives/:initiativeId/audit-events",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      const params = z
+        .object({ initiativeId: z.string().uuid() })
+        .parse(request.params);
+      const query = z
+        .object({ organizationId: z.string().uuid() })
+        .parse(request.query);
+      const events = await input.initiatives.auditTrail({
+        actorId: session.actorId,
+        ...params,
+        ...query,
+      });
+      return events.map((event) => ({
+        ...event,
+        occurredAt: event.occurredAt.toISOString(),
+      }));
+    },
+  );
   return app;
+}
+
+async function toInitiativeResponse(
+  detail: Awaited<ReturnType<InitiativeService["detail"]>>,
+) {
+  const { initiative, allowedActions } = detail;
+  return {
+    ...initiative,
+    createdAt: initiative.createdAt.toISOString(),
+    updatedAt: initiative.updatedAt.toISOString(),
+    allowedActions,
+  };
+}
+function correlationId(reply: FastifyReply): string {
+  const value = reply.getHeader("X-Correlation-ID");
+  return typeof value === "string" ? value : String(value);
 }
 
 async function requireSession(
