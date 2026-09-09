@@ -14,14 +14,14 @@ puede leerse ni modificarse desde otro contexto.
 ```text
 draft -> presented -> under_review -> approved
                  |                 -> rejected
-                 |
-                 +-> withdrawn
-draft -----------------> withdrawn
-presented -------------> withdrawn
-under_review ----------> withdrawn
+                 |                 -> returned -> presented
+                 |                 -> cancelled
+draft -----------------> cancelled
+presented -------------> cancelled
 ```
 
-`approved`, `rejected` y `withdrawn` son terminales. Solo se edita `draft`.
+`approved`, `rejected` y `cancelled` son terminales. `returned` permite editar
+y presentar nuevamente; no se confunde con una aprobación pendiente.
 No existen estados de "aprobación pendiente", "proyecto" o equivalentes: la
 conversión a proyecto es una decisión posterior y explícita (ADR-0003).
 
@@ -31,7 +31,7 @@ conversión a proyecto es una decisión posterior y explícita (ADR-0003).
 | ------------------ | ---------------- | ---------------------------------------------------------------- |
 | Crear              | —                | `owner`/`admin` de organización, o `admin`/`member` de workspace |
 | Editar o presentar | `draft`          | Creador, `owner`/`admin` de organización o `admin` de workspace  |
-| Iniciar revisión   | `presented`      | `owner` o `admin` de organización                                |
+| Evaluar            | `presented`      | `owner` o `admin` de organización                                |
 | Decidir            | `under_review`   | Solo `owner` de organización                                     |
 
 Estas reglas se calculan en el servidor y se entregan al cliente como

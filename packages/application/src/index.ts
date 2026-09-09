@@ -2,6 +2,7 @@
 
 export * from "./tenancy.js";
 export * from "./initiatives.js";
+export * from "./evaluations.js";
 
 export interface RequestMetadata {
   readonly actorId: string;

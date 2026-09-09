@@ -1,9 +1,16 @@
 import type {
+  EvaluationStandardStore,
+  EvaluationStore,
   InitiativeAuditEvent,
   InitiativeAuditStore,
   InitiativeStore,
 } from "@aether/application";
-import type { Initiative } from "@aether/domain";
+import type {
+  EvaluationStandard,
+  Initiative,
+  InitiativeDecision,
+  InitiativeEvaluation,
+} from "@aether/domain";
 
 export class InMemoryInitiativeStore implements InitiativeStore {
   readonly initiatives = new Map<string, Initiative>();
@@ -48,5 +55,43 @@ export class InMemoryInitiativeAuditStore implements InitiativeAuditStore {
         event.organizationId === input.organizationId &&
         event.initiativeId === input.initiativeId,
     );
+  }
+}
+
+export class InMemoryEvaluationStandardStore implements EvaluationStandardStore {
+  readonly standards = new Map<string, EvaluationStandard>();
+  async create(standard: EvaluationStandard): Promise<void> {
+    this.standards.set(standard.id, standard);
+  }
+  async findById(standardId: string): Promise<EvaluationStandard | null> {
+    return this.standards.get(standardId) ?? null;
+  }
+  async activate(input: {
+    organizationId: string;
+    standardId: string;
+  }): Promise<void> {
+    for (const [id, standard] of this.standards) {
+      if (standard.organizationId === input.organizationId)
+        this.standards.set(id, {
+          ...standard,
+          isActive: id === input.standardId,
+        });
+    }
+  }
+}
+
+export class InMemoryEvaluationStore implements EvaluationStore {
+  readonly evaluations = new Map<string, InitiativeEvaluation>();
+  readonly decisions: InitiativeDecision[] = [];
+  async createEvaluation(evaluation: InitiativeEvaluation): Promise<void> {
+    this.evaluations.set(evaluation.id, evaluation);
+  }
+  async findEvaluation(
+    evaluationId: string,
+  ): Promise<InitiativeEvaluation | null> {
+    return this.evaluations.get(evaluationId) ?? null;
+  }
+  async createDecision(decision: InitiativeDecision): Promise<void> {
+    this.decisions.push(decision);
   }
 }

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   AccessDeniedError,
+  EvaluationService,
   InitiativeService,
   InitiativeVersionConflictError,
   TenantService,
@@ -9,6 +10,8 @@ import {
 
 import {
   InMemoryInitiativeAuditStore,
+  InMemoryEvaluationStandardStore,
+  InMemoryEvaluationStore,
   InMemoryInitiativeStore,
 } from "./initiatives.js";
 import { InMemoryTenantStore } from "./tenancy.js";
@@ -75,8 +78,9 @@ describe("initiative vertical slice", () => {
     });
 
     const audit = new InMemoryInitiativeAuditStore();
+    const initiativeStore = new InMemoryInitiativeStore();
     const initiatives = new InitiativeService({
-      store: new InMemoryInitiativeStore(),
+      store: initiativeStore,
       audit,
       tenancy: tenantStore,
       ids,
@@ -119,32 +123,76 @@ describe("initiative vertical slice", () => {
       correlationId: ids.next(),
       expectedVersion: edited.version,
     });
-    const reviewing = await initiatives.startReview({
+    const standards = new InMemoryEvaluationStandardStore();
+    const evaluations = new EvaluationService({
+      standards,
+      evaluations: new InMemoryEvaluationStore(),
+      initiatives: initiativeStore,
+      audit,
+      tenancy: tenantStore,
+      ids,
+      clock,
+    });
+    const standard = await evaluations.publishStandard({
+      actorId: "owner",
+      organizationId: organization.id,
+      name: "Estándar institucional",
+      version: 1,
+      criteria: [
+        {
+          id: ids.next(),
+          code: "IMPACT",
+          name: "Impacto",
+          description: "El impacto está respaldado por evidencia.",
+          weight: 1,
+        },
+      ],
+    });
+    await evaluations.activateStandard({
+      actorId: "owner",
+      organizationId: organization.id,
+      standardId: standard.id,
+    });
+    const evaluation = await evaluations.review({
       actorId: "reviewer",
       organizationId: organization.id,
       initiativeId: created.id,
       correlationId: ids.next(),
       expectedVersion: presented.version,
+      standardId: standard.id,
+      results: [
+        {
+          criterionId: standard.criteria[0]!.id,
+          assessment: "met",
+          evidence: ["Indicador validado."],
+        },
+      ],
     });
     await expect(
-      initiatives.decide({
+      evaluations.decide({
         actorId: "reviewer",
         organizationId: organization.id,
         initiativeId: created.id,
         correlationId: ids.next(),
-        expectedVersion: reviewing.version,
-        decision: "approved",
+        expectedVersion: presented.version + 1,
+        evaluationId: evaluation.id,
+        outcome: "approved",
+        rationale: "Revisión favorable.",
+        evidence: ["Acta."],
       }),
     ).rejects.toBeInstanceOf(AccessDeniedError);
-    const decided = await initiatives.decide({
+    const decided = await evaluations.decide({
       actorId: "owner",
       organizationId: organization.id,
       initiativeId: created.id,
       correlationId: ids.next(),
-      expectedVersion: reviewing.version,
-      decision: "approved",
+      expectedVersion: presented.version + 1,
+      evaluationId: evaluation.id,
+      outcome: "approved",
+      rationale: "Revisión favorable.",
+      evidence: ["Acta."],
     });
-    expect(decided.status).toBe("approved");
+    expect(decided.outcome).toBe("approved");
     expect(
       (
         await initiatives.auditTrail({
@@ -157,8 +205,8 @@ describe("initiative vertical slice", () => {
       "initiative.created.v1",
       "initiative.edited.v1",
       "initiative.presented.v1",
-      "initiative.review_started.v1",
-      "initiative.decided.v1",
+      "initiative.evaluated.v1",
+      "initiative.decided.v2",
     ]);
   });
 });

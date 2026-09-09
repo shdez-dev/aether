@@ -6,6 +6,7 @@ import {
   InitiativeDomainError,
   InitiativeService,
   InitiativeVersionConflictError,
+  EvaluationService,
   InvitationError,
   ResourceNotFoundError,
   TenantService,
@@ -16,6 +17,8 @@ import {
   CreateOrganizationRequestSchema,
   CreateWorkspaceRequestSchema,
   DecideInitiativeRequestSchema,
+  ActivateEvaluationStandardRequestSchema,
+  PublishEvaluationStandardRequestSchema,
   StartReviewRequestSchema,
   SubmitInitiativeRequestSchema,
   UpdateInitiativeRequestSchema,
@@ -44,6 +47,7 @@ export async function buildServer(input: {
   auth: AuthService;
   tenants: TenantService;
   initiatives: InitiativeService;
+  evaluations: EvaluationService;
 }): Promise<FastifyInstance> {
   const app = Fastify({
     logger: input.config.nodeEnv !== "test",
@@ -318,6 +322,43 @@ export async function buildServer(input: {
       ),
     );
   });
+  app.post("/v1/evaluation-standards", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    const body = PublishEvaluationStandardRequestSchema.parse(request.body);
+    const standard = await input.evaluations.publishStandard({
+      actorId: session.actorId,
+      ...body,
+    });
+    return reply
+      .code(201)
+      .send({ ...standard, publishedAt: standard.publishedAt.toISOString() });
+  });
+  app.post(
+    "/v1/evaluation-standards/:standardId/activate",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      const params = z
+        .object({ standardId: z.string().uuid() })
+        .parse(request.params);
+      const body = ActivateEvaluationStandardRequestSchema.parse(request.body);
+      await input.evaluations.activateStandard({
+        actorId: session.actorId,
+        standardId: params.standardId,
+        ...body,
+      });
+      return reply.code(204).send();
+    },
+  );
   app.get("/v1/initiatives", async (request, reply) => {
     const session = await requireSession(
       request,
@@ -430,20 +471,23 @@ export async function buildServer(input: {
       .object({ organizationId: z.string().uuid() })
       .parse(request.query);
     const body = StartReviewRequestSchema.parse(request.body);
-    const initiative = await input.initiatives.startReview({
+    const evaluation = await input.evaluations.review({
       actorId: session.actorId,
       correlationId: correlationId(reply),
       ...params,
       ...query,
       ...body,
     });
-    return toInitiativeResponse(
-      await input.initiatives.detail({
-        actorId: session.actorId,
-        organizationId: initiative.organizationId,
-        initiativeId: initiative.id,
-      }),
-    );
+    return reply.send({
+      evaluation: toEvaluationResponse(evaluation),
+      initiative: await toInitiativeResponse(
+        await input.initiatives.detail({
+          actorId: session.actorId,
+          organizationId: query.organizationId,
+          initiativeId: params.initiativeId,
+        }),
+      ),
+    });
   });
   app.post("/v1/initiatives/:initiativeId/decide", async (request, reply) => {
     const session = await requireSession(
@@ -459,20 +503,23 @@ export async function buildServer(input: {
       .object({ organizationId: z.string().uuid() })
       .parse(request.query);
     const body = DecideInitiativeRequestSchema.parse(request.body);
-    const initiative = await input.initiatives.decide({
+    const decision = await input.evaluations.decide({
       actorId: session.actorId,
       correlationId: correlationId(reply),
       ...params,
       ...query,
       ...body,
     });
-    return toInitiativeResponse(
-      await input.initiatives.detail({
-        actorId: session.actorId,
-        organizationId: initiative.organizationId,
-        initiativeId: initiative.id,
-      }),
-    );
+    return reply.send({
+      decision: toDecisionResponse(decision),
+      initiative: await toInitiativeResponse(
+        await input.initiatives.detail({
+          actorId: session.actorId,
+          organizationId: query.organizationId,
+          initiativeId: params.initiativeId,
+        }),
+      ),
+    });
   });
   app.get(
     "/v1/initiatives/:initiativeId/audit-events",
@@ -513,6 +560,16 @@ async function toInitiativeResponse(
     updatedAt: initiative.updatedAt.toISOString(),
     allowedActions,
   };
+}
+function toEvaluationResponse(
+  evaluation: { evaluatedAt: Date } & Record<string, unknown>,
+) {
+  return { ...evaluation, evaluatedAt: evaluation.evaluatedAt.toISOString() };
+}
+function toDecisionResponse(
+  decision: { decidedAt: Date } & Record<string, unknown>,
+) {
+  return { ...decision, decidedAt: decision.decidedAt.toISOString() };
 }
 function correlationId(reply: FastifyReply): string {
   const value = reply.getHeader("X-Correlation-ID");

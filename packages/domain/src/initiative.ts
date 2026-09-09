@@ -2,9 +2,10 @@ export const InitiativeStatuses = [
   "draft",
   "presented",
   "under_review",
+  "returned",
   "approved",
   "rejected",
-  "withdrawn",
+  "cancelled",
 ] as const;
 export type InitiativeStatus = (typeof InitiativeStatuses)[number];
 export type InitiativeClassification = "internal" | "confidential";
@@ -27,12 +28,13 @@ export type Initiative = Readonly<{
 const transitions: Readonly<
   Record<InitiativeStatus, readonly InitiativeStatus[]>
 > = {
-  draft: ["presented", "withdrawn"],
-  presented: ["under_review", "withdrawn"],
-  under_review: ["approved", "rejected", "withdrawn"],
+  draft: ["presented", "cancelled"],
+  presented: ["under_review", "cancelled"],
+  under_review: ["returned", "approved", "rejected", "cancelled"],
+  returned: ["presented", "cancelled"],
   approved: [],
   rejected: [],
-  withdrawn: [],
+  cancelled: [],
 };
 
 export function createInitiative(
@@ -49,7 +51,7 @@ export function editInitiative(
   >,
   updatedAt: Date,
 ): Initiative {
-  if (initiative.status !== "draft")
+  if (initiative.status !== "draft" && initiative.status !== "returned")
     throw new InitiativeDomainError("INITIATIVE_NOT_EDITABLE");
   return {
     ...initiative,

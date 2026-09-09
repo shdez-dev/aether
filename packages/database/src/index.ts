@@ -3,6 +3,8 @@ import type {
   InitiativeAuditEvent,
   InitiativeAuditStore,
   InitiativeStore,
+  EvaluationStandardStore,
+  EvaluationStore,
   Invitation,
   Organization,
   TenantStore,
@@ -12,6 +14,9 @@ import type {
   Initiative,
   InitiativeClassification,
   InitiativeStatus,
+  EvaluationStandard,
+  InitiativeEvaluation,
+  InitiativeDecision,
   OrganizationRole,
   WorkspaceRole,
 } from "@aether/domain";
@@ -433,6 +438,112 @@ export class PostgresInitiativeAuditStore implements InitiativeAuditStore {
   }
 }
 
+export class PostgresEvaluationStandardStore implements EvaluationStandardStore {
+  constructor(private readonly pool: Pool) {}
+  async create(standard: EvaluationStandard): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO evaluation_standards (id, organization_id, name, version, criteria, is_active, published_at, published_by_actor_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        standard.id,
+        standard.organizationId,
+        standard.name,
+        standard.version,
+        standard.criteria,
+        standard.isActive,
+        standard.publishedAt,
+        standard.publishedByActorId,
+      ],
+    );
+  }
+  async findById(standardId: string): Promise<EvaluationStandard | null> {
+    const result = await this.pool.query<EvaluationStandardRow>(
+      `SELECT id, organization_id, name, version, criteria, is_active, published_at, published_by_actor_id
+       FROM evaluation_standards WHERE id = $1`,
+      [standardId],
+    );
+    return result.rows[0] ? toEvaluationStandard(result.rows[0]) : null;
+  }
+  async activate(input: {
+    organizationId: string;
+    standardId: string;
+  }): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        "UPDATE evaluation_standards SET is_active = FALSE WHERE organization_id = $1 AND is_active",
+        [input.organizationId],
+      );
+      const updated = await client.query(
+        "UPDATE evaluation_standards SET is_active = TRUE WHERE id = $1 AND organization_id = $2",
+        [input.standardId, input.organizationId],
+      );
+      if (updated.rowCount !== 1)
+        throw new Error("Evaluation standard not found");
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+}
+
+export class PostgresEvaluationStore implements EvaluationStore {
+  constructor(private readonly pool: Pool) {}
+  async createEvaluation(evaluation: InitiativeEvaluation): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO initiative_evaluations (id, organization_id, workspace_id, initiative_id, initiative_version, standard_id, standard_version, criteria, coverage, evaluated_by_actor_id, evaluated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [
+        evaluation.id,
+        evaluation.organizationId,
+        evaluation.workspaceId,
+        evaluation.initiativeId,
+        evaluation.initiativeVersion,
+        evaluation.standardId,
+        evaluation.standardVersion,
+        evaluation.criteria,
+        evaluation.coverage,
+        evaluation.evaluatedByActorId,
+        evaluation.evaluatedAt,
+      ],
+    );
+  }
+  async findEvaluation(
+    evaluationId: string,
+  ): Promise<InitiativeEvaluation | null> {
+    const result = await this.pool.query<InitiativeEvaluationRow>(
+      `SELECT id, organization_id, workspace_id, initiative_id, initiative_version, standard_id, standard_version, criteria, coverage, evaluated_by_actor_id, evaluated_at FROM initiative_evaluations WHERE id = $1`,
+      [evaluationId],
+    );
+    return result.rows[0] ? toInitiativeEvaluation(result.rows[0]) : null;
+  }
+  async createDecision(decision: InitiativeDecision): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO initiative_decisions (id, organization_id, workspace_id, initiative_id, evaluation_id, outcome, rationale, evidence, standard_id, standard_version, coverage, decided_by_actor_id, decided_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+      [
+        decision.id,
+        decision.organizationId,
+        decision.workspaceId,
+        decision.initiativeId,
+        decision.evaluationId,
+        decision.outcome,
+        decision.rationale,
+        decision.evidence,
+        decision.standardId,
+        decision.standardVersion,
+        decision.coverage,
+        decision.decidedByActorId,
+        decision.decidedAt,
+      ],
+    );
+  }
+}
+
 type InitiativeRow = {
   id: string;
   organization_id: string;
@@ -489,5 +600,58 @@ function toInitiativeAuditEvent(row: InitiativeAuditRow): InitiativeAuditEvent {
     fromStatus: row.from_status,
     toStatus: row.to_status,
     payload: row.payload,
+  };
+}
+
+type EvaluationStandardRow = {
+  id: string;
+  organization_id: string;
+  name: string;
+  version: number;
+  criteria: EvaluationStandard["criteria"];
+  is_active: boolean;
+  published_at: Date;
+  published_by_actor_id: string;
+};
+type InitiativeEvaluationRow = {
+  id: string;
+  organization_id: string;
+  workspace_id: string;
+  initiative_id: string;
+  initiative_version: number;
+  standard_id: string;
+  standard_version: number;
+  criteria: InitiativeEvaluation["criteria"];
+  coverage: InitiativeEvaluation["coverage"];
+  evaluated_by_actor_id: string;
+  evaluated_at: Date;
+};
+function toEvaluationStandard(row: EvaluationStandardRow): EvaluationStandard {
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    name: row.name,
+    version: row.version,
+    criteria: row.criteria,
+    isActive: row.is_active,
+    publishedAt: row.published_at,
+    publishedByActorId: row.published_by_actor_id,
+  };
+}
+function toInitiativeEvaluation(
+  row: InitiativeEvaluationRow,
+): InitiativeEvaluation {
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    workspaceId: row.workspace_id,
+    initiativeId: row.initiative_id,
+    initiativeVersion: row.initiative_version,
+    standardId: row.standard_id,
+    standardVersion: row.standard_version,
+    criteria: row.criteria,
+    coverage: row.coverage,
+    evaluatedByActorId: row.evaluated_by_actor_id,
+    evaluatedAt: row.evaluated_at,
   };
 }

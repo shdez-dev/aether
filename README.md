@@ -44,3 +44,4 @@ La primera rebanada vertical será: invitación, sesión segura, organización, 
 - [Autenticación OIDC y sesiones](docs/architecture/authentication-and-sessions.md)
 - [Organizaciones, workspaces y autorización](docs/architecture/tenancy-and-authorization.md)
 - [Ciclo de vida de iniciativas institucionales](docs/architecture/initiative-lifecycle.md)
+- [Evaluación y decisión institucional](docs/architecture/evaluation-and-decision.md)

@@ -90,7 +90,10 @@ export function allowedInitiativeActions(input: {
     organizationManager ||
     workspaceManager;
   const actions: InitiativeAction[] = [];
-  if (input.status === "draft" && authorOrManager)
+  if (
+    (input.status === "draft" || input.status === "returned") &&
+    authorOrManager
+  )
     actions.push("edit", "present");
   if (input.status === "presented" && organizationManager)
     actions.push("review");

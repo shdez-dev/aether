@@ -1,0 +1,166 @@
+export type EvaluationCriterion = Readonly<{
+  id: string;
+  code: string;
+  name: string;
+  description: string;
+  weight: number;
+}>;
+
+export type EvaluationStandard = Readonly<{
+  id: string;
+  organizationId: string;
+  name: string;
+  version: number;
+  criteria: readonly EvaluationCriterion[];
+  isActive: boolean;
+  publishedAt: Date;
+  publishedByActorId: string;
+}>;
+
+export type CriterionAssessment = "met" | "not_met" | "not_applicable";
+export type EvaluationCriterionResult = Readonly<{
+  criterion: EvaluationCriterion;
+  assessment: CriterionAssessment | null;
+  evidence: readonly string[];
+}>;
+export type EvaluationResultInput = Readonly<{
+  criterionId: string;
+  assessment: CriterionAssessment | null;
+  evidence: readonly string[];
+}>;
+export type EvaluationCoverage = Readonly<{
+  totalCriteria: number;
+  assessedCriteria: number;
+  percentage: number;
+}>;
+export type InitiativeEvaluation = Readonly<{
+  id: string;
+  organizationId: string;
+  workspaceId: string;
+  initiativeId: string;
+  initiativeVersion: number;
+  standardId: string;
+  standardVersion: number;
+  criteria: readonly EvaluationCriterionResult[];
+  coverage: EvaluationCoverage;
+  evaluatedByActorId: string;
+  evaluatedAt: Date;
+}>;
+export type DecisionOutcome =
+  "approved" | "rejected" | "returned" | "cancelled";
+export type InitiativeDecision = Readonly<{
+  id: string;
+  organizationId: string;
+  workspaceId: string;
+  initiativeId: string;
+  evaluationId: string;
+  outcome: DecisionOutcome;
+  rationale: string;
+  evidence: readonly string[];
+  standardId: string;
+  standardVersion: number;
+  coverage: EvaluationCoverage;
+  decidedByActorId: string;
+  decidedAt: Date;
+}>;
+
+export function publishEvaluationStandard(
+  input: Omit<EvaluationStandard, "isActive">,
+): EvaluationStandard {
+  if (input.criteria.length === 0)
+    throw new EvaluationDomainError("STANDARD_REQUIRES_CRITERIA");
+  if (
+    new Set(input.criteria.map((criterion) => criterion.code)).size !==
+    input.criteria.length
+  )
+    throw new EvaluationDomainError("DUPLICATE_CRITERION_CODE");
+  if (input.criteria.some((criterion) => criterion.weight <= 0))
+    throw new EvaluationDomainError("INVALID_CRITERION_WEIGHT");
+  return { ...input, criteria: [...input.criteria], isActive: false };
+}
+
+export function evaluateInitiative(input: {
+  id: string;
+  organizationId: string;
+  workspaceId: string;
+  initiativeId: string;
+  initiativeVersion: number;
+  standard: EvaluationStandard;
+  results: readonly EvaluationResultInput[];
+  evaluatedByActorId: string;
+  evaluatedAt: Date;
+}): InitiativeEvaluation {
+  const resultById = new Map(
+    input.results.map((result) => [result.criterionId, result]),
+  );
+  if (
+    resultById.size !== input.results.length ||
+    input.results.some(
+      (result) =>
+        !input.standard.criteria.some(
+          (criterion) => criterion.id === result.criterionId,
+        ),
+    )
+  )
+    throw new EvaluationDomainError("INVALID_EVALUATION_CRITERIA");
+  const criteria = input.standard.criteria.map((criterion) => {
+    const result = resultById.get(criterion.id);
+    return {
+      criterion,
+      assessment: result?.assessment ?? null,
+      evidence: [...(result?.evidence ?? [])],
+    };
+  });
+  const assessedCriteria = criteria.filter(
+    (criterion) => criterion.assessment !== null,
+  ).length;
+  return {
+    id: input.id,
+    organizationId: input.organizationId,
+    workspaceId: input.workspaceId,
+    initiativeId: input.initiativeId,
+    initiativeVersion: input.initiativeVersion,
+    standardId: input.standard.id,
+    standardVersion: input.standard.version,
+    criteria,
+    coverage: {
+      totalCriteria: criteria.length,
+      assessedCriteria,
+      percentage: Math.round((assessedCriteria / criteria.length) * 100),
+    },
+    evaluatedByActorId: input.evaluatedByActorId,
+    evaluatedAt: input.evaluatedAt,
+  };
+}
+
+export function decideInitiative(
+  input: Omit<
+    InitiativeDecision,
+    "coverage" | "standardId" | "standardVersion"
+  > & { evaluation: InitiativeEvaluation },
+): InitiativeDecision {
+  if (input.evaluation.initiativeId !== input.initiativeId)
+    throw new EvaluationDomainError("EVALUATION_DOES_NOT_MATCH_INITIATIVE");
+  if (input.evaluation.coverage.percentage !== 100)
+    throw new EvaluationDomainError("EVALUATION_INCOMPLETE");
+  return {
+    ...input,
+    standardId: input.evaluation.standardId,
+    standardVersion: input.evaluation.standardVersion,
+    coverage: input.evaluation.coverage,
+  };
+}
+
+export class EvaluationDomainError extends Error {
+  constructor(
+    public readonly code:
+      | "STANDARD_REQUIRES_CRITERIA"
+      | "DUPLICATE_CRITERION_CODE"
+      | "INVALID_CRITERION_WEIGHT"
+      | "INVALID_EVALUATION_CRITERIA"
+      | "EVALUATION_DOES_NOT_MATCH_INITIATIVE"
+      | "EVALUATION_INCOMPLETE",
+  ) {
+    super(code);
+  }
+}

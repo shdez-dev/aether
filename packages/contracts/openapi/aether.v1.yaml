@@ -285,6 +285,50 @@ paths:
           $ref: "#/components/responses/Problem"
         "403":
           $ref: "#/components/responses/Problem"
+  /v1/evaluation-standards:
+    post:
+      tags: [Initiatives]
+      operationId: publishEvaluationStandard
+      summary: Publicar un estándar de evaluación inmutable
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              { $ref: "#/components/schemas/PublishEvaluationStandardRequest" }
+      responses:
+        "201":
+          description: Estándar publicado sin alterar evaluaciones existentes.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EvaluationStandard" }
+        default: { $ref: "#/components/responses/Problem" }
+  /v1/evaluation-standards/{standardId}/activate:
+    post:
+      tags: [Initiatives]
+      operationId: activateEvaluationStandard
+      summary: Activar el estándar de referencia de una organización
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: standardId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              { $ref: "#/components/schemas/ActivateEvaluationStandardRequest" }
+      responses:
+        "204": { description: Estándar activado. }
+        default: { $ref: "#/components/responses/Problem" }
   /v1/initiatives:
     get:
       tags: [Initiatives]
@@ -436,10 +480,16 @@ paths:
             schema: { $ref: "#/components/schemas/StartReviewRequest" }
       responses:
         "200":
-          description: Iniciativa en revisión.
+          description: Evaluación registrada junto a la iniciativa en revisión.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Initiative" }
+              schema:
+                type: object
+                required: [evaluation, initiative]
+                properties:
+                  evaluation:
+                    { $ref: "#/components/schemas/InitiativeEvaluation" }
+                  initiative: { $ref: "#/components/schemas/Initiative" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
@@ -448,7 +498,7 @@ paths:
     post:
       tags: [Initiatives]
       operationId: decideInitiative
-      summary: Aprobar o rechazar una iniciativa en revisión
+      summary: Aprobar, rechazar, devolver o cancelar una iniciativa evaluada
       security: [{ cookieSession: [] }]
       parameters:
         - $ref: "#/components/parameters/InitiativeId"
@@ -465,7 +515,12 @@ paths:
           description: Decisión registrada.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Initiative" }
+              schema:
+                type: object
+                required: [decision, initiative]
+                properties:
+                  decision: { $ref: "#/components/schemas/InitiativeDecision" }
+                  initiative: { $ref: "#/components/schemas/Initiative" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
@@ -711,9 +766,24 @@ components:
     SubmitInitiativeRequest:
       type: object
       additionalProperties: false
-      required: [expectedVersion]
+      required: [expectedVersion, standardId, results]
       properties:
         expectedVersion: { type: integer, minimum: 0 }
+        standardId: { type: string, format: uuid }
+        results:
+          type: array
+          maxItems: 100
+          items:
+            type: object
+            required: [criterionId, assessment, evidence]
+            properties:
+              criterionId: { type: string, format: uuid }
+              assessment:
+                {
+                  type: [string, "null"],
+                  enum: [met, not_met, not_applicable, null],
+                }
+              evidence: { type: array, items: { type: string }, maxItems: 50 }
     UpdateInitiativeRequest:
       type: object
       additionalProperties: false
@@ -740,10 +810,126 @@ components:
     DecideInitiativeRequest:
       type: object
       additionalProperties: false
-      required: [expectedVersion, decision]
+      required: [expectedVersion, evaluationId, outcome, rationale, evidence]
       properties:
         expectedVersion: { type: integer, minimum: 0 }
-        decision: { type: string, enum: [approved, rejected] }
+        evaluationId: { type: string, format: uuid }
+        outcome:
+          { type: string, enum: [approved, rejected, returned, cancelled] }
+        rationale: { type: string, minLength: 1, maxLength: 10000 }
+        evidence: { type: array, items: { type: string }, maxItems: 50 }
+    EvaluationCriterion:
+      type: object
+      additionalProperties: false
+      required: [id, code, name, description, weight]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string, minLength: 1, maxLength: 64 }
+        name: { type: string, minLength: 1, maxLength: 255 }
+        description: { type: string, minLength: 1, maxLength: 2000 }
+        weight: { type: number, exclusiveMinimum: 0 }
+    PublishEvaluationStandardRequest:
+      type: object
+      additionalProperties: false
+      required: [organizationId, name, version, criteria]
+      properties:
+        organizationId: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 255 }
+        version: { type: integer, minimum: 1 }
+        criteria:
+          {
+            type: array,
+            minItems: 1,
+            maxItems: 100,
+            items: { $ref: "#/components/schemas/EvaluationCriterion" },
+          }
+    ActivateEvaluationStandardRequest:
+      type: object
+      additionalProperties: false
+      required: [organizationId]
+      properties:
+        organizationId: { type: string, format: uuid }
+    EvaluationStandard:
+      type: object
+      required:
+        [
+          id,
+          organizationId,
+          name,
+          version,
+          criteria,
+          isActive,
+          publishedAt,
+          publishedByActorId,
+        ]
+      properties:
+        id: { type: string, format: uuid }
+        organizationId: { type: string, format: uuid }
+        name: { type: string }
+        version: { type: integer }
+        criteria:
+          {
+            type: array,
+            items: { $ref: "#/components/schemas/EvaluationCriterion" },
+          }
+        isActive: { type: boolean }
+        publishedAt: { type: string, format: date-time }
+        publishedByActorId: { type: string }
+    InitiativeEvaluation:
+      type: object
+      required:
+        [
+          id,
+          initiativeId,
+          initiativeVersion,
+          standardId,
+          standardVersion,
+          coverage,
+          evaluatedByActorId,
+          evaluatedAt,
+        ]
+      properties:
+        id: { type: string, format: uuid }
+        initiativeId: { type: string, format: uuid }
+        initiativeVersion: { type: integer, minimum: 0 }
+        standardId: { type: string, format: uuid }
+        standardVersion: { type: integer, minimum: 1 }
+        coverage:
+          type: object
+          required: [totalCriteria, assessedCriteria, percentage]
+          properties:
+            totalCriteria: { type: integer }
+            assessedCriteria: { type: integer }
+            percentage: { type: integer, minimum: 0, maximum: 100 }
+        evaluatedByActorId: { type: string }
+        evaluatedAt: { type: string, format: date-time }
+    InitiativeDecision:
+      type: object
+      required:
+        [
+          id,
+          initiativeId,
+          evaluationId,
+          outcome,
+          rationale,
+          standardId,
+          standardVersion,
+          coverage,
+          decidedByActorId,
+          decidedAt,
+        ]
+      properties:
+        id: { type: string, format: uuid }
+        initiativeId: { type: string, format: uuid }
+        evaluationId: { type: string, format: uuid }
+        outcome:
+          { type: string, enum: [approved, rejected, returned, cancelled] }
+        rationale: { type: string }
+        standardId: { type: string, format: uuid }
+        standardVersion: { type: integer }
+        coverage: { type: object }
+        decidedByActorId: { type: string }
+        decidedAt: { type: string, format: date-time }
     Initiative:
       type: object
       required:
@@ -771,7 +957,16 @@ components:
         classification: { type: string, enum: [internal, confidential] }
         status:
           type: string
-          enum: [draft, presented, under_review, approved, rejected, withdrawn]
+          enum:
+            [
+              draft,
+              presented,
+              under_review,
+              returned,
+              approved,
+              rejected,
+              cancelled,
+            ]
         version: { type: integer, minimum: 0 }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
@@ -809,9 +1004,10 @@ components:
                 draft,
                 presented,
                 under_review,
+                returned,
                 approved,
                 rejected,
-                withdrawn,
+                cancelled,
                 null,
               ],
           }
@@ -823,9 +1019,10 @@ components:
                 draft,
                 presented,
                 under_review,
+                returned,
                 approved,
                 rejected,
-                withdrawn,
+                cancelled,
                 null,
               ],
           }

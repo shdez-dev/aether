@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 
-import { InitiativeService, TenantService } from "@aether/application";
+import {
+  EvaluationService,
+  InitiativeService,
+  TenantService,
+} from "@aether/application";
 import {
   AuthService,
   createAesGcmCipher,
@@ -12,6 +16,8 @@ import {
   PostgresAuthStore,
   PostgresInitiativeAuditStore,
   PostgresInitiativeStore,
+  PostgresEvaluationStandardStore,
+  PostgresEvaluationStore,
   PostgresTenantStore,
 } from "@aether/database";
 import { Pool } from "pg";
@@ -47,5 +53,20 @@ const initiatives = new InitiativeService({
   ids: { next: randomUUID },
   clock: { now: () => new Date() },
 });
-const app = await buildServer({ config, auth, tenants, initiatives });
+const evaluations = new EvaluationService({
+  standards: new PostgresEvaluationStandardStore(pool),
+  evaluations: new PostgresEvaluationStore(pool),
+  initiatives: new PostgresInitiativeStore(pool),
+  audit: new PostgresInitiativeAuditStore(pool),
+  tenancy: new PostgresTenantStore(pool),
+  ids: { next: randomUUID },
+  clock: { now: () => new Date() },
+});
+const app = await buildServer({
+  config,
+  auth,
+  tenants,
+  initiatives,
+  evaluations,
+});
 await app.listen({ port: config.port, host: "0.0.0.0" });

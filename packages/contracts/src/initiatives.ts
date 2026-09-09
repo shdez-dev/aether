@@ -6,9 +6,10 @@ export const InitiativeStatusSchema = z.enum([
   "draft",
   "presented",
   "under_review",
+  "returned",
   "approved",
   "rejected",
-  "withdrawn",
+  "cancelled",
 ]);
 
 export const CreateInitiativeDraftRequestSchema = z.object({
@@ -34,11 +35,41 @@ export const UpdateInitiativeRequestSchema = z.object({
 
 export const StartReviewRequestSchema = z.object({
   expectedVersion: z.number().int().nonnegative(),
+  standardId: UuidSchema,
+  results: z
+    .array(
+      z.object({
+        criterionId: UuidSchema,
+        assessment: z.enum(["met", "not_met", "not_applicable"]).nullable(),
+        evidence: z.array(NonEmptyTextSchema.max(2_000)).max(50),
+      }),
+    )
+    .max(100),
 });
 
 export const DecideInitiativeRequestSchema = z.object({
   expectedVersion: z.number().int().nonnegative(),
-  decision: z.enum(["approved", "rejected"]),
+  evaluationId: UuidSchema,
+  outcome: z.enum(["approved", "rejected", "returned", "cancelled"]),
+  rationale: NonEmptyTextSchema.max(10_000),
+  evidence: z.array(NonEmptyTextSchema.max(2_000)).max(50),
+});
+
+export const EvaluationCriterionInputSchema = z.object({
+  id: UuidSchema,
+  code: z.string().min(1).max(64),
+  name: NonEmptyTextSchema.max(255),
+  description: NonEmptyTextSchema.max(2_000),
+  weight: z.number().positive().max(1_000),
+});
+export const PublishEvaluationStandardRequestSchema = z.object({
+  organizationId: UuidSchema,
+  name: NonEmptyTextSchema.max(255),
+  version: z.number().int().positive(),
+  criteria: z.array(EvaluationCriterionInputSchema).min(1).max(100),
+});
+export const ActivateEvaluationStandardRequestSchema = z.object({
+  organizationId: UuidSchema,
 });
 
 export const InitiativeActionSchema = z.enum([
@@ -76,6 +107,30 @@ export const InitiativeAuditEventSchema = z.object({
   toStatus: InitiativeStatusSchema.nullable(),
   payload: z.record(z.string(), z.unknown()),
 });
+export const EvaluationStandardResponseSchema = z.object({
+  id: UuidSchema,
+  organizationId: UuidSchema,
+  name: z.string(),
+  version: z.number().int().positive(),
+  criteria: z.array(EvaluationCriterionInputSchema),
+  isActive: z.boolean(),
+  publishedAt: z.string().datetime(),
+  publishedByActorId: z.string(),
+});
+export const InitiativeEvaluationResponseSchema = z.object({
+  id: UuidSchema,
+  initiativeId: UuidSchema,
+  initiativeVersion: z.number().int().nonnegative(),
+  standardId: UuidSchema,
+  standardVersion: z.number().int().positive(),
+  coverage: z.object({
+    totalCriteria: z.number().int(),
+    assessedCriteria: z.number().int(),
+    percentage: z.number().int(),
+  }),
+  evaluatedByActorId: z.string(),
+  evaluatedAt: z.string().datetime(),
+});
 
 export type CreateInitiativeDraftRequest = z.infer<
   typeof CreateInitiativeDraftRequestSchema
@@ -89,6 +144,9 @@ export type UpdateInitiativeRequest = z.infer<
 export type StartReviewRequest = z.infer<typeof StartReviewRequestSchema>;
 export type DecideInitiativeRequest = z.infer<
   typeof DecideInitiativeRequestSchema
+>;
+export type PublishEvaluationStandardRequest = z.infer<
+  typeof PublishEvaluationStandardRequestSchema
 >;
 export type InitiativeResponse = z.infer<typeof InitiativeResponseSchema>;
 export type InitiativeAuditEvent = z.infer<typeof InitiativeAuditEventSchema>;

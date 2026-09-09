@@ -8,8 +8,14 @@ import {
   type LoginTransaction,
   type OidcProvider,
 } from "@aether/auth";
-import { InitiativeService, TenantService } from "@aether/application";
 import {
+  EvaluationService,
+  InitiativeService,
+  TenantService,
+} from "@aether/application";
+import {
+  InMemoryEvaluationStandardStore,
+  InMemoryEvaluationStore,
   InMemoryInitiativeAuditStore,
   InMemoryInitiativeStore,
   InMemoryTenantStore,
@@ -136,6 +142,7 @@ describe("HTTP authentication boundary", () => {
       auth,
       tenants,
       initiatives: {} as InitiativeService,
+      evaluations: {} as EvaluationService,
     });
     const login = await app.inject({ method: "GET", url: "/auth/login" });
     const loginCookies = responseCookies(login);
@@ -210,9 +217,20 @@ describe("HTTP authentication boundary", () => {
       },
       clock: { now: () => new Date() },
     });
+    const initiativeStore = new InMemoryInitiativeStore();
+    const auditStore = new InMemoryInitiativeAuditStore();
     const initiatives = new InitiativeService({
-      store: new InMemoryInitiativeStore(),
-      audit: new InMemoryInitiativeAuditStore(),
+      store: initiativeStore,
+      audit: auditStore,
+      tenancy: tenancyStore,
+      ids: { next: () => crypto.randomUUID() },
+      clock: { now: () => new Date() },
+    });
+    const evaluations = new EvaluationService({
+      standards: new InMemoryEvaluationStandardStore(),
+      evaluations: new InMemoryEvaluationStore(),
+      initiatives: initiativeStore,
+      audit: auditStore,
       tenancy: tenancyStore,
       ids: { next: () => crypto.randomUUID() },
       clock: { now: () => new Date() },
@@ -225,7 +243,13 @@ describe("HTTP authentication boundary", () => {
       sessionTtlSeconds: 3600,
       sessionRenewalWindowSeconds: 600,
     });
-    const app = await buildServer({ config, auth, tenants, initiatives });
+    const app = await buildServer({
+      config,
+      auth,
+      tenants,
+      initiatives,
+      evaluations,
+    });
     const login = await app.inject({ method: "GET", url: "/auth/login" });
     const state = new URL(login.headers.location!).searchParams.get("state")!;
     const callback = await app.inject({
@@ -307,24 +331,74 @@ describe("HTTP authentication boundary", () => {
     };
     expect(presented.status).toBe("presented");
 
+    const standardResponse = await app.inject({
+      method: "POST",
+      url: "/v1/evaluation-standards",
+      headers,
+      payload: {
+        organizationId: organization.id,
+        name: "Estándar inicial",
+        version: 1,
+        criteria: [
+          {
+            id: crypto.randomUUID(),
+            code: "IMPACT",
+            name: "Impacto",
+            description: "La iniciativa demuestra un impacto institucional.",
+            weight: 1,
+          },
+        ],
+      },
+    });
+    expect(standardResponse.statusCode).toBe(201);
+    const standard = standardResponse.json() as {
+      id: string;
+      criteria: { id: string }[];
+    };
+    const activated = await app.inject({
+      method: "POST",
+      url: `/v1/evaluation-standards/${standard.id}/activate`,
+      headers,
+      payload: { organizationId: organization.id },
+    });
+    expect(activated.statusCode).toBe(204);
+
     const reviewResponse = await app.inject({
       method: "POST",
       url: `/v1/initiatives/${created.id}/review?organizationId=${organization.id}`,
       headers,
-      payload: { expectedVersion: presented.version },
+      payload: {
+        expectedVersion: presented.version,
+        standardId: standard.id,
+        results: [
+          {
+            criterionId: standard.criteria[0]!.id,
+            assessment: "met",
+            evidence: ["Indicador de espera validado."],
+          },
+        ],
+      },
     });
     expect(reviewResponse.statusCode).toBe(200);
-    const underReview = reviewResponse.json() as { version: number };
+    const review = reviewResponse.json() as {
+      evaluation: { id: string };
+      initiative: { version: number };
+    };
     const decisionResponse = await app.inject({
       method: "POST",
       url: `/v1/initiatives/${created.id}/decide?organizationId=${organization.id}`,
       headers,
-      payload: { expectedVersion: underReview.version, decision: "approved" },
+      payload: {
+        expectedVersion: review.initiative.version,
+        evaluationId: review.evaluation.id,
+        outcome: "approved",
+        rationale: "Impacto y evidencia suficientes.",
+        evidence: ["Acta de comité."],
+      },
     });
     expect(decisionResponse.statusCode).toBe(200);
     expect(decisionResponse.json()).toMatchObject({
-      status: "approved",
-      allowedActions: [],
+      initiative: { status: "approved", allowedActions: [] },
     });
     const auditResponse = await app.inject({
       method: "GET",
@@ -337,8 +411,8 @@ describe("HTTP authentication boundary", () => {
         expect.objectContaining({ eventType: "initiative.created.v1" }),
         expect.objectContaining({ eventType: "initiative.edited.v1" }),
         expect.objectContaining({ eventType: "initiative.presented.v1" }),
-        expect.objectContaining({ eventType: "initiative.review_started.v1" }),
-        expect.objectContaining({ eventType: "initiative.decided.v1" }),
+        expect.objectContaining({ eventType: "initiative.evaluated.v1" }),
+        expect.objectContaining({ eventType: "initiative.decided.v2" }),
       ]),
     );
     await app.close();

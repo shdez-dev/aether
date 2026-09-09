@@ -6,7 +6,8 @@ const statusLabels: Record<InitiativeResponse["status"], string> = {
   under_review: "En revisión",
   approved: "Aprobada",
   rejected: "Rechazada",
-  withdrawn: "Retirada",
+  returned: "Devuelta",
+  cancelled: "Cancelada",
 };
 
 export function initiativeStatusLabel(
