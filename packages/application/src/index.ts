@@ -5,6 +5,7 @@ export * from "./initiatives.js";
 export * from "./evaluations.js";
 export * from "./projects.js";
 export * from "./outbox.js";
+export * from "./auditing.js";
 
 export interface RequestMetadata {
   readonly actorId: string;

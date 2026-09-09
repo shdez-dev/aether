@@ -1,6 +1,9 @@
 import type {
   EvaluationStandardStore,
   EvaluationStore,
+  AuditEvent,
+  AuditHistoryStore,
+  AuditResourceType,
   InitiativeAuditEvent,
   InitiativeAuditStore,
   InitiativeStore,
@@ -56,6 +59,78 @@ export class InMemoryInitiativeAuditStore implements InitiativeAuditStore {
         event.initiativeId === input.initiativeId,
     );
   }
+}
+
+export class InMemoryAuditHistoryStore implements AuditHistoryStore {
+  constructor(
+    private readonly initiativeAudit: InMemoryInitiativeAuditStore,
+    private readonly projectAudit?: {
+      events: readonly import("@aether/application").ProjectAuditEvent[];
+    },
+  ) {}
+  async list(input: {
+    organizationId: string;
+    resourceType: AuditResourceType;
+    resourceId: string;
+  }): Promise<readonly AuditEvent[]> {
+    const initiativeEvents = this.initiativeAudit.events.map((event) => {
+      const evaluationId = stringPayload(event.payload, "evaluationId");
+      const decisionId = stringPayload(event.payload, "decisionId");
+      const resourceType: AuditResourceType = decisionId
+        ? "decision"
+        : evaluationId
+          ? "evaluation"
+          : "initiative";
+      return {
+        id: event.id,
+        action: event.eventType,
+        resourceType,
+        resourceId: decisionId ?? evaluationId ?? event.initiativeId,
+        actorId: event.actorId,
+        organizationId: event.organizationId,
+        workspaceId: event.workspaceId,
+        occurredAt: event.occurredAt,
+        result: "succeeded" as const,
+        correlationId: event.correlationId,
+        causationId: null,
+        asyncEventId: null,
+        payload: event.payload,
+      };
+    });
+    const projectEvents = (this.projectAudit?.events ?? []).map((event) => ({
+      id: event.id,
+      action: event.eventType,
+      resourceType: "project" as const,
+      resourceId: event.projectId,
+      actorId: event.actorId,
+      organizationId: event.organizationId,
+      workspaceId: event.workspaceId,
+      occurredAt: event.occurredAt,
+      result: "succeeded" as const,
+      correlationId: event.correlationId,
+      causationId: null,
+      asyncEventId: null,
+      payload: event.payload,
+    }));
+    return [...initiativeEvents, ...projectEvents]
+      .filter(
+        (event) =>
+          event.organizationId === input.organizationId &&
+          event.resourceType === input.resourceType &&
+          event.resourceId === input.resourceId,
+      )
+      .sort(
+        (left, right) => left.occurredAt.getTime() - right.occurredAt.getTime(),
+      );
+  }
+}
+
+function stringPayload(
+  payload: Readonly<Record<string, unknown>>,
+  key: string,
+): string | null {
+  const value = payload[key];
+  return typeof value === "string" ? value : null;
 }
 
 export class InMemoryEvaluationStandardStore implements EvaluationStandardStore {

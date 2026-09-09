@@ -12,6 +12,8 @@ import type {
   OutboxStore,
   OutboxMessage,
   DurableDomainEvent,
+  AuditEvent,
+  AuditHistoryStore,
   Invitation,
   Organization,
   TenantStore,
@@ -724,6 +726,24 @@ export class PostgresProjectAuditStore implements ProjectAuditStore {
   }
 }
 
+export class PostgresAuditHistoryStore implements AuditHistoryStore {
+  constructor(private readonly pool: Pool) {}
+  async list(input: {
+    organizationId: string;
+    resourceType: import("@aether/application").AuditResourceType;
+    resourceId: string;
+  }): Promise<readonly AuditEvent[]> {
+    const result = await this.pool.query<AuditRow>(
+      `SELECT id, action, resource_type, resource_id, actor_id, organization_id, workspace_id, occurred_at, result, correlation_id, causation_id, async_event_id, payload
+       FROM audit_events
+       WHERE organization_id = $1 AND resource_type = $2 AND resource_id = $3
+       ORDER BY occurred_at ASC, id ASC`,
+      [input.organizationId, input.resourceType, input.resourceId],
+    );
+    return result.rows.map(toAuditEvent);
+  }
+}
+
 export class PostgresOutboxStore implements OutboxStore {
   constructor(private readonly pool: Pool) {}
   async claim(input: {
@@ -948,6 +968,21 @@ type ProjectAuditRow = {
   occurred_at: Date;
   payload: Record<string, unknown>;
 };
+type AuditRow = {
+  id: string;
+  action: string;
+  resource_type: import("@aether/application").AuditResourceType;
+  resource_id: string;
+  actor_id: string;
+  organization_id: string;
+  workspace_id: string;
+  occurred_at: Date;
+  result: AuditEvent["result"];
+  correlation_id: string;
+  causation_id: string | null;
+  async_event_id: string | null;
+  payload: Record<string, unknown>;
+};
 type OutboxRow = {
   event_id: string;
   event_type: string;
@@ -1040,6 +1075,23 @@ function toProjectAuditEvent(row: ProjectAuditRow): ProjectAuditEvent {
     actorId: row.actor_id,
     correlationId: row.correlation_id,
     occurredAt: row.occurred_at,
+    payload: row.payload,
+  };
+}
+function toAuditEvent(row: AuditRow): AuditEvent {
+  return {
+    id: row.id,
+    action: row.action,
+    resourceType: row.resource_type,
+    resourceId: row.resource_id,
+    actorId: row.actor_id,
+    organizationId: row.organization_id,
+    workspaceId: row.workspace_id,
+    occurredAt: row.occurred_at,
+    result: row.result,
+    correlationId: row.correlation_id,
+    causationId: row.causation_id,
+    asyncEventId: row.async_event_id,
     payload: row.payload,
   };
 }

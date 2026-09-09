@@ -10,6 +10,7 @@ import {
 } from "@aether/auth";
 import {
   EvaluationService,
+  AuditHistoryService,
   InitiativeService,
   ProjectService,
   TenantService,
@@ -18,6 +19,7 @@ import {
   InMemoryEvaluationStandardStore,
   InMemoryEvaluationStore,
   InMemoryInitiativeAuditStore,
+  InMemoryAuditHistoryStore,
   InMemoryInitiativeStore,
   InMemoryTenantStore,
 } from "@aether/testkit";
@@ -221,6 +223,10 @@ describe("HTTP authentication boundary", () => {
     });
     const initiativeStore = new InMemoryInitiativeStore();
     const auditStore = new InMemoryInitiativeAuditStore();
+    const auditHistory = new AuditHistoryService({
+      store: new InMemoryAuditHistoryStore(auditStore),
+      tenancy: tenancyStore,
+    });
     const initiatives = new InitiativeService({
       store: initiativeStore,
       audit: auditStore,
@@ -252,6 +258,7 @@ describe("HTTP authentication boundary", () => {
       initiatives,
       evaluations,
       projects: {} as ProjectService,
+      auditHistory,
     });
     const login = await app.inject({ method: "GET", url: "/auth/login" });
     const state = new URL(login.headers.location!).searchParams.get("state")!;
@@ -400,7 +407,8 @@ describe("HTTP authentication boundary", () => {
       },
     });
     expect(decisionResponse.statusCode).toBe(200);
-    expect(decisionResponse.json()).toMatchObject({
+    const decision = decisionResponse.json() as { decision: { id: string } };
+    expect(decision).toMatchObject({
       initiative: { status: "approved", allowedActions: [] },
     });
     const auditResponse = await app.inject({
@@ -418,6 +426,27 @@ describe("HTTP authentication boundary", () => {
         expect.objectContaining({ eventType: "initiative.decided.v2" }),
       ]),
     );
+    for (const [resourceType, resourceId, action] of [
+      ["initiative", created.id, "initiative.created.v1"],
+      ["evaluation", review.evaluation.id, "initiative.evaluated.v1"],
+      ["decision", decision.decision.id, "initiative.decided.v2"],
+    ] as const) {
+      const history = await app.inject({
+        method: "GET",
+        url: `/v1/audit-events?organizationId=${organization.id}&resourceType=${resourceType}&resourceId=${resourceId}`,
+        headers: { cookie: headers.cookie },
+      });
+      expect(history.statusCode).toBe(200);
+      expect(history.json()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            action,
+            actorId: "actor-123",
+            result: "succeeded",
+          }),
+        ]),
+      );
+    }
     await app.close();
   });
 });

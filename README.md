@@ -47,3 +47,4 @@ La primera rebanada vertical será: invitación, sesión segura, organización, 
 - [Evaluación y decisión institucional](docs/architecture/evaluation-and-decision.md)
 - [Proyecto y ejecución](docs/architecture/project-execution.md)
 - [Outbox y trabajos asíncronos](docs/architecture/outbox-and-worker.md)
+- [Auditoría y trazabilidad](docs/architecture/audit-and-traceability.md)

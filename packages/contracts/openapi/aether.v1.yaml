@@ -667,9 +667,15 @@ paths:
       security: [{ cookieSession: [] }]
       parameters:
         - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/OrganizationContextId"
+        - name: resourceType
+          in: query
+          required: true
+          schema:
+            { type: string, enum: [initiative, evaluation, decision, project] }
         - name: resourceId
           in: query
-          required: false
+          required: true
           schema:
             type: string
             format: uuid
@@ -684,7 +690,7 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: "#/components/schemas/AuditEvent"
+                  $ref: "#/components/schemas/AuditHistoryEvent"
         "401":
           $ref: "#/components/responses/Problem"
         default:
@@ -1267,6 +1273,37 @@ components:
         correlationId: { type: string, format: uuid }
         causationId: { type: string, format: uuid }
         schemaVersion: { type: integer, minimum: 1 }
+        payload: { type: object, additionalProperties: true }
+    AuditHistoryEvent:
+      type: object
+      required:
+        [
+          id,
+          action,
+          resourceType,
+          resourceId,
+          actorId,
+          organizationId,
+          workspaceId,
+          occurredAt,
+          result,
+          correlationId,
+          payload,
+        ]
+      properties:
+        id: { type: string, format: uuid }
+        action: { type: string, example: initiative.presented.v1 }
+        resourceType:
+          { type: string, enum: [initiative, evaluation, decision, project] }
+        resourceId: { type: string, format: uuid }
+        actorId: { type: string }
+        organizationId: { type: string, format: uuid }
+        workspaceId: { type: string, format: uuid }
+        occurredAt: { type: string, format: date-time }
+        result: { type: string, enum: [succeeded, failed] }
+        correlationId: { type: string, format: uuid }
+        causationId: { type: [string, "null"], format: uuid }
+        asyncEventId: { type: [string, "null"], format: uuid }
         payload: { type: object, additionalProperties: true }
     Session:
       type: object

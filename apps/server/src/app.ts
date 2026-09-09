@@ -3,6 +3,7 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 import { AuthService } from "@aether/auth";
 import {
   AccessDeniedError,
+  AuditHistoryService,
   InitiativeDomainError,
   InitiativeService,
   InitiativeVersionConflictError,
@@ -21,6 +22,7 @@ import {
   CreateWorkspaceRequestSchema,
   DecideInitiativeRequestSchema,
   ActivateEvaluationStandardRequestSchema,
+  AuditHistoryQuerySchema,
   AddProjectMilestoneRequestSchema,
   AddProjectNextActionRequestSchema,
   ChangeProjectStatusRequestSchema,
@@ -56,6 +58,7 @@ export async function buildServer(input: {
   initiatives: InitiativeService;
   evaluations: EvaluationService;
   projects: ProjectService;
+  auditHistory?: AuditHistoryService;
 }): Promise<FastifyInstance> {
   const app = Fastify({
     logger: input.config.nodeEnv !== "test",
@@ -657,6 +660,24 @@ export async function buildServer(input: {
       }));
     },
   );
+  app.get("/v1/audit-events", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    if (!input.auditHistory) throw new Error("Audit history is not configured");
+    const query = AuditHistoryQuerySchema.parse(request.query);
+    const events = await input.auditHistory.history({
+      actorId: session.actorId,
+      ...query,
+    });
+    return events.map((event) => ({
+      ...event,
+      occurredAt: event.occurredAt.toISOString(),
+    }));
+  });
   return app;
 }
 

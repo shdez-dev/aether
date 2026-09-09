@@ -8,7 +8,9 @@ import {
 import { createInitiative, transitionInitiative } from "@aether/domain";
 
 import {
+  InMemoryAuditHistoryStore,
   InMemoryEvaluationStore,
+  InMemoryInitiativeAuditStore,
   InMemoryInitiativeStore,
 } from "./initiatives.js";
 import {
@@ -175,6 +177,20 @@ describe("project conversion and execution", () => {
     expect(projectStore.durableEvents.map((event) => event.eventType)).toEqual([
       "project.created.v1",
       "project.status_changed.v1",
+    ]);
+    const projectHistory = await new InMemoryAuditHistoryStore(
+      new InMemoryInitiativeAuditStore(),
+      audit,
+    ).list({
+      organizationId: organization.id,
+      resourceType: "project",
+      resourceId: project.id,
+    });
+    expect(projectHistory.map((event) => event.action)).toEqual([
+      "project.created_from_initiative.v1",
+      "project.status_changed.v1",
+      "project.milestone_added.v1",
+      "project.next_action_added.v1",
     ]);
     expect(audit.events.map((event) => event.eventType)).toEqual([
       "project.created_from_initiative.v1",
