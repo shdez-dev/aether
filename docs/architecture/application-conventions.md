@@ -18,4 +18,4 @@ Cada caso de uso implementa `CommandHandler` o `QueryHandler` y vive en `package
 
 Un puerto expresa una necesidad de aplicación: `InitiativeRepository`, `UnitOfWork`, `DomainEventPublisher`, `Clock` o `IdGenerator`. Vive junto al caso de uso y termina en `Port`. Un adaptador implementa ese puerto y describe su tecnología: `PostgresInitiativeRepository`, `PostgresUnitOfWork` o `S3ObjectStore`.
 
-Los puertos no aceptan ni devuelven objetos del ORM. Las operaciones que deben ser atómicas reciben la misma transacción desde aplicación; ningún adaptador abre una segunda conexión por su cuenta.
+Los puertos no aceptan ni devuelven objetos del ORM. Las operaciones atómicas declaran esa intención en el puerto; el adaptador puede ejecutar una única transacción para persistir el agregado y su evento de outbox, sin abrir conexiones adicionales dentro de esa operación.

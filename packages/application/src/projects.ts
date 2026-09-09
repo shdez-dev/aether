@@ -16,6 +16,7 @@ import {
   type TenantStore,
 } from "./tenancy.js";
 import type { InitiativeStore } from "./initiatives.js";
+import type { DurableDomainEvent } from "./outbox.js";
 
 export type ProjectAuditEvent = Readonly<{
   id: string;
@@ -33,6 +34,15 @@ export interface ProjectStore {
   findById(projectId: string): Promise<Project | null>;
   findByInitiative(initiativeId: string): Promise<Project | null>;
   save(input: { project: Project; expectedVersion: number }): Promise<boolean>;
+  createWithEvent?(input: {
+    project: Project;
+    event: DurableDomainEvent;
+  }): Promise<void>;
+  saveWithEvent?(input: {
+    project: Project;
+    expectedVersion: number;
+    event: DurableDomainEvent;
+  }): Promise<boolean>;
 }
 export interface ProjectExecutionStore {
   addMilestone(milestone: ProjectMilestone): Promise<void>;
@@ -118,7 +128,15 @@ export class ProjectService {
       createdAt: now,
       updatedAt: now,
     });
-    await this.dependencies.projects.create(project);
+    const event = this.eventFor(
+      project,
+      input.correlationId,
+      "project.created.v1",
+      { initiativeId: initiative.id, decisionId: decision.id },
+    );
+    if (this.dependencies.projects.createWithEvent)
+      await this.dependencies.projects.createWithEvent({ project, event });
+    else await this.dependencies.projects.create(project);
     await this.record(
       project,
       input.actorId,
@@ -153,13 +171,23 @@ export class ProjectService {
       input.status,
       this.dependencies.clock.now(),
     );
-    if (
-      !(await this.dependencies.projects.save({
-        project: updated,
-        expectedVersion: project.version,
-      }))
-    )
-      throw new ProjectVersionConflictError();
+    const event = this.eventFor(
+      updated,
+      input.correlationId,
+      "project.status_changed.v1",
+      { fromStatus: project.status, toStatus: updated.status },
+    );
+    const saved = this.dependencies.projects.saveWithEvent
+      ? await this.dependencies.projects.saveWithEvent({
+          project: updated,
+          expectedVersion: project.version,
+          event,
+        })
+      : await this.dependencies.projects.save({
+          project: updated,
+          expectedVersion: project.version,
+        });
+    if (!saved) throw new ProjectVersionConflictError();
     await this.record(
       updated,
       input.actorId,
@@ -313,6 +341,26 @@ export class ProjectService {
       occurredAt: this.dependencies.clock.now(),
       payload,
     });
+  }
+  private eventFor(
+    project: Project,
+    correlationId: string,
+    eventType: string,
+    payload: Record<string, unknown>,
+  ): DurableDomainEvent {
+    return {
+      eventId: this.dependencies.ids.next(),
+      eventType,
+      occurredAt: this.dependencies.clock.now(),
+      aggregateId: project.id,
+      aggregateType: "project",
+      aggregateVersion: project.version,
+      organizationId: project.organizationId,
+      correlationId,
+      causationId: null,
+      schemaVersion: 1,
+      payload,
+    };
   }
 }
 export class ProjectVersionConflictError extends Error {

@@ -172,6 +172,10 @@ describe("project conversion and execution", () => {
     expect(active.status).toBe("active");
     expect(execution.milestones).toHaveLength(1);
     expect(execution.actions).toHaveLength(1);
+    expect(projectStore.durableEvents.map((event) => event.eventType)).toEqual([
+      "project.created.v1",
+      "project.status_changed.v1",
+    ]);
     expect(audit.events.map((event) => event.eventType)).toEqual([
       "project.created_from_initiative.v1",
       "project.status_changed.v1",

@@ -3,6 +3,7 @@ import type {
   ProjectAuditStore,
   ProjectExecutionStore,
   ProjectStore,
+  DurableDomainEvent,
 } from "@aether/application";
 import type {
   Project,
@@ -12,6 +13,7 @@ import type {
 
 export class InMemoryProjectStore implements ProjectStore {
   readonly projects = new Map<string, Project>();
+  readonly durableEvents: DurableDomainEvent[] = [];
   async create(project: Project): Promise<void> {
     this.projects.set(project.id, project);
   }
@@ -33,6 +35,22 @@ export class InMemoryProjectStore implements ProjectStore {
     if (!current || current.version !== input.expectedVersion) return false;
     this.projects.set(input.project.id, input.project);
     return true;
+  }
+  async createWithEvent(input: {
+    project: Project;
+    event: DurableDomainEvent;
+  }): Promise<void> {
+    this.projects.set(input.project.id, input.project);
+    this.durableEvents.push(input.event);
+  }
+  async saveWithEvent(input: {
+    project: Project;
+    expectedVersion: number;
+    event: DurableDomainEvent;
+  }): Promise<boolean> {
+    const saved = await this.save(input);
+    if (saved) this.durableEvents.push(input.event);
+    return saved;
   }
 }
 export class InMemoryProjectExecutionStore implements ProjectExecutionStore {

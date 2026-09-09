@@ -2,11 +2,17 @@
   "name": "@aether/worker",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
-    "dev": "echo Worker app pending bootstrap",
-    "build": "echo Worker app pending bootstrap",
-    "lint": "echo Worker lint pending bootstrap",
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc --noEmit",
+    "lint": "prettier --check src",
     "typecheck": "tsc --noEmit",
-    "test": "echo Worker tests pending bootstrap"
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aether/application": "workspace:*",
+    "@aether/database": "workspace:*",
+    "pg": "^8.0.0"
   }
 }

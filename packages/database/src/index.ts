@@ -9,6 +9,9 @@ import type {
   ProjectAuditStore,
   ProjectExecutionStore,
   ProjectStore,
+  OutboxStore,
+  OutboxMessage,
+  DurableDomainEvent,
   Invitation,
   Organization,
   TenantStore,
@@ -27,7 +30,7 @@ import type {
   OrganizationRole,
   WorkspaceRole,
 } from "@aether/domain";
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 
 /** Adaptador PostgreSQL para transacciones OIDC y sesiones opacas. */
 export class PostgresAuthStore implements AuthStore {
@@ -582,6 +585,23 @@ export class PostgresProjectStore implements ProjectStore {
       ],
     );
   }
+  async createWithEvent(input: {
+    project: Project;
+    event: DurableDomainEvent;
+  }): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await insertProject(client, input.project);
+      await insertOutboxEvent(client, input.event);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
   async findById(projectId: string): Promise<Project | null> {
     const result = await this.pool.query<ProjectRow>(
       `SELECT id, organization_id, workspace_id, source_initiative_id, source_decision_id, name, sponsor_actor_id, lead_actor_id, participants, status, version, created_at, updated_at FROM projects WHERE id = $1`,
@@ -611,6 +631,35 @@ export class PostgresProjectStore implements ProjectStore {
       ],
     );
     return result.rowCount === 1;
+  }
+  async saveWithEvent(input: {
+    project: Project;
+    expectedVersion: number;
+    event: DurableDomainEvent;
+  }): Promise<boolean> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await client.query(
+        `UPDATE projects SET status = $2, version = $3, updated_at = $4 WHERE id = $1 AND version = $5`,
+        [
+          input.project.id,
+          input.project.status,
+          input.project.version,
+          input.project.updatedAt,
+          input.expectedVersion,
+        ],
+      );
+      if ((result.rowCount ?? 0) === 1)
+        await insertOutboxEvent(client, input.event);
+      await client.query("COMMIT");
+      return (result.rowCount ?? 0) === 1;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 }
 export class PostgresProjectExecutionStore implements ProjectExecutionStore {
@@ -672,6 +721,107 @@ export class PostgresProjectAuditStore implements ProjectAuditStore {
       [input.organizationId, input.projectId],
     );
     return result.rows.map(toProjectAuditEvent);
+  }
+}
+
+export class PostgresOutboxStore implements OutboxStore {
+  constructor(private readonly pool: Pool) {}
+  async claim(input: {
+    workerId: string;
+    limit: number;
+    now: Date;
+    lockExpiredBefore: Date;
+  }): Promise<readonly OutboxMessage[]> {
+    const result = await this.pool.query<OutboxRow>(
+      `WITH candidates AS (
+         SELECT event_id FROM outbox_events
+         WHERE (status = 'pending' AND available_at <= $1)
+            OR (status = 'processing' AND locked_at < $2)
+         ORDER BY occurred_at ASC LIMIT $3 FOR UPDATE SKIP LOCKED
+       )
+       UPDATE outbox_events AS events SET status = 'processing', attempts = attempts + 1, locked_at = $1, locked_by = $4
+       FROM candidates WHERE events.event_id = candidates.event_id
+       RETURNING events.*`,
+      [input.now, input.lockExpiredBefore, input.limit, input.workerId],
+    );
+    return result.rows.map(toOutboxMessage);
+  }
+  async markProcessed(input: {
+    eventId: string;
+    workerId: string;
+    processedAt: Date;
+  }): Promise<void> {
+    await this.pool.query(
+      `UPDATE outbox_events SET status = 'processed', processed_at = $3, locked_at = NULL, locked_by = NULL WHERE event_id = $1 AND locked_by = $2`,
+      [input.eventId, input.workerId, input.processedAt],
+    );
+  }
+  async scheduleRetry(input: {
+    eventId: string;
+    workerId: string;
+    availableAt: Date;
+    error: string;
+  }): Promise<void> {
+    await this.pool.query(
+      `UPDATE outbox_events SET status = 'pending', available_at = $3, last_error = $4, locked_at = NULL, locked_by = NULL WHERE event_id = $1 AND locked_by = $2`,
+      [input.eventId, input.workerId, input.availableAt, input.error],
+    );
+  }
+  async deadLetter(input: {
+    eventId: string;
+    workerId: string;
+    failedAt: Date;
+    error: string;
+  }): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await client.query<OutboxRow>(
+        `UPDATE outbox_events SET status = 'dead_letter', last_error = $3, locked_at = NULL, locked_by = NULL WHERE event_id = $1 AND locked_by = $2 RETURNING *`,
+        [input.eventId, input.workerId, input.error],
+      );
+      const event = result.rows[0];
+      if (event)
+        await client.query(
+          `INSERT INTO outbox_dead_letters (event_id, event_type, organization_id, attempts, failed_at, last_error, payload) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (event_id) DO NOTHING`,
+          [
+            event.event_id,
+            event.event_type,
+            event.organization_id,
+            event.attempts,
+            input.failedAt,
+            input.error,
+            event.payload,
+          ],
+        );
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+  async hasConsumption(input: {
+    consumer: string;
+    eventId: string;
+  }): Promise<boolean> {
+    const result = await this.pool.query(
+      `SELECT 1 FROM outbox_consumptions WHERE consumer = $1 AND event_id = $2`,
+      [input.consumer, input.eventId],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+  async recordConsumption(input: {
+    consumer: string;
+    eventId: string;
+    processedAt: Date;
+  }): Promise<boolean> {
+    const result = await this.pool.query(
+      `INSERT INTO outbox_consumptions (consumer, event_id, processed_at) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
+      [input.consumer, input.eventId, input.processedAt],
+    );
+    return (result.rowCount ?? 0) === 1;
   }
 }
 
@@ -798,6 +948,25 @@ type ProjectAuditRow = {
   occurred_at: Date;
   payload: Record<string, unknown>;
 };
+type OutboxRow = {
+  event_id: string;
+  event_type: string;
+  occurred_at: Date;
+  aggregate_id: string;
+  aggregate_type: string;
+  aggregate_version: number;
+  organization_id: string;
+  correlation_id: string;
+  causation_id: string | null;
+  schema_version: number;
+  payload: Record<string, unknown>;
+  status: OutboxMessage["status"];
+  attempts: number;
+  available_at: Date;
+  locked_at: Date | null;
+  locked_by: string | null;
+  last_error: string | null;
+};
 function toEvaluationStandard(row: EvaluationStandardRow): EvaluationStandard {
   return {
     id: row.id,
@@ -873,4 +1042,71 @@ function toProjectAuditEvent(row: ProjectAuditRow): ProjectAuditEvent {
     occurredAt: row.occurred_at,
     payload: row.payload,
   };
+}
+function toOutboxMessage(row: OutboxRow): OutboxMessage {
+  return {
+    eventId: row.event_id,
+    eventType: row.event_type,
+    occurredAt: row.occurred_at,
+    aggregateId: row.aggregate_id,
+    aggregateType: row.aggregate_type,
+    aggregateVersion: row.aggregate_version,
+    organizationId: row.organization_id,
+    correlationId: row.correlation_id,
+    causationId: row.causation_id,
+    schemaVersion: row.schema_version,
+    payload: row.payload,
+    status: row.status,
+    attempts: row.attempts,
+    availableAt: row.available_at,
+    lockedAt: row.locked_at,
+    lockedBy: row.locked_by,
+    lastError: row.last_error,
+  };
+}
+async function insertProject(
+  client: PoolClient,
+  project: Project,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO projects (id, organization_id, workspace_id, source_initiative_id, source_decision_id, name, sponsor_actor_id, lead_actor_id, participants, status, version, created_at, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+    [
+      project.id,
+      project.organizationId,
+      project.workspaceId,
+      project.sourceInitiativeId,
+      project.sourceDecisionId,
+      project.name,
+      project.sponsorActorId,
+      project.leadActorId,
+      project.participants,
+      project.status,
+      project.version,
+      project.createdAt,
+      project.updatedAt,
+    ],
+  );
+}
+async function insertOutboxEvent(
+  client: PoolClient,
+  event: DurableDomainEvent,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO outbox_events (event_id, event_type, occurred_at, aggregate_id, aggregate_type, aggregate_version, organization_id, correlation_id, causation_id, schema_version, payload)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+    [
+      event.eventId,
+      event.eventType,
+      event.occurredAt,
+      event.aggregateId,
+      event.aggregateType,
+      event.aggregateVersion,
+      event.organizationId,
+      event.correlationId,
+      event.causationId,
+      event.schemaVersion,
+      event.payload,
+    ],
+  );
 }
