@@ -4,6 +4,7 @@ import type {
 } from "@aether/application";
 import { OutboxWorker } from "@aether/application";
 import { PostgresOutboxStore } from "@aether/database";
+import { telemetryTracer, withinSpan } from "@aether/observability";
 import type { Pool } from "pg";
 
 export function createOutboxWorker(input: {
@@ -20,7 +21,22 @@ export function createOutboxWorker(input: {
   };
   return new OutboxWorker({
     store: new PostgresOutboxStore(input.pool),
-    handler,
+    handler: {
+      async handle(event) {
+        return withinSpan({
+          tracer: telemetryTracer("aether-worker"),
+          name: "outbox.process",
+          attributes: {
+            "messaging.message.id": event.eventId,
+            "messaging.operation.type": "process",
+            "messaging.destination.name": event.eventType,
+            "aether.correlation_id": event.correlationId,
+            "aether.causation_id": event.causationId ?? "none",
+          },
+          run: () => handler.handle(event),
+        });
+      },
+    },
     clock: { now: () => new Date() },
     workerId: input.workerId,
     consumer: "aether-worker.v1",

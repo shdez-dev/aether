@@ -148,10 +148,19 @@ export const EvaluationStandardResponseSchema = z.object({
 });
 export const InitiativeEvaluationResponseSchema = z.object({
   id: UuidSchema,
+  organizationId: UuidSchema,
+  workspaceId: UuidSchema,
   initiativeId: UuidSchema,
   initiativeVersion: z.number().int().nonnegative(),
   standardId: UuidSchema,
   standardVersion: z.number().int().positive(),
+  criteria: z.array(
+    z.object({
+      criterion: EvaluationCriterionInputSchema,
+      assessment: z.enum(["met", "not_met", "not_applicable"]).nullable(),
+      evidence: z.array(z.string()),
+    }),
+  ),
   coverage: z.object({
     totalCriteria: z.number().int(),
     assessedCriteria: z.number().int(),
@@ -159,6 +168,40 @@ export const InitiativeEvaluationResponseSchema = z.object({
   }),
   evaluatedByActorId: z.string(),
   evaluatedAt: z.string().datetime(),
+});
+export const InitiativeDecisionResponseSchema = z.object({
+  id: UuidSchema,
+  organizationId: UuidSchema,
+  workspaceId: UuidSchema,
+  initiativeId: UuidSchema,
+  evaluationId: UuidSchema,
+  outcome: z.enum(["approved", "rejected", "returned", "cancelled"]),
+  rationale: z.string(),
+  evidence: z.array(z.string()),
+  standardId: UuidSchema,
+  standardVersion: z.number().int().positive(),
+  coverage: z.object({
+    totalCriteria: z.number().int(),
+    assessedCriteria: z.number().int(),
+    percentage: z.number().int(),
+  }),
+  decidedByActorId: z.string(),
+  decidedAt: z.string().datetime(),
+});
+export const ProjectResponseSchema = z.object({
+  id: UuidSchema,
+  organizationId: UuidSchema,
+  workspaceId: UuidSchema,
+  sourceInitiativeId: UuidSchema,
+  sourceDecisionId: UuidSchema,
+  name: z.string(),
+  sponsorActorId: z.string(),
+  leadActorId: z.string(),
+  participants: z.array(ProjectParticipantSchema),
+  status: z.enum(["planned", "active", "blocked", "completed", "cancelled"]),
+  version: z.number().int().nonnegative(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
 });
 
 export type CreateInitiativeDraftRequest = z.infer<
@@ -179,3 +222,13 @@ export type PublishEvaluationStandardRequest = z.infer<
 >;
 export type InitiativeResponse = z.infer<typeof InitiativeResponseSchema>;
 export type InitiativeAuditEvent = z.infer<typeof InitiativeAuditEventSchema>;
+export type EvaluationStandardResponse = z.infer<
+  typeof EvaluationStandardResponseSchema
+>;
+export type InitiativeEvaluationResponse = z.infer<
+  typeof InitiativeEvaluationResponseSchema
+>;
+export type InitiativeDecisionResponse = z.infer<
+  typeof InitiativeDecisionResponseSchema
+>;
+export type ProjectResponse = z.infer<typeof ProjectResponseSchema>;

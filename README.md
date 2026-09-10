@@ -48,3 +48,4 @@ La primera rebanada vertical será: invitación, sesión segura, organización, 
 - [Proyecto y ejecución](docs/architecture/project-execution.md)
 - [Outbox y trabajos asíncronos](docs/architecture/outbox-and-worker.md)
 - [Auditoría y trazabilidad](docs/architecture/audit-and-traceability.md)
+- [Frontend y sistema de diseño](docs/architecture/frontend-design-system.md)

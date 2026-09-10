@@ -14,6 +14,8 @@ servers:
 tags:
   - name: Health
     description: Disponibilidad del servicio.
+  - name: Observability
+    description: Señales operacionales sin datos institucionales.
   - name: Authentication
     description: Inicio OIDC, sesión opaca y cierre de sesión.
   - name: Organizations
@@ -50,6 +52,21 @@ paths:
                     const: ok
         "429":
           $ref: "#/components/responses/Problem"
+  /metrics:
+    get:
+      tags: [Observability]
+      operationId: getOperationalMetrics
+      summary: Consultar métricas agregadas del proceso
+      description: Requiere token de infraestructura y nunca incluye usuarios, cuerpos ni tokens.
+      security: [{ metricsToken: [] }]
+      responses:
+        "200":
+          description: Métricas de proceso y outbox.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperationalMetrics"
+        "401": { description: Token de infraestructura inválido o ausente. }
   /auth/login:
     get:
       tags: [Authentication]
@@ -125,7 +142,80 @@ paths:
           $ref: "#/components/responses/Problem"
         "403":
           $ref: "#/components/responses/Problem"
+  /auth/sessions:
+    get:
+      tags: [Authentication]
+      operationId: listSessions
+      summary: Listar sesiones activas de la persona autenticada
+      security: [{ cookieSession: [] }]
+      responses:
+        "200":
+          description: Sesiones activas sin tokens ni hashes.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sessions]
+                properties:
+                  sessions:
+                    type: array
+                    items: { $ref: "#/components/schemas/SessionSummary" }
+        "401": { $ref: "#/components/responses/Problem" }
+  /auth/sessions/revoke-others:
+    post:
+      tags: [Authentication]
+      operationId: revokeOtherSessions
+      summary: Revocar las demás sesiones activas
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: Número de sesiones revocadas.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [revoked]
+                properties:
+                  revoked: { type: integer, minimum: 0 }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /auth/sessions/{sessionId}/revoke:
+    post:
+      tags: [Authentication]
+      operationId: revokeSession
+      summary: Revocar una sesión propia concreta
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "204": { description: Sesión revocada o ya inactiva. }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
   /v1/organizations:
+    get:
+      tags: [Organizations]
+      operationId: listOrganizations
+      summary: Listar las organizaciones a las que pertenece la persona autenticada
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: Organizaciones visibles para la sesión.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Organization" }
+        "401": { $ref: "#/components/responses/Problem" }
     post:
       tags: [Organizations]
       operationId: createOrganization
@@ -154,6 +244,25 @@ paths:
           $ref: "#/components/responses/Problem"
         default:
           $ref: "#/components/responses/Problem"
+  /v1/organizations/{organizationId}/workspaces:
+    get:
+      tags: [Workspaces]
+      operationId: listOrganizationWorkspaces
+      summary: Listar workspaces visibles dentro de una organización
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationId"
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: Workspaces autorizados para la persona autenticada.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Workspace" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
   /v1/workspaces:
     post:
       tags: [Workspaces]
@@ -288,6 +397,24 @@ paths:
         "403":
           $ref: "#/components/responses/Problem"
   /v1/evaluation-standards:
+    get:
+      tags: [Initiatives]
+      operationId: listEvaluationStandards
+      summary: Listar estándares de evaluación de una organización
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationContextId"
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: Estándares disponibles, incluyendo cuál está activo.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/EvaluationStandard" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
     post:
       tags: [Initiatives]
       operationId: publishEvaluationStandard
@@ -331,6 +458,50 @@ paths:
       responses:
         "204": { description: Estándar activado. }
         default: { $ref: "#/components/responses/Problem" }
+  /v1/evaluations/{evaluationId}:
+    get:
+      tags: [Initiatives]
+      operationId: getEvaluation
+      summary: Obtener una evaluación autorizada
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: evaluationId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/OrganizationContextId"
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: Evaluación registrada.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InitiativeEvaluation" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/decisions/{decisionId}:
+    get:
+      tags: [Initiatives]
+      operationId: getDecision
+      summary: Obtener una decisión autorizada
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: decisionId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/OrganizationContextId"
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: Decisión institucional registrada.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InitiativeDecision" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
   /v1/initiatives:
     get:
       tags: [Initiatives]
@@ -417,6 +588,7 @@ paths:
         - $ref: "#/components/parameters/OrganizationContextId"
         - $ref: "#/components/parameters/CsrfToken"
         - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -475,6 +647,7 @@ paths:
         - $ref: "#/components/parameters/OrganizationContextId"
         - $ref: "#/components/parameters/CsrfToken"
         - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -507,6 +680,7 @@ paths:
         - $ref: "#/components/parameters/OrganizationContextId"
         - $ref: "#/components/parameters/CsrfToken"
         - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -549,6 +723,28 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
   /v1/projects:
+    get:
+      tags: [Projects]
+      operationId: listProjects
+      summary: Listar proyectos de un workspace autorizado
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationContextId"
+        - name: workspaceId
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: Proyectos del contexto.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Project" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
     post:
       tags: [Projects]
       operationId: createProjectFromInitiative
@@ -557,6 +753,7 @@ paths:
       parameters:
         - $ref: "#/components/parameters/CsrfToken"
         - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -576,6 +773,28 @@ paths:
               },
           }
         default: { $ref: "#/components/responses/Problem" }
+  /v1/projects/{projectId}:
+    get:
+      tags: [Projects]
+      operationId: getProject
+      summary: Obtener el detalle de un proyecto autorizado
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/OrganizationContextId"
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: Proyecto autorizado.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Project" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
   /v1/projects/{projectId}/status:
     patch:
       tags: [Projects]
@@ -588,6 +807,7 @@ paths:
           required: true
           schema: { type: string, format: uuid }
         - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -616,6 +836,7 @@ paths:
           required: true
           schema: { type: string, format: uuid }
         - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -636,6 +857,7 @@ paths:
           required: true
           schema: { type: string, format: uuid }
         - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -701,6 +923,10 @@ components:
       type: apiKey
       in: cookie
       name: aether_session
+    metricsToken:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
   parameters:
     CorrelationId:
       name: X-Correlation-ID
@@ -999,20 +1225,38 @@ components:
       required:
         [
           id,
+          organizationId,
+          workspaceId,
           initiativeId,
           initiativeVersion,
           standardId,
           standardVersion,
+          criteria,
           coverage,
           evaluatedByActorId,
           evaluatedAt,
         ]
       properties:
         id: { type: string, format: uuid }
+        organizationId: { type: string, format: uuid }
+        workspaceId: { type: string, format: uuid }
         initiativeId: { type: string, format: uuid }
         initiativeVersion: { type: integer, minimum: 0 }
         standardId: { type: string, format: uuid }
         standardVersion: { type: integer, minimum: 1 }
+        criteria:
+          type: array
+          items:
+            type: object
+            required: [criterion, assessment, evidence]
+            properties:
+              criterion: { $ref: "#/components/schemas/EvaluationCriterion" }
+              assessment:
+                {
+                  type: [string, "null"],
+                  enum: [met, not_met, not_applicable, null],
+                }
+              evidence: { type: array, items: { type: string } }
         coverage:
           type: object
           required: [totalCriteria, assessedCriteria, percentage]
@@ -1027,10 +1271,13 @@ components:
       required:
         [
           id,
+          organizationId,
+          workspaceId,
           initiativeId,
           evaluationId,
           outcome,
           rationale,
+          evidence,
           standardId,
           standardVersion,
           coverage,
@@ -1039,11 +1286,14 @@ components:
         ]
       properties:
         id: { type: string, format: uuid }
+        organizationId: { type: string, format: uuid }
+        workspaceId: { type: string, format: uuid }
         initiativeId: { type: string, format: uuid }
         evaluationId: { type: string, format: uuid }
         outcome:
           { type: string, enum: [approved, rejected, returned, cancelled] }
         rationale: { type: string }
+        evidence: { type: array, items: { type: string } }
         standardId: { type: string, format: uuid }
         standardVersion: { type: integer }
         coverage: { type: object }
@@ -1311,6 +1561,36 @@ components:
       properties:
         actorId: { type: string }
         expiresAt: { type: string, format: date-time }
+    SessionSummary:
+      type: object
+      additionalProperties: false
+      required: [id, createdAt, lastSeenAt, expiresAt, isCurrent]
+      properties:
+        id: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+        lastSeenAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        isCurrent: { type: boolean }
+    OperationalMetrics:
+      type: object
+      additionalProperties: false
+      required: [startedAt, http, outbox]
+      properties:
+        startedAt: { type: string, format: date-time }
+        http:
+          type: object
+          required: [requests, failures, durationMsTotal]
+          properties:
+            requests: { type: integer, minimum: 0 }
+            failures: { type: integer, minimum: 0 }
+            durationMsTotal: { type: number, minimum: 0 }
+        outbox:
+          type: object
+          required: [processed, retried, deadLettered]
+          properties:
+            processed: { type: integer, minimum: 0 }
+            retried: { type: integer, minimum: 0 }
+            deadLettered: { type: integer, minimum: 0 }
     ApiProblem:
       type: object
       additionalProperties: false
@@ -1328,8 +1608,11 @@ components:
               FORBIDDEN,
               NOT_FOUND,
               CONFLICT,
+              IDEMPOTENCY_KEY_REUSED,
+              IDEMPOTENCY_REQUEST_IN_PROGRESS,
               PRECONDITION_FAILED,
               RATE_LIMITED,
+              PAYLOAD_TOO_LARGE,
               DEPENDENCY_UNAVAILABLE,
               INVITATION_INVALID_OR_EXPIRED,
               INTERNAL_ERROR,

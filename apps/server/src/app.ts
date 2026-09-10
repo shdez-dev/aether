@@ -1,12 +1,20 @@
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 
 import { AuthService } from "@aether/auth";
+import {
+  createOperationalMetrics,
+  telemetryTracer,
+  type OperationalMetrics,
+  type TelemetrySpan,
+} from "@aether/observability";
 import {
   AccessDeniedError,
   AuditHistoryService,
   InitiativeDomainError,
   InitiativeService,
   InitiativeVersionConflictError,
+  IdempotencyStore,
+  ProjectAlreadyExistsError,
   EvaluationService,
   ProjectService,
   ProjectDomainError,
@@ -33,6 +41,9 @@ import {
   UpdateInitiativeRequestSchema,
 } from "@aether/contracts";
 import cookie from "@fastify/cookie";
+import cors from "@fastify/cors";
+import helmet from "@fastify/helmet";
+import rateLimit from "@fastify/rate-limit";
 import Fastify, {
   type FastifyInstance,
   type FastifyReply,
@@ -58,84 +69,249 @@ export async function buildServer(input: {
   initiatives: InitiativeService;
   evaluations: EvaluationService;
   projects: ProjectService;
+  idempotency: IdempotencyStore;
   auditHistory?: AuditHistoryService;
+  readinessCheck?: () => Promise<void>;
+  metrics?: OperationalMetrics;
 }): Promise<FastifyInstance> {
+  const metrics = input.metrics ?? createOperationalMetrics("aether-server");
+  const requestSpans = new WeakMap<
+    FastifyRequest,
+    { startedAt: number; span: TelemetrySpan }
+  >();
   const app = Fastify({
-    logger: input.config.nodeEnv !== "test",
+    bodyLimit: input.config.maxRequestBodyBytes,
+    logger:
+      input.config.nodeEnv !== "test"
+        ? {
+            level: input.config.logLevel,
+            redact: {
+              paths: [
+                "req.headers.authorization",
+                "req.headers.cookie",
+                "req.headers.x-csrf-token",
+                "req.headers.idempotency-key",
+                "req.body",
+                "res.headers.set-cookie",
+              ],
+              censor: "[REDACTED]",
+            },
+          }
+        : false,
     trustProxy: input.config.nodeEnv === "production",
+    genReqId: (request) => {
+      const supplied = request.headers["x-correlation-id"];
+      return typeof supplied === "string" &&
+        z.uuid().safeParse(supplied).success
+        ? supplied
+        : randomUUID();
+    },
+  });
+  await app.register(helmet, {
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'none'"],
+        baseUri: ["'none'"],
+        frameAncestors: ["'none'"],
+        formAction: ["'self'"],
+      },
+    },
+  });
+  await app.register(cors, {
+    origin: (origin, callback) => {
+      callback(null, origin === input.config.webOrigin);
+    },
+    credentials: true,
+    methods: ["GET", "HEAD", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: [
+      "content-type",
+      "origin",
+      "x-correlation-id",
+      "x-csrf-token",
+      "idempotency-key",
+    ],
+    exposedHeaders: ["x-correlation-id", "idempotent-replayed"],
+    maxAge: 600,
   });
   await app.register(cookie);
+  await app.register(rateLimit, {
+    max: input.config.rateLimitMax,
+    timeWindow: input.config.rateLimitWindowSeconds * 1_000,
+    keyGenerator: (request) => {
+      const sessionToken = request.cookies[sessionCookie];
+      return sessionToken
+        ? `session:${hashOpaqueValue(sessionToken)}`
+        : `ip:${request.ip}`;
+    },
+    errorResponseBuilder: (request) => ({
+      type: "https://aether.local/problems/rate-limit",
+      title: "Demasiadas solicitudes",
+      status: 429,
+      code: "RATE_LIMITED",
+      correlationId: request.id,
+      instance: request.url,
+    }),
+  });
 
   app.addHook("onRequest", async (request, reply) => {
-    const correlationId = request.headers["x-correlation-id"];
-    reply.header(
-      "X-Correlation-ID",
-      typeof correlationId === "string" ? correlationId : randomUUID(),
-    );
+    reply.header("X-Correlation-ID", request.id);
+    const route = request.url.split("?")[0] ?? "/";
+    requestSpans.set(request, {
+      startedAt: performance.now(),
+      span: telemetryTracer("aether-server").startSpan(
+        `HTTP ${request.method}`,
+        {
+          attributes: {
+            "http.request.method": request.method,
+            "url.path": route,
+            "aether.correlation_id": request.id,
+          },
+        },
+      ),
+    });
+  });
+  app.addHook("onResponse", async (request, reply) => {
+    const telemetry = requestSpans.get(request);
+    if (!telemetry) return;
+    const route = request.routeOptions.url ?? request.url.split("?")[0] ?? "/";
+    const durationMs = performance.now() - telemetry.startedAt;
+    telemetry.span.setAttributes({
+      "http.route": route,
+      "http.response.status_code": reply.statusCode,
+    });
+    if (reply.statusCode >= 500)
+      telemetry.span.setAttribute("error.type", "server_error");
+    telemetry.span.end();
+    metrics.recordHttpRequest({
+      method: request.method,
+      route,
+      statusCode: reply.statusCode,
+      durationMs,
+    });
   });
   app.addHook("preHandler", async (request, reply) => {
     const path = request.url.split("?")[0] ?? "";
     if (
       ["POST", "PATCH", "PUT", "DELETE"].includes(request.method) &&
-      (path === "/auth/logout" || path.startsWith("/v1/"))
+      (path === "/auth/logout" ||
+        path.startsWith("/auth/sessions") ||
+        path.startsWith("/v1/"))
     ) {
       assertCsrf(request, input.config);
     }
   });
   app.setErrorHandler((error, request, reply) => {
-    const status =
-      error instanceof UnauthenticatedError
-        ? 401
-        : error instanceof CsrfError ||
-            error instanceof AccessDeniedError ||
-            error instanceof IdentityEmailRequiredError
-          ? 403
-          : error instanceof ResourceNotFoundError
-            ? 404
-            : error instanceof InitiativeVersionConflictError ||
-                error instanceof ProjectVersionConflictError
-              ? 409
-              : 400;
+    const errorStatusCode =
+      error &&
+      typeof error === "object" &&
+      "statusCode" in error &&
+      typeof error.statusCode === "number"
+        ? error.statusCode
+        : null;
+    const errorCode =
+      error &&
+      typeof error === "object" &&
+      "code" in error &&
+      typeof error.code === "string"
+        ? error.code
+        : null;
+    const payloadTooLarge = errorStatusCode === 413;
+    const rateLimited =
+      errorStatusCode === 429 ||
+      errorCode === "FST_ERR_RATE_LIMIT" ||
+      errorCode === "RATE_LIMITED";
+    const status = payloadTooLarge
+      ? 413
+      : rateLimited
+        ? 429
+        : error instanceof UnauthenticatedError
+          ? 401
+          : error instanceof IdempotencyKeyReusedError ||
+              error instanceof IdempotencyRequestInProgressError ||
+              error instanceof ProjectAlreadyExistsError
+            ? 409
+            : error instanceof CsrfError ||
+                error instanceof AccessDeniedError ||
+                error instanceof IdentityEmailRequiredError
+              ? 403
+              : error instanceof ResourceNotFoundError
+                ? 404
+                : error instanceof InitiativeVersionConflictError ||
+                    error instanceof ProjectVersionConflictError
+                  ? 409
+                  : 400;
     reply
       .code(status)
       .type("application/problem+json")
       .send({
         type: "https://aether.local/problems/authentication",
         title:
-          status === 401
-            ? "Sesión requerida"
-            : status === 403
-              ? "Solicitud rechazada"
-              : status === 404
-                ? "Recurso no encontrado"
-                : status === 409
-                  ? "Conflicto de versión"
-                  : "Solicitud inválida",
+          status === 413
+            ? "Carga demasiado grande"
+            : status === 429
+              ? "Demasiadas solicitudes"
+              : status === 401
+                ? "Sesión requerida"
+                : status === 403
+                  ? "Solicitud rechazada"
+                  : status === 404
+                    ? "Recurso no encontrado"
+                    : status === 409
+                      ? "Conflicto de versión"
+                      : "Solicitud inválida",
         status,
-        code:
-          error instanceof UnauthenticatedError
-            ? "UNAUTHENTICATED"
-            : error instanceof CsrfError ||
-                error instanceof AccessDeniedError ||
-                error instanceof IdentityEmailRequiredError
-              ? "FORBIDDEN"
-              : error instanceof ResourceNotFoundError
-                ? "NOT_FOUND"
-                : error instanceof InitiativeVersionConflictError ||
-                    error instanceof ProjectVersionConflictError
-                  ? "CONFLICT"
-                  : error instanceof InitiativeDomainError ||
-                      error instanceof ProjectDomainError
-                    ? "PRECONDITION_FAILED"
-                    : error instanceof InvitationError
-                      ? "INVITATION_INVALID_OR_EXPIRED"
-                      : "VALIDATION_ERROR",
+        code: payloadTooLarge
+          ? "PAYLOAD_TOO_LARGE"
+          : rateLimited
+            ? "RATE_LIMITED"
+            : error instanceof UnauthenticatedError
+              ? "UNAUTHENTICATED"
+              : error instanceof IdempotencyKeyReusedError
+                ? "IDEMPOTENCY_KEY_REUSED"
+                : error instanceof IdempotencyRequestInProgressError
+                  ? "IDEMPOTENCY_REQUEST_IN_PROGRESS"
+                  : error instanceof ProjectAlreadyExistsError
+                    ? "CONFLICT"
+                    : error instanceof CsrfError ||
+                        error instanceof AccessDeniedError ||
+                        error instanceof IdentityEmailRequiredError
+                      ? "FORBIDDEN"
+                      : error instanceof ResourceNotFoundError
+                        ? "NOT_FOUND"
+                        : error instanceof InitiativeVersionConflictError ||
+                            error instanceof ProjectVersionConflictError
+                          ? "CONFLICT"
+                          : error instanceof InitiativeDomainError ||
+                              error instanceof ProjectDomainError
+                            ? "PRECONDITION_FAILED"
+                            : error instanceof InvitationError
+                              ? "INVITATION_INVALID_OR_EXPIRED"
+                              : "VALIDATION_ERROR",
         correlationId: reply.getHeader("X-Correlation-ID"),
         instance: request.url,
       });
   });
 
   app.get("/health", async () => ({ status: "ok" }));
+  app.get("/metrics", async (request, reply) => {
+    if (
+      input.config.metricsToken &&
+      !safeEqual(
+        request.headers.authorization ?? "",
+        `Bearer ${input.config.metricsToken}`,
+      )
+    )
+      return reply.code(401).send({ status: "unauthorized" });
+    return metrics.snapshot();
+  });
+  app.get("/ready", async (_request, reply) => {
+    try {
+      await input.readinessCheck?.();
+      return { status: "ready" };
+    } catch {
+      return reply.code(503).send({ status: "unavailable" });
+    }
+  });
   app.get("/auth/login", async (_request, reply) => {
     const login = await input.auth.beginLogin();
     reply.setCookie(
@@ -194,9 +370,65 @@ export async function buildServer(input: {
     };
   });
   app.post("/auth/logout", async (request, reply) => {
-    await input.auth.logout(request.cookies[sessionCookie]);
+    await input.auth.logout(
+      request.cookies[sessionCookie],
+      correlationId(reply),
+    );
     reply.clearCookie(sessionCookie, sessionCookieOptions(input.config));
     reply.clearCookie(csrfCookie, csrfCookieOptions(input.config));
+    return reply.code(204).send();
+  });
+  app.get("/auth/sessions", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    const sessions = await input.auth.listSessions(session.actorId, session.id);
+    return {
+      sessions: sessions.map((item) => ({
+        id: item.id,
+        createdAt: item.createdAt.toISOString(),
+        lastSeenAt: item.lastSeenAt.toISOString(),
+        expiresAt: item.expiresAt.toISOString(),
+        isCurrent: item.isCurrent,
+      })),
+    };
+  });
+  app.post("/auth/sessions/revoke-others", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    const revoked = await input.auth.revokeOtherSessions({
+      actorId: session.actorId,
+      currentSessionId: session.id,
+      correlationId: correlationId(reply),
+    });
+    return reply.code(200).send({ revoked });
+  });
+  app.post("/auth/sessions/:sessionId/revoke", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    const { sessionId } = z
+      .object({ sessionId: z.string().uuid() })
+      .parse(request.params);
+    const revoked = await input.auth.revokeSession({
+      actorId: session.actorId,
+      sessionId,
+      correlationId: correlationId(reply),
+    });
+    if (revoked && session.id === sessionId) {
+      reply.clearCookie(sessionCookie, sessionCookieOptions(input.config));
+      reply.clearCookie(csrfCookie, csrfCookieOptions(input.config));
+    }
     return reply.code(204).send();
   });
   app.post("/v1/organizations", async (request, reply) => {
@@ -214,6 +446,33 @@ export async function buildServer(input: {
     });
     return reply.code(201).send(organization);
   });
+  app.get("/v1/organizations", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    return input.tenants.listOrganizations(session.actorId);
+  });
+  app.get(
+    "/v1/organizations/:organizationId/workspaces",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      const { organizationId } = z
+        .object({ organizationId: z.string().uuid() })
+        .parse(request.params);
+      return input.tenants.listWorkspaces({
+        actorId: session.actorId,
+        organizationId,
+      });
+    },
+  );
   app.post("/v1/workspaces", async (request, reply) => {
     const session = await requireSession(
       request,
@@ -321,20 +580,31 @@ export async function buildServer(input: {
       input.config,
     );
     const body = CreateInitiativeDraftRequestSchema.parse(request.body);
-    const initiative = await input.initiatives.create({
+    return respondIdempotently({
+      request,
+      reply,
+      store: input.idempotency,
       actorId: session.actorId,
-      correlationId: correlationId(reply),
-      ...body,
-    });
-    return reply.code(201).send(
-      await toInitiativeResponse(
-        await input.initiatives.detail({
+      operation: "initiative.create",
+      requestPayload: body,
+      execute: async () => {
+        const initiative = await input.initiatives.create({
           actorId: session.actorId,
-          organizationId: initiative.organizationId,
-          initiativeId: initiative.id,
-        }),
-      ),
-    );
+          correlationId: correlationId(reply),
+          ...body,
+        });
+        return {
+          statusCode: 201,
+          body: await toInitiativeResponse(
+            await input.initiatives.detail({
+              actorId: session.actorId,
+              organizationId: initiative.organizationId,
+              initiativeId: initiative.id,
+            }),
+          ),
+        };
+      },
+    });
   });
   app.post("/v1/evaluation-standards", async (request, reply) => {
     const session = await requireSession(
@@ -352,6 +622,65 @@ export async function buildServer(input: {
       .code(201)
       .send({ ...standard, publishedAt: standard.publishedAt.toISOString() });
   });
+  app.get("/v1/evaluation-standards", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    const { organizationId } = z
+      .object({ organizationId: z.string().uuid() })
+      .parse(request.query);
+    const standards = await input.evaluations.listStandards({
+      actorId: session.actorId,
+      organizationId,
+    });
+    return standards.map((standard) => ({
+      ...standard,
+      publishedAt: standard.publishedAt.toISOString(),
+    }));
+  });
+  app.get("/v1/evaluations/:evaluationId", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    const { evaluationId } = z
+      .object({ evaluationId: z.string().uuid() })
+      .parse(request.params);
+    const { organizationId } = z
+      .object({ organizationId: z.string().uuid() })
+      .parse(request.query);
+    const evaluation = await input.evaluations.getEvaluation({
+      actorId: session.actorId,
+      organizationId,
+      evaluationId,
+    });
+    return { ...evaluation, evaluatedAt: evaluation.evaluatedAt.toISOString() };
+  });
+  app.get("/v1/decisions/:decisionId", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    const { decisionId } = z
+      .object({ decisionId: z.string().uuid() })
+      .parse(request.params);
+    const { organizationId } = z
+      .object({ organizationId: z.string().uuid() })
+      .parse(request.query);
+    const decision = await input.evaluations.getDecision({
+      actorId: session.actorId,
+      organizationId,
+      decisionId,
+    });
+    return { ...decision, decidedAt: decision.decidedAt.toISOString() };
+  });
   app.post("/v1/projects", async (request, reply) => {
     const session = await requireSession(
       request,
@@ -360,12 +689,60 @@ export async function buildServer(input: {
       input.config,
     );
     const body = CreateProjectFromInitiativeRequestSchema.parse(request.body);
-    const project = await input.projects.createFromInitiative({
+    return respondIdempotently({
+      request,
+      reply,
+      store: input.idempotency,
       actorId: session.actorId,
-      correlationId: correlationId(reply),
-      ...body,
+      operation: `project.create:${body.initiativeId}`,
+      requestPayload: body,
+      execute: async () => {
+        const project = await input.projects.createFromInitiative({
+          actorId: session.actorId,
+          correlationId: correlationId(reply),
+          ...body,
+        });
+        return { statusCode: 201, body: toProjectResponse(project) };
+      },
     });
-    return reply.code(201).send(toProjectResponse(project));
+  });
+  app.get("/v1/projects", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    const query = z
+      .object({
+        organizationId: z.string().uuid(),
+        workspaceId: z.string().uuid(),
+      })
+      .parse(request.query);
+    return (
+      await input.projects.list({ actorId: session.actorId, ...query })
+    ).map(toProjectResponse);
+  });
+  app.get("/v1/projects/:projectId", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    const { projectId } = z
+      .object({ projectId: z.string().uuid() })
+      .parse(request.params);
+    const { organizationId } = z
+      .object({ organizationId: z.string().uuid() })
+      .parse(request.query);
+    return toProjectResponse(
+      await input.projects.detail({
+        actorId: session.actorId,
+        organizationId,
+        projectId,
+      }),
+    );
   });
   app.patch("/v1/projects/:projectId/status", async (request, reply) => {
     const session = await requireSession(
@@ -378,13 +755,23 @@ export async function buildServer(input: {
       .object({ projectId: z.string().uuid() })
       .parse(request.params);
     const body = ChangeProjectStatusRequestSchema.parse(request.body);
-    const project = await input.projects.changeStatus({
+    return respondIdempotently({
+      request,
+      reply,
+      store: input.idempotency,
       actorId: session.actorId,
-      correlationId: correlationId(reply),
-      projectId: params.projectId,
-      ...body,
+      operation: `project.status:${params.projectId}`,
+      requestPayload: body,
+      execute: async () => {
+        const project = await input.projects.changeStatus({
+          actorId: session.actorId,
+          correlationId: correlationId(reply),
+          projectId: params.projectId,
+          ...body,
+        });
+        return { statusCode: 200, body: toProjectResponse(project) };
+      },
     });
-    return toProjectResponse(project);
   });
   app.post("/v1/projects/:projectId/milestones", async (request, reply) => {
     const session = await requireSession(
@@ -397,15 +784,26 @@ export async function buildServer(input: {
       .object({ projectId: z.string().uuid() })
       .parse(request.params);
     const body = AddProjectMilestoneRequestSchema.parse(request.body);
-    const milestone = await input.projects.addMilestone({
+    return respondIdempotently({
+      request,
+      reply,
+      store: input.idempotency,
       actorId: session.actorId,
-      correlationId: correlationId(reply),
-      projectId: params.projectId,
-      ...body,
+      operation: `project.milestone.add:${params.projectId}`,
+      requestPayload: body,
+      execute: async () => {
+        const milestone = await input.projects.addMilestone({
+          actorId: session.actorId,
+          correlationId: correlationId(reply),
+          projectId: params.projectId,
+          ...body,
+        });
+        return {
+          statusCode: 201,
+          body: { ...milestone, createdAt: milestone.createdAt.toISOString() },
+        };
+      },
     });
-    return reply
-      .code(201)
-      .send({ ...milestone, createdAt: milestone.createdAt.toISOString() });
   });
   app.post("/v1/projects/:projectId/next-actions", async (request, reply) => {
     const session = await requireSession(
@@ -418,15 +816,26 @@ export async function buildServer(input: {
       .object({ projectId: z.string().uuid() })
       .parse(request.params);
     const body = AddProjectNextActionRequestSchema.parse(request.body);
-    const action = await input.projects.addNextAction({
+    return respondIdempotently({
+      request,
+      reply,
+      store: input.idempotency,
       actorId: session.actorId,
-      correlationId: correlationId(reply),
-      projectId: params.projectId,
-      ...body,
+      operation: `project.next_action.add:${params.projectId}`,
+      requestPayload: body,
+      execute: async () => {
+        const action = await input.projects.addNextAction({
+          actorId: session.actorId,
+          correlationId: correlationId(reply),
+          projectId: params.projectId,
+          ...body,
+        });
+        return {
+          statusCode: 201,
+          body: { ...action, createdAt: action.createdAt.toISOString() },
+        };
+      },
     });
-    return reply
-      .code(201)
-      .send({ ...action, createdAt: action.createdAt.toISOString() });
   });
   app.get("/v1/projects/:projectId/audit-events", async (request, reply) => {
     const session = await requireSession(
@@ -526,20 +935,33 @@ export async function buildServer(input: {
       .object({ organizationId: z.string().uuid() })
       .parse(request.query);
     const body = UpdateInitiativeRequestSchema.parse(request.body);
-    const initiative = await input.initiatives.edit({
+    return respondIdempotently({
+      request,
+      reply,
+      store: input.idempotency,
       actorId: session.actorId,
-      correlationId: correlationId(reply),
-      ...params,
-      ...query,
-      ...body,
+      operation: `initiative.edit:${params.initiativeId}`,
+      requestPayload: { query, body },
+      execute: async () => {
+        const initiative = await input.initiatives.edit({
+          actorId: session.actorId,
+          correlationId: correlationId(reply),
+          ...params,
+          ...query,
+          ...body,
+        });
+        return {
+          statusCode: 200,
+          body: await toInitiativeResponse(
+            await input.initiatives.detail({
+              actorId: session.actorId,
+              organizationId: initiative.organizationId,
+              initiativeId: initiative.id,
+            }),
+          ),
+        };
+      },
     });
-    return toInitiativeResponse(
-      await input.initiatives.detail({
-        actorId: session.actorId,
-        organizationId: initiative.organizationId,
-        initiativeId: initiative.id,
-      }),
-    );
   });
   app.post("/v1/initiatives/:initiativeId/submit", async (request, reply) => {
     const session = await requireSession(
@@ -555,20 +977,33 @@ export async function buildServer(input: {
       .object({ organizationId: z.string().uuid() })
       .parse(request.query);
     const body = SubmitInitiativeRequestSchema.parse(request.body);
-    const initiative = await input.initiatives.present({
+    return respondIdempotently({
+      request,
+      reply,
+      store: input.idempotency,
       actorId: session.actorId,
-      correlationId: correlationId(reply),
-      ...params,
-      ...query,
-      ...body,
+      operation: `initiative.submit:${params.initiativeId}`,
+      requestPayload: { query, body },
+      execute: async () => {
+        const initiative = await input.initiatives.present({
+          actorId: session.actorId,
+          correlationId: correlationId(reply),
+          ...params,
+          ...query,
+          ...body,
+        });
+        return {
+          statusCode: 200,
+          body: await toInitiativeResponse(
+            await input.initiatives.detail({
+              actorId: session.actorId,
+              organizationId: initiative.organizationId,
+              initiativeId: initiative.id,
+            }),
+          ),
+        };
+      },
     });
-    return toInitiativeResponse(
-      await input.initiatives.detail({
-        actorId: session.actorId,
-        organizationId: initiative.organizationId,
-        initiativeId: initiative.id,
-      }),
-    );
   });
   app.post("/v1/initiatives/:initiativeId/review", async (request, reply) => {
     const session = await requireSession(
@@ -584,22 +1019,35 @@ export async function buildServer(input: {
       .object({ organizationId: z.string().uuid() })
       .parse(request.query);
     const body = StartReviewRequestSchema.parse(request.body);
-    const evaluation = await input.evaluations.review({
+    return respondIdempotently({
+      request,
+      reply,
+      store: input.idempotency,
       actorId: session.actorId,
-      correlationId: correlationId(reply),
-      ...params,
-      ...query,
-      ...body,
-    });
-    return reply.send({
-      evaluation: toEvaluationResponse(evaluation),
-      initiative: await toInitiativeResponse(
-        await input.initiatives.detail({
+      operation: `initiative.review:${params.initiativeId}`,
+      requestPayload: { query, body },
+      execute: async () => {
+        const evaluation = await input.evaluations.review({
           actorId: session.actorId,
-          organizationId: query.organizationId,
-          initiativeId: params.initiativeId,
-        }),
-      ),
+          correlationId: correlationId(reply),
+          ...params,
+          ...query,
+          ...body,
+        });
+        return {
+          statusCode: 200,
+          body: {
+            evaluation: toEvaluationResponse(evaluation),
+            initiative: await toInitiativeResponse(
+              await input.initiatives.detail({
+                actorId: session.actorId,
+                organizationId: query.organizationId,
+                initiativeId: params.initiativeId,
+              }),
+            ),
+          },
+        };
+      },
     });
   });
   app.post("/v1/initiatives/:initiativeId/decide", async (request, reply) => {
@@ -616,22 +1064,35 @@ export async function buildServer(input: {
       .object({ organizationId: z.string().uuid() })
       .parse(request.query);
     const body = DecideInitiativeRequestSchema.parse(request.body);
-    const decision = await input.evaluations.decide({
+    return respondIdempotently({
+      request,
+      reply,
+      store: input.idempotency,
       actorId: session.actorId,
-      correlationId: correlationId(reply),
-      ...params,
-      ...query,
-      ...body,
-    });
-    return reply.send({
-      decision: toDecisionResponse(decision),
-      initiative: await toInitiativeResponse(
-        await input.initiatives.detail({
+      operation: `initiative.decide:${params.initiativeId}`,
+      requestPayload: { query, body },
+      execute: async () => {
+        const decision = await input.evaluations.decide({
           actorId: session.actorId,
-          organizationId: query.organizationId,
-          initiativeId: params.initiativeId,
-        }),
-      ),
+          correlationId: correlationId(reply),
+          ...params,
+          ...query,
+          ...body,
+        });
+        return {
+          statusCode: 200,
+          body: {
+            decision: toDecisionResponse(decision),
+            initiative: await toInitiativeResponse(
+              await input.initiatives.detail({
+                actorId: session.actorId,
+                organizationId: query.organizationId,
+                initiativeId: params.initiativeId,
+              }),
+            ),
+          },
+        };
+      },
     });
   });
   app.get(
@@ -735,6 +1196,9 @@ async function requireSession(
 class CsrfError extends Error {}
 class UnauthenticatedError extends Error {}
 class IdentityEmailRequiredError extends Error {}
+class IdempotencyKeyRequiredError extends Error {}
+class IdempotencyKeyReusedError extends Error {}
+class IdempotencyRequestInProgressError extends Error {}
 function requireActorEmail(email: string | null): string {
   if (!email) throw new IdentityEmailRequiredError();
   return email;
@@ -763,6 +1227,9 @@ function safeEqual(left: string, right: string): boolean {
     timingSafeEqual(leftBuffer, rightBuffer)
   );
 }
+function hashOpaqueValue(value: string): string {
+  return createHash("sha256").update(value).digest("base64url");
+}
 function sessionCookieOptions(config: ServerConfig) {
   return {
     httpOnly: true,
@@ -789,4 +1256,66 @@ function csrfCookieOptions(config: ServerConfig) {
     path: "/",
     maxAge: config.sessionTtlSeconds,
   };
+}
+
+async function respondIdempotently(input: {
+  request: FastifyRequest;
+  reply: FastifyReply;
+  store: IdempotencyStore;
+  actorId: string;
+  operation: string;
+  requestPayload: unknown;
+  execute: () => Promise<{ statusCode: number; body: unknown }>;
+}): Promise<FastifyReply> {
+  const supplied = input.request.headers["idempotency-key"];
+  if (typeof supplied !== "string") throw new IdempotencyKeyRequiredError();
+  const key = z.string().trim().min(1).max(255).parse(supplied);
+  const requestHash = createHash("sha256")
+    .update(canonicalJson(input.requestPayload))
+    .digest("base64url");
+  const reservation = await input.store.reserve({
+    actorId: input.actorId,
+    operation: input.operation,
+    key,
+    requestHash,
+    expiresAt: new Date(Date.now() + 86_400_000),
+  });
+  if (reservation.kind === "key_reused") throw new IdempotencyKeyReusedError();
+  if (reservation.kind === "in_progress")
+    throw new IdempotencyRequestInProgressError();
+  if (reservation.kind === "completed")
+    return input.reply
+      .header("Idempotent-Replayed", "true")
+      .code(reservation.response.statusCode)
+      .send(reservation.response.body);
+  try {
+    const response = await input.execute();
+    await input.store.complete({
+      actorId: input.actorId,
+      operation: input.operation,
+      key,
+      requestHash,
+      response,
+    });
+    return input.reply.code(response.statusCode).send(response.body);
+  } catch (error) {
+    await input.store.abandon({
+      actorId: input.actorId,
+      operation: input.operation,
+      key,
+      requestHash,
+    });
+    throw error;
+  }
+}
+
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== "object")
+    return JSON.stringify(value) ?? "null";
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
+    .join(",")}}`;
 }

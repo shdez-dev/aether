@@ -31,6 +31,27 @@ export class InMemoryTenantStore implements TenantStore {
   async findWorkspace(workspaceId: string): Promise<Workspace | null> {
     return this.workspaces.get(workspaceId) ?? null;
   }
+  async listOrganizations(actorId: string): Promise<readonly Organization[]> {
+    const ids = [...this.organizationRoles.keys()]
+      .filter((key) => key.startsWith(`${actorId}:`))
+      .map((key) => key.slice(actorId.length + 1));
+    return [...this.organizations.values()].filter((organization) =>
+      ids.includes(organization.id),
+    );
+  }
+  async listWorkspaces(input: {
+    actorId: string;
+    organizationId: string;
+  }): Promise<readonly Workspace[]> {
+    return [...this.workspaces.values()].filter(
+      (workspace) =>
+        workspace.organizationId === input.organizationId &&
+        (this.organizationRoles.has(
+          `${input.actorId}:${input.organizationId}`,
+        ) ||
+          this.workspaceRoles.has(`${input.actorId}:${workspace.id}`)),
+    );
+  }
   async findOrganizationRole(input: {
     actorId: string;
     organizationId: string;

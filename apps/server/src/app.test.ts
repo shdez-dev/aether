@@ -21,6 +21,7 @@ import {
   InMemoryInitiativeAuditStore,
   InMemoryAuditHistoryStore,
   InMemoryInitiativeStore,
+  InMemoryIdempotencyStore,
   InMemoryTenantStore,
 } from "@aether/testkit";
 
@@ -57,9 +58,42 @@ class InMemoryAuthStore implements AuthStore {
     this.sessions.set(sessionId, renewed);
     return renewed;
   }
-  async revokeSession(sessionId: string, now: Date): Promise<void> {
-    const session = this.sessions.get(sessionId);
-    if (session) this.sessions.set(sessionId, { ...session, revokedAt: now });
+  async listActiveSessions(input: {
+    actorId: string;
+    now: Date;
+  }): Promise<readonly AuthSession[]> {
+    return [...this.sessions.values()].filter(
+      (session) =>
+        session.actorId === input.actorId &&
+        !session.revokedAt &&
+        session.expiresAt > input.now,
+    );
+  }
+  async revokeOwnedSession(input: {
+    actorId: string;
+    sessionId: string;
+    now: Date;
+  }): Promise<boolean> {
+    const session = this.sessions.get(input.sessionId);
+    if (!session || session.actorId !== input.actorId || session.revokedAt)
+      return false;
+    this.sessions.set(input.sessionId, { ...session, revokedAt: input.now });
+    return true;
+  }
+  async revokeOtherSessions(input: {
+    actorId: string;
+    exceptSessionId: string;
+    now: Date;
+  }): Promise<number> {
+    const sessions = await this.listActiveSessions({
+      actorId: input.actorId,
+      now: input.now,
+    });
+    for (const session of sessions)
+      if (session.id !== input.exceptSessionId)
+        this.sessions.set(session.id, { ...session, revokedAt: input.now });
+    return sessions.filter((session) => session.id !== input.exceptSessionId)
+      .length;
   }
   async createLoginTransaction(transaction: LoginTransaction): Promise<void> {
     this.transactions.set(transaction.handleHash, transaction);
@@ -94,6 +128,10 @@ const config: ServerConfig = {
   sessionEncryptionKey: "K5Ahk0FQ4+zxKxg4atlrPkS0vP0w+ZsSCx6x8v4hX3c=",
   sessionTtlSeconds: 3600,
   sessionRenewalWindowSeconds: 600,
+  maxRequestBodyBytes: 1_048_576,
+  rateLimitMax: 120,
+  rateLimitWindowSeconds: 60,
+  logLevel: "info",
   secureCookies: false,
 };
 const oidc: OidcProvider = {
@@ -147,6 +185,7 @@ describe("HTTP authentication boundary", () => {
       initiatives: {} as InitiativeService,
       evaluations: {} as EvaluationService,
       projects: {} as ProjectService,
+      idempotency: new InMemoryIdempotencyStore(),
     });
     const login = await app.inject({ method: "GET", url: "/auth/login" });
     const loginCookies = responseCookies(login);
@@ -173,6 +212,27 @@ describe("HTTP authentication boundary", () => {
     expect(sessionHeader).not.toContain("access_token");
     const session = cookieValue(callbackCookies, "aether_session");
     const csrf = cookieValue(callbackCookies, "aether_csrf");
+    const activeSessions = await app.inject({
+      method: "GET",
+      url: "/auth/sessions",
+      headers: { cookie: `aether_session=${session}` },
+    });
+    expect(activeSessions.statusCode).toBe(200);
+    expect(activeSessions.json()).toMatchObject({
+      sessions: [expect.objectContaining({ isCurrent: true })],
+    });
+    expect(JSON.stringify(activeSessions.json())).not.toContain("tokenHash");
+    const revokeOthers = await app.inject({
+      method: "POST",
+      url: "/auth/sessions/revoke-others",
+      headers: {
+        origin: config.webOrigin,
+        "x-csrf-token": csrf,
+        cookie: `aether_session=${session}; aether_csrf=${csrf}`,
+      },
+    });
+    expect(revokeOthers.statusCode).toBe(200);
+    expect(revokeOthers.json()).toEqual({ revoked: 0 });
     const mutationWithoutCsrf = await app.inject({
       method: "POST",
       url: "/v1/organizations",
@@ -207,6 +267,12 @@ describe("HTTP authentication boundary", () => {
       },
     });
     expect(logout.statusCode).toBe(204);
+    const afterLogout = await app.inject({
+      method: "GET",
+      url: "/auth/session",
+      headers: { cookie: `aether_session=${session}` },
+    });
+    expect(afterLogout.statusCode).toBe(401);
     await app.close();
   });
 
@@ -258,6 +324,7 @@ describe("HTTP authentication boundary", () => {
       initiatives,
       evaluations,
       projects: {} as ProjectService,
+      idempotency: new InMemoryIdempotencyStore(),
       auditHistory,
     });
     const login = await app.inject({ method: "GET", url: "/auth/login" });
@@ -274,6 +341,7 @@ describe("HTTP authentication boundary", () => {
     const headers = {
       origin: config.webOrigin,
       "x-csrf-token": csrf,
+      "idempotency-key": crypto.randomUUID(),
       cookie: `aether_session=${session}; aether_csrf=${csrf}`,
     };
 
@@ -285,6 +353,17 @@ describe("HTTP authentication boundary", () => {
     });
     expect(organizationResponse.statusCode).toBe(201);
     const organization = organizationResponse.json() as { id: string };
+    const organizationsResponse = await app.inject({
+      method: "GET",
+      url: "/v1/organizations",
+      headers: { cookie: headers.cookie },
+    });
+    expect(organizationsResponse.statusCode).toBe(200);
+    expect(organizationsResponse.json()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: organization.id }),
+      ]),
+    );
     const workspaceResponse = await app.inject({
       method: "POST",
       url: "/v1/workspaces",
@@ -297,6 +376,15 @@ describe("HTTP authentication boundary", () => {
     });
     expect(workspaceResponse.statusCode).toBe(201);
     const workspace = workspaceResponse.json() as { id: string };
+    const workspacesResponse = await app.inject({
+      method: "GET",
+      url: `/v1/organizations/${organization.id}/workspaces`,
+      headers: { cookie: headers.cookie },
+    });
+    expect(workspacesResponse.statusCode).toBe(200);
+    expect(workspacesResponse.json()).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: workspace.id })]),
+    );
     const createdResponse = await app.inject({
       method: "POST",
       url: "/v1/initiatives",
@@ -312,6 +400,37 @@ describe("HTTP authentication boundary", () => {
     });
     expect(createdResponse.statusCode).toBe(201);
     const created = createdResponse.json() as { id: string; version: number };
+    const replayedCreate = await app.inject({
+      method: "POST",
+      url: "/v1/initiatives",
+      headers,
+      payload: {
+        organizationId: organization.id,
+        workspaceId: workspace.id,
+        title: "Reducir tiempos de espera",
+        problemStatement: "La atención tarda demasiado.",
+        expectedOutcome: "Reducir la mediana de espera en el piloto.",
+        classification: "internal",
+      },
+    });
+    expect(replayedCreate.statusCode).toBe(201);
+    expect(replayedCreate.headers["idempotent-replayed"]).toBe("true");
+    expect(replayedCreate.json()).toMatchObject({ id: created.id });
+    const reusedKey = await app.inject({
+      method: "POST",
+      url: "/v1/initiatives",
+      headers,
+      payload: {
+        organizationId: organization.id,
+        workspaceId: workspace.id,
+        title: "Otra iniciativa",
+        problemStatement: "Otro problema.",
+        expectedOutcome: "Otro resultado.",
+        classification: "internal",
+      },
+    });
+    expect(reusedKey.statusCode).toBe(409);
+    expect(reusedKey.json()).toMatchObject({ code: "IDEMPOTENCY_KEY_REUSED" });
 
     const editedResponse = await app.inject({
       method: "PATCH",
@@ -365,6 +484,15 @@ describe("HTTP authentication boundary", () => {
       id: string;
       criteria: { id: string }[];
     };
+    const standardsResponse = await app.inject({
+      method: "GET",
+      url: `/v1/evaluation-standards?organizationId=${organization.id}`,
+      headers: { cookie: headers.cookie },
+    });
+    expect(standardsResponse.statusCode).toBe(200);
+    expect(standardsResponse.json()).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: standard.id })]),
+    );
     const activated = await app.inject({
       method: "POST",
       url: `/v1/evaluation-standards/${standard.id}/activate`,
@@ -394,6 +522,16 @@ describe("HTTP authentication boundary", () => {
       evaluation: { id: string };
       initiative: { version: number };
     };
+    const evaluationResponse = await app.inject({
+      method: "GET",
+      url: `/v1/evaluations/${review.evaluation.id}?organizationId=${organization.id}`,
+      headers: { cookie: headers.cookie },
+    });
+    expect(evaluationResponse.statusCode).toBe(200);
+    expect(evaluationResponse.json()).toMatchObject({
+      id: review.evaluation.id,
+      initiativeId: created.id,
+    });
     const decisionResponse = await app.inject({
       method: "POST",
       url: `/v1/initiatives/${created.id}/decide?organizationId=${organization.id}`,
@@ -410,6 +548,17 @@ describe("HTTP authentication boundary", () => {
     const decision = decisionResponse.json() as { decision: { id: string } };
     expect(decision).toMatchObject({
       initiative: { status: "approved", allowedActions: [] },
+    });
+    const decisionDetailResponse = await app.inject({
+      method: "GET",
+      url: `/v1/decisions/${decision.decision.id}?organizationId=${organization.id}`,
+      headers: { cookie: headers.cookie },
+    });
+    expect(decisionDetailResponse.statusCode).toBe(200);
+    expect(decisionDetailResponse.json()).toMatchObject({
+      id: decision.decision.id,
+      initiativeId: created.id,
+      outcome: "approved",
     });
     const auditResponse = await app.inject({
       method: "GET",

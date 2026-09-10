@@ -33,6 +33,10 @@ export interface ProjectStore {
   create(project: Project): Promise<void>;
   findById(projectId: string): Promise<Project | null>;
   findByInitiative(initiativeId: string): Promise<Project | null>;
+  list(input: {
+    organizationId: string;
+    workspaceId: string;
+  }): Promise<readonly Project[]>;
   save(input: { project: Project; expectedVersion: number }): Promise<boolean>;
   createWithEvent?(input: {
     project: Project;
@@ -106,7 +110,7 @@ export class ProjectService {
     )
       throw new ProjectDomainError("INVALID_PROJECT_TRANSITION");
     if (await this.dependencies.projects.findByInitiative(initiative.id))
-      throw new ProjectDomainError("INVALID_PROJECT_TRANSITION");
+      throw new ProjectAlreadyExistsError();
     await Promise.all(
       [
         input.sponsorActorId,
@@ -279,6 +283,26 @@ export class ProjectService {
       projectId: input.projectId,
     });
   }
+  async list(input: {
+    actorId: string;
+    organizationId: string;
+    workspaceId: string;
+  }): Promise<readonly Project[]> {
+    await this.assertMember(input.actorId, input.organizationId);
+    return this.dependencies.projects.list(input);
+  }
+  async detail(input: {
+    actorId: string;
+    organizationId: string;
+    projectId: string;
+  }): Promise<Project> {
+    const project = await this.requireProject(
+      input.projectId,
+      input.organizationId,
+    );
+    await this.assertMember(input.actorId, input.organizationId);
+    return project;
+  }
   private async requireProject(
     projectId: string,
     organizationId: string,
@@ -366,6 +390,11 @@ export class ProjectService {
 export class ProjectVersionConflictError extends Error {
   constructor() {
     super("PROJECT_VERSION_CONFLICT");
+  }
+}
+export class ProjectAlreadyExistsError extends Error {
+  constructor() {
+    super("PROJECT_ALREADY_EXISTS");
   }
 }
 export { ProjectDomainError };

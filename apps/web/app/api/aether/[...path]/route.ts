@@ -3,6 +3,7 @@ import { NextRequest } from "next/server";
 const forwardedHeaders = [
   "content-type",
   "cookie",
+  "idempotency-key",
   "origin",
   "x-correlation-id",
   "x-csrf-token",

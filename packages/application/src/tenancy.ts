@@ -39,6 +39,11 @@ export interface TenantStore {
   }): Promise<void>;
   createWorkspace(workspace: Workspace): Promise<void>;
   findWorkspace(workspaceId: string): Promise<Workspace | null>;
+  listOrganizations(actorId: string): Promise<readonly Organization[]>;
+  listWorkspaces(input: {
+    actorId: string;
+    organizationId: string;
+  }): Promise<readonly Workspace[]>;
   findOrganizationRole(input: {
     actorId: string;
     organizationId: string;
@@ -139,6 +144,17 @@ export class TenantService {
       "workspace:read",
     );
     return workspace;
+  }
+  async listOrganizations(actorId: string): Promise<readonly Organization[]> {
+    return this.dependencies.store.listOrganizations(actorId);
+  }
+  async listWorkspaces(input: {
+    actorId: string;
+    organizationId: string;
+  }): Promise<readonly Workspace[]> {
+    if (!(await this.dependencies.store.findOrganizationRole(input)))
+      throw new AccessDeniedError("organization:read");
+    return this.dependencies.store.listWorkspaces(input);
   }
 
   async invite(input: {

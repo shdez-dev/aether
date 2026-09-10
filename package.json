@@ -17,7 +17,9 @@
     "test": "turbo run test",
     "test:e2e": "turbo run test:e2e",
     "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
-    "db:migrate": "pnpm --filter @aether/database migrate"
+    "db:migrate": "pnpm --filter @aether/database migrate",
+    "local:up": "docker compose -f infra/compose.yaml up -d",
+    "local:down": "docker compose -f infra/compose.yaml down"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

@@ -40,9 +40,42 @@ class InMemoryAuthStore implements AuthStore {
     this.sessions.set(sessionId, renewed);
     return renewed;
   }
-  async revokeSession(sessionId: string, now: Date): Promise<void> {
-    const session = this.sessions.get(sessionId);
-    if (session) this.sessions.set(sessionId, { ...session, revokedAt: now });
+  async listActiveSessions(input: {
+    actorId: string;
+    now: Date;
+  }): Promise<readonly AuthSession[]> {
+    return [...this.sessions.values()].filter(
+      (session) =>
+        session.actorId === input.actorId &&
+        !session.revokedAt &&
+        session.expiresAt > input.now,
+    );
+  }
+  async revokeOwnedSession(input: {
+    actorId: string;
+    sessionId: string;
+    now: Date;
+  }): Promise<boolean> {
+    const session = this.sessions.get(input.sessionId);
+    if (!session || session.actorId !== input.actorId || session.revokedAt)
+      return false;
+    this.sessions.set(input.sessionId, { ...session, revokedAt: input.now });
+    return true;
+  }
+  async revokeOtherSessions(input: {
+    actorId: string;
+    exceptSessionId: string;
+    now: Date;
+  }): Promise<number> {
+    const sessions = await this.listActiveSessions({
+      actorId: input.actorId,
+      now: input.now,
+    });
+    for (const session of sessions)
+      if (session.id !== input.exceptSessionId)
+        this.sessions.set(session.id, { ...session, revokedAt: input.now });
+    return sessions.filter((session) => session.id !== input.exceptSessionId)
+      .length;
   }
   async createLoginTransaction(transaction: LoginTransaction): Promise<void> {
     this.transactions.set(transaction.handleHash, transaction);

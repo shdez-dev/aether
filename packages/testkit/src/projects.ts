@@ -27,6 +27,16 @@ export class InMemoryProjectStore implements ProjectStore {
       ) ?? null
     );
   }
+  async list(input: {
+    organizationId: string;
+    workspaceId: string;
+  }): Promise<readonly Project[]> {
+    return [...this.projects.values()].filter(
+      (project) =>
+        project.organizationId === input.organizationId &&
+        project.workspaceId === input.workspaceId,
+    );
+  }
   async save(input: {
     project: Project;
     expectedVersion: number;

@@ -141,6 +141,13 @@ export class InMemoryEvaluationStandardStore implements EvaluationStandardStore 
   async findById(standardId: string): Promise<EvaluationStandard | null> {
     return this.standards.get(standardId) ?? null;
   }
+  async list(input: {
+    organizationId: string;
+  }): Promise<readonly EvaluationStandard[]> {
+    return [...this.standards.values()].filter(
+      (standard) => standard.organizationId === input.organizationId,
+    );
+  }
   async activate(input: {
     organizationId: string;
     standardId: string;

@@ -19,6 +19,7 @@ import {
   PostgresAuditHistoryStore,
   PostgresInitiativeAuditStore,
   PostgresInitiativeStore,
+  PostgresIdempotencyStore,
   PostgresProjectAuditStore,
   PostgresProjectExecutionStore,
   PostgresProjectStore,
@@ -26,21 +27,35 @@ import {
   PostgresEvaluationStore,
   PostgresTenantStore,
 } from "@aether/database";
+import {
+  createOperationalMetrics,
+  initializeTelemetry,
+} from "@aether/observability";
 import { Pool } from "pg";
 
 import { buildServer } from "./app.js";
 import { readServerConfig } from "./config.js";
 
 const config = readServerConfig();
+const telemetry = initializeTelemetry({
+  serviceName: "aether-server",
+  ...(config.otelExporterOtlpEndpoint
+    ? { otlpEndpoint: config.otelExporterOtlpEndpoint }
+    : {}),
+});
+const metrics = createOperationalMetrics("aether-server");
 const pool = new Pool({ connectionString: config.databaseUrl });
+const authStore = new PostgresAuthStore(pool);
 const auth = new AuthService({
-  store: new PostgresAuthStore(pool),
+  store: authStore,
+  audit: authStore,
   cipher: createAesGcmCipher(config.sessionEncryptionKey),
   oidc: createKeycloakOidcProvider({
     issuerUrl: config.oidcIssuerUrl,
     clientId: config.oidcClientId,
     clientSecret: config.oidcClientSecret,
     redirectUri: config.oidcRedirectUri,
+    allowInsecureRequests: config.nodeEnv === "development",
   }),
   issuer: config.oidcIssuerUrl,
   sessionTtlSeconds: config.sessionTtlSeconds,
@@ -89,6 +104,24 @@ const app = await buildServer({
   initiatives,
   evaluations,
   projects,
+  idempotency: new PostgresIdempotencyStore(pool),
   auditHistory,
+  metrics,
+  readinessCheck: async () => {
+    await pool.query("SELECT 1");
+  },
 });
-await app.listen({ port: config.port, host: "0.0.0.0" });
+try {
+  await app.listen({ port: config.port, host: "0.0.0.0" });
+} catch (error) {
+  await telemetry.shutdown();
+  await pool.end();
+  throw error;
+}
+for (const signal of ["SIGINT", "SIGTERM"] as const)
+  process.once(signal, () => {
+    void app
+      .close()
+      .then(() => telemetry.shutdown())
+      .then(() => pool.end());
+  });

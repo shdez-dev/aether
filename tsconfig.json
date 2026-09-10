@@ -6,7 +6,8 @@
     "paths": {
       "@aether/application": ["packages/application/src/index.ts"],
       "@aether/contracts": ["packages/contracts/src/index.ts"],
-      "@aether/domain": ["packages/domain/src/index.ts"]
+      "@aether/domain": ["packages/domain/src/index.ts"],
+      "@aether/ui": ["packages/ui/src/index.ts"]
     }
   },
   "include": [

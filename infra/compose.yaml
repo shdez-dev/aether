@@ -1,0 +1,61 @@
+name: aether-local
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: aether
+      POSTGRES_USER: aether
+      POSTGRES_PASSWORD: aether_local_only
+    ports: ["5433:5432"]
+    volumes: [postgres-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aether -d aether"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    command: redis-server --appendonly yes
+    volumes: [redis-data:/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.4
+    command: start-dev --import-realm
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: aether_local_only
+    ports: ["8080:8080"]
+    volumes:
+      [
+        ./keycloak/aether-local-realm.json:/opt/keycloak/data/import/aether-local-realm.json:ro,
+      ]
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: aether-local
+      MINIO_ROOT_PASSWORD: aether_local_only_minio_secret
+    ports: ["9000:9000", "9001:9001"]
+    volumes: [minio-data:/data]
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_started
+    entrypoint: >-
+      /bin/sh -c "until mc alias set local http://minio:9000 aether-local aether_local_only_minio_secret; do sleep 2; done; mc mb --ignore-existing local/aether-local"
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:

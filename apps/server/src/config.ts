@@ -25,6 +25,29 @@ const configSchema = z.object({
     .min(60)
     .max(43_200)
     .default(1_800),
+  MAX_REQUEST_BODY_BYTES: z.coerce
+    .number()
+    .int()
+    .min(1_024)
+    .max(10_485_760)
+    .default(1_048_576),
+  RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(10_000).default(120),
+  RATE_LIMIT_WINDOW_SECONDS: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(3_600)
+    .default(60),
+  LOG_LEVEL: z
+    .enum(["fatal", "error", "warn", "info", "debug"])
+    .default("info"),
+  METRICS_TOKEN: z.string().min(32).optional(),
+  OTEL_EXPORTER_OTLP_ENDPOINT: z
+    .string()
+    .url()
+    .or(z.literal(""))
+    .optional()
+    .transform((value) => value || undefined),
 });
 
 export type ServerConfig = Readonly<{
@@ -40,6 +63,12 @@ export type ServerConfig = Readonly<{
   sessionEncryptionKey: string;
   sessionTtlSeconds: number;
   sessionRenewalWindowSeconds: number;
+  maxRequestBodyBytes: number;
+  rateLimitMax: number;
+  rateLimitWindowSeconds: number;
+  logLevel: "fatal" | "error" | "warn" | "info" | "debug";
+  metricsToken?: string;
+  otelExporterOtlpEndpoint?: string;
   secureCookies: boolean;
 }>;
 
@@ -53,6 +82,8 @@ export function readServerConfig(
   ) {
     throw new Error("OIDC_REDIRECT_URI must use SERVER_PUBLIC_URL origin");
   }
+  if (value.NODE_ENV === "production" && !value.METRICS_TOKEN)
+    throw new Error("METRICS_TOKEN is required in production");
   return {
     nodeEnv: value.NODE_ENV,
     port: value.PORT,
@@ -66,6 +97,14 @@ export function readServerConfig(
     sessionEncryptionKey: value.SESSION_ENCRYPTION_KEY,
     sessionTtlSeconds: value.SESSION_TTL_SECONDS,
     sessionRenewalWindowSeconds: value.SESSION_RENEWAL_WINDOW_SECONDS,
+    maxRequestBodyBytes: value.MAX_REQUEST_BODY_BYTES,
+    rateLimitMax: value.RATE_LIMIT_MAX,
+    rateLimitWindowSeconds: value.RATE_LIMIT_WINDOW_SECONDS,
+    logLevel: value.LOG_LEVEL,
+    ...(value.METRICS_TOKEN ? { metricsToken: value.METRICS_TOKEN } : {}),
+    ...(value.OTEL_EXPORTER_OTLP_ENDPOINT
+      ? { otelExporterOtlpEndpoint: value.OTEL_EXPORTER_OTLP_ENDPOINT }
+      : {}),
     secureCookies: value.NODE_ENV === "production",
   };
 }

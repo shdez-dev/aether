@@ -35,6 +35,19 @@ export type LoginTransaction = Readonly<{
   expiresAt: Date;
 }>;
 
+export type AuthSessionAuditEvent = Readonly<{
+  id: string;
+  action:
+    | "auth.session_logged_out.v1"
+    | "auth.session_revoked.v1"
+    | "auth.sessions_revoked_others.v1";
+  actorId: string;
+  targetSessionId: string | null;
+  correlationId: string;
+  occurredAt: Date;
+  payload: Readonly<Record<string, unknown>>;
+}>;
+
 export interface AuthStore {
   createSession(session: AuthSession): Promise<void>;
   findActiveSession(tokenHash: string, now: Date): Promise<AuthSession | null>;
@@ -43,13 +56,30 @@ export interface AuthStore {
     expiresAt: Date,
     now: Date,
   ): Promise<AuthSession | null>;
-  revokeSession(sessionId: string, now: Date): Promise<void>;
+  listActiveSessions(input: {
+    actorId: string;
+    now: Date;
+  }): Promise<readonly AuthSession[]>;
+  revokeOwnedSession(input: {
+    actorId: string;
+    sessionId: string;
+    now: Date;
+  }): Promise<boolean>;
+  revokeOtherSessions(input: {
+    actorId: string;
+    exceptSessionId: string;
+    now: Date;
+  }): Promise<number>;
   createLoginTransaction(transaction: LoginTransaction): Promise<void>;
   consumeLoginTransaction(input: {
     handleHash: string;
     stateHash: string;
     now: Date;
   }): Promise<LoginTransaction | null>;
+}
+
+export interface AuthSessionAuditStore {
+  recordSessionAudit(event: AuthSessionAuditEvent): Promise<void>;
 }
 
 export interface SecretCipher {
@@ -79,6 +109,7 @@ export type AuthServiceOptions = Readonly<{
   sessionTtlSeconds: number;
   sessionRenewalWindowSeconds: number;
   loginTransactionTtlSeconds?: number;
+  audit?: AuthSessionAuditStore;
   now?: () => Date;
 }>;
 
@@ -185,9 +216,94 @@ export class AuthService {
     return session;
   }
 
-  async logout(sessionToken: string | undefined): Promise<void> {
+  async listSessions(actorId: string, currentSessionId: string) {
+    const sessions = await this.options.store.listActiveSessions({
+      actorId,
+      now: this.now(),
+    });
+    return sessions.map((session) => ({
+      id: session.id,
+      createdAt: session.createdAt,
+      lastSeenAt: session.lastSeenAt,
+      expiresAt: session.expiresAt,
+      isCurrent: session.id === currentSessionId,
+    }));
+  }
+
+  async revokeSession(input: {
+    actorId: string;
+    sessionId: string;
+    correlationId: string;
+  }): Promise<boolean> {
+    const now = this.now();
+    const revoked = await this.options.store.revokeOwnedSession({
+      actorId: input.actorId,
+      sessionId: input.sessionId,
+      now,
+    });
+    if (revoked)
+      await this.recordSessionAudit({
+        id: randomUUID(),
+        action: "auth.session_revoked.v1",
+        actorId: input.actorId,
+        targetSessionId: input.sessionId,
+        correlationId: input.correlationId,
+        occurredAt: now,
+        payload: {},
+      });
+    return revoked;
+  }
+
+  async revokeOtherSessions(input: {
+    actorId: string;
+    currentSessionId: string;
+    correlationId: string;
+  }): Promise<number> {
+    const now = this.now();
+    const revoked = await this.options.store.revokeOtherSessions({
+      actorId: input.actorId,
+      exceptSessionId: input.currentSessionId,
+      now,
+    });
+    if (revoked > 0)
+      await this.recordSessionAudit({
+        id: randomUUID(),
+        action: "auth.sessions_revoked_others.v1",
+        actorId: input.actorId,
+        targetSessionId: input.currentSessionId,
+        correlationId: input.correlationId,
+        occurredAt: now,
+        payload: { revokedSessions: revoked },
+      });
+    return revoked;
+  }
+
+  async logout(
+    sessionToken: string | undefined,
+    correlationId: string = randomUUID(),
+  ): Promise<void> {
     const session = await this.authenticate(sessionToken);
-    if (session) await this.options.store.revokeSession(session.id, this.now());
+    if (!session) return;
+    const now = this.now();
+    const revoked = await this.options.store.revokeOwnedSession({
+      actorId: session.actorId,
+      sessionId: session.id,
+      now,
+    });
+    if (revoked)
+      await this.recordSessionAudit({
+        id: randomUUID(),
+        action: "auth.session_logged_out.v1",
+        actorId: session.actorId,
+        targetSessionId: session.id,
+        correlationId,
+        occurredAt: now,
+        payload: {},
+      });
+  }
+
+  private async recordSessionAudit(event: AuthSessionAuditEvent): Promise<void> {
+    if (this.options.audit) await this.options.audit.recordSessionAudit(event);
   }
 }
 
@@ -251,11 +367,16 @@ export function createKeycloakOidcProvider(config: {
   clientId: string;
   clientSecret: string;
   redirectUri: string;
+  allowInsecureRequests?: boolean;
 }): OidcProvider {
   const discovery = oidc.discovery(
     new URL(config.issuerUrl),
     config.clientId,
     config.clientSecret,
+    undefined,
+    config.allowInsecureRequests
+      ? { execute: [oidc.allowInsecureRequests] }
+      : undefined,
   );
   return {
     async buildAuthorizationUrl(input) {

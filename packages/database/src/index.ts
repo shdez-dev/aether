@@ -1,4 +1,11 @@
-import type { AuthSession, AuthStore, LoginTransaction } from "@aether/auth";
+import type {
+  AuthSession,
+  AuthSessionAuditEvent,
+  AuthSessionAuditStore,
+  AuthStore,
+  LoginTransaction,
+} from "@aether/auth";
+import { ProjectAlreadyExistsError } from "@aether/application";
 import type {
   InitiativeAuditEvent,
   InitiativeAuditStore,
@@ -12,6 +19,9 @@ import type {
   OutboxStore,
   OutboxMessage,
   DurableDomainEvent,
+  IdempotencyReservation,
+  IdempotencyResponse,
+  IdempotencyStore,
   AuditEvent,
   AuditHistoryStore,
   Invitation,
@@ -34,8 +44,10 @@ import type {
 } from "@aether/domain";
 import type { Pool, PoolClient } from "pg";
 
+export { migratePool } from "./migrations.js";
+
 /** Adaptador PostgreSQL para transacciones OIDC y sesiones opacas. */
-export class PostgresAuthStore implements AuthStore {
+export class PostgresAuthStore implements AuthStore, AuthSessionAuditStore {
   constructor(private readonly pool: Pool) {}
 
   async createSession(session: AuthSession): Promise<void> {
@@ -81,10 +93,61 @@ export class PostgresAuthStore implements AuthStore {
     return result.rows[0] ? toSession(result.rows[0]) : null;
   }
 
-  async revokeSession(sessionId: string, now: Date): Promise<void> {
+  async listActiveSessions(input: {
+    actorId: string;
+    now: Date;
+  }): Promise<readonly AuthSession[]> {
+    const result = await this.pool.query<SessionRow>(
+      `SELECT id, token_hash, actor_id, actor_email, issuer, created_at, last_seen_at, expires_at, revoked_at
+       FROM auth_sessions
+       WHERE actor_id = $1 AND revoked_at IS NULL AND expires_at > $2
+       ORDER BY last_seen_at DESC, created_at DESC`,
+      [input.actorId, input.now],
+    );
+    return result.rows.map(toSession);
+  }
+
+  async revokeOwnedSession(input: {
+    actorId: string;
+    sessionId: string;
+    now: Date;
+  }): Promise<boolean> {
+    const result = await this.pool.query(
+      `UPDATE auth_sessions SET revoked_at = $3
+       WHERE id = $1 AND actor_id = $2 AND revoked_at IS NULL
+       RETURNING id`,
+      [input.sessionId, input.actorId, input.now],
+    );
+    return (result.rowCount ?? 0) === 1;
+  }
+
+  async revokeOtherSessions(input: {
+    actorId: string;
+    exceptSessionId: string;
+    now: Date;
+  }): Promise<number> {
+    const result = await this.pool.query(
+      `UPDATE auth_sessions SET revoked_at = $3
+       WHERE actor_id = $1 AND id <> $2 AND revoked_at IS NULL AND expires_at > $3`,
+      [input.actorId, input.exceptSessionId, input.now],
+    );
+    return result.rowCount ?? 0;
+  }
+
+  async recordSessionAudit(event: AuthSessionAuditEvent): Promise<void> {
     await this.pool.query(
-      "UPDATE auth_sessions SET revoked_at = $2 WHERE id = $1 AND revoked_at IS NULL",
-      [sessionId, now],
+      `INSERT INTO auth_session_audit_events
+       (id, action, actor_id, target_session_id, correlation_id, occurred_at, payload)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        event.id,
+        event.action,
+        event.actorId,
+        event.targetSessionId,
+        event.correlationId,
+        event.occurredAt,
+        asJson(event.payload),
+      ],
     );
   }
 
@@ -117,6 +180,96 @@ export class PostgresAuthStore implements AuthStore {
   }
 }
 
+/** Persistencia de resultados de mutaciones HTTP idempotentes. */
+export class PostgresIdempotencyStore implements IdempotencyStore {
+  constructor(private readonly pool: Pool) {}
+
+  async reserve(input: {
+    actorId: string;
+    operation: string;
+    key: string;
+    requestHash: string;
+    expiresAt: Date;
+  }): Promise<IdempotencyReservation> {
+    await this.pool.query(
+      "DELETE FROM api_idempotency_keys WHERE expires_at <= NOW()",
+    );
+    const inserted = await this.pool.query(
+      `INSERT INTO api_idempotency_keys (actor_id, operation, idempotency_key, request_hash, status, expires_at)
+       VALUES ($1, $2, $3, $4, 'pending', $5)
+       ON CONFLICT DO NOTHING
+       RETURNING actor_id`,
+      [
+        input.actorId,
+        input.operation,
+        input.key,
+        input.requestHash,
+        input.expiresAt,
+      ],
+    );
+    if ((inserted.rowCount ?? 0) === 1) return { kind: "claimed" };
+
+    const existing = await this.pool.query<IdempotencyKeyRow>(
+      `SELECT request_hash, status, response_status, response_body
+       FROM api_idempotency_keys
+       WHERE actor_id = $1 AND operation = $2 AND idempotency_key = $3`,
+      [input.actorId, input.operation, input.key],
+    );
+    const record = existing.rows[0];
+    if (!record || record.request_hash !== input.requestHash)
+      return { kind: "key_reused" };
+    if (record.status === "pending") return { kind: "in_progress" };
+    if (record.response_status === null || record.response_body === null)
+      throw new Error("Completed idempotency record is invalid");
+    return {
+      kind: "completed",
+      response: {
+        statusCode: record.response_status,
+        body: record.response_body,
+      },
+    };
+  }
+
+  async complete(input: {
+    actorId: string;
+    operation: string;
+    key: string;
+    requestHash: string;
+    response: IdempotencyResponse;
+  }): Promise<void> {
+    const result = await this.pool.query(
+      `UPDATE api_idempotency_keys
+       SET status = 'completed', response_status = $5, response_body = $6
+       WHERE actor_id = $1 AND operation = $2 AND idempotency_key = $3
+         AND request_hash = $4 AND status = 'pending'`,
+      [
+        input.actorId,
+        input.operation,
+        input.key,
+        input.requestHash,
+        input.response.statusCode,
+        asJson(input.response.body),
+      ],
+    );
+    if ((result.rowCount ?? 0) !== 1)
+      throw new Error("Idempotency record cannot be completed");
+  }
+
+  async abandon(input: {
+    actorId: string;
+    operation: string;
+    key: string;
+    requestHash: string;
+  }): Promise<void> {
+    await this.pool.query(
+      `DELETE FROM api_idempotency_keys
+       WHERE actor_id = $1 AND operation = $2 AND idempotency_key = $3
+         AND request_hash = $4 AND status = 'pending'`,
+      [input.actorId, input.operation, input.key, input.requestHash],
+    );
+  }
+}
+
 type SessionRow = {
   id: string;
   token_hash: string;
@@ -127,6 +280,12 @@ type SessionRow = {
   last_seen_at: Date;
   expires_at: Date;
   revoked_at: Date | null;
+};
+type IdempotencyKeyRow = {
+  request_hash: string;
+  status: "pending" | "completed";
+  response_status: number | null;
+  response_body: unknown | null;
 };
 type LoginTransactionRow = {
   id: string;
@@ -218,6 +377,23 @@ export class PostgresTenantStore implements TenantStore {
       [workspaceId],
     );
     return result.rows[0] ? toWorkspace(result.rows[0]) : null;
+  }
+  async listOrganizations(actorId: string): Promise<readonly Organization[]> {
+    const result = await this.pool.query<Organization>(
+      `SELECT organizations.id, organizations.name, organizations.timezone, organizations.locale, organizations.version FROM organizations JOIN organization_memberships ON organization_memberships.organization_id = organizations.id WHERE organization_memberships.actor_id = $1 ORDER BY organizations.name`,
+      [actorId],
+    );
+    return result.rows;
+  }
+  async listWorkspaces(input: {
+    actorId: string;
+    organizationId: string;
+  }): Promise<readonly Workspace[]> {
+    const result = await this.pool.query<WorkspaceRow>(
+      `SELECT workspaces.id, workspaces.organization_id, workspaces.name, workspaces.mode, workspaces.version FROM workspaces LEFT JOIN workspace_memberships ON workspace_memberships.workspace_id = workspaces.id WHERE workspaces.organization_id = $1 AND (EXISTS (SELECT 1 FROM organization_memberships WHERE organization_id = $1 AND actor_id = $2 AND role IN ('owner','admin')) OR workspace_memberships.actor_id = $2) ORDER BY workspaces.name`,
+      [input.organizationId, input.actorId],
+    );
+    return result.rows.map(toWorkspace);
   }
 
   async findOrganizationRole(input: {
@@ -461,7 +637,7 @@ export class PostgresEvaluationStandardStore implements EvaluationStandardStore 
         standard.organizationId,
         standard.name,
         standard.version,
-        standard.criteria,
+        asJson(standard.criteria),
         standard.isActive,
         standard.publishedAt,
         standard.publishedByActorId,
@@ -475,6 +651,15 @@ export class PostgresEvaluationStandardStore implements EvaluationStandardStore 
       [standardId],
     );
     return result.rows[0] ? toEvaluationStandard(result.rows[0]) : null;
+  }
+  async list(input: {
+    organizationId: string;
+  }): Promise<readonly EvaluationStandard[]> {
+    const result = await this.pool.query<EvaluationStandardRow>(
+      `SELECT id, organization_id, name, version, criteria, is_active, published_at, published_by_actor_id FROM evaluation_standards WHERE organization_id = $1 ORDER BY is_active DESC, name, version DESC`,
+      [input.organizationId],
+    );
+    return result.rows.map(toEvaluationStandard);
   }
   async activate(input: {
     organizationId: string;
@@ -517,8 +702,8 @@ export class PostgresEvaluationStore implements EvaluationStore {
         evaluation.initiativeVersion,
         evaluation.standardId,
         evaluation.standardVersion,
-        evaluation.criteria,
-        evaluation.coverage,
+        asJson(evaluation.criteria),
+        asJson(evaluation.coverage),
         evaluation.evaluatedByActorId,
         evaluation.evaluatedAt,
       ],
@@ -545,10 +730,10 @@ export class PostgresEvaluationStore implements EvaluationStore {
         decision.evaluationId,
         decision.outcome,
         decision.rationale,
-        decision.evidence,
+        asJson(decision.evidence),
         decision.standardId,
         decision.standardVersion,
-        decision.coverage,
+        asJson(decision.coverage),
         decision.decidedByActorId,
         decision.decidedAt,
       ],
@@ -579,7 +764,7 @@ export class PostgresProjectStore implements ProjectStore {
         project.name,
         project.sponsorActorId,
         project.leadActorId,
-        project.participants,
+        asJson(project.participants),
         project.status,
         project.version,
         project.createdAt,
@@ -599,6 +784,8 @@ export class PostgresProjectStore implements ProjectStore {
       await client.query("COMMIT");
     } catch (error) {
       await client.query("ROLLBACK");
+      if (isProjectConversionConflict(error))
+        throw new ProjectAlreadyExistsError();
       throw error;
     } finally {
       client.release();
@@ -617,6 +804,16 @@ export class PostgresProjectStore implements ProjectStore {
       [initiativeId],
     );
     return result.rows[0] ? toProject(result.rows[0]) : null;
+  }
+  async list(input: {
+    organizationId: string;
+    workspaceId: string;
+  }): Promise<readonly Project[]> {
+    const result = await this.pool.query<ProjectRow>(
+      `SELECT id, organization_id, workspace_id, source_initiative_id, source_decision_id, name, sponsor_actor_id, lead_actor_id, participants, status, version, created_at, updated_at FROM projects WHERE organization_id = $1 AND workspace_id = $2 ORDER BY updated_at DESC`,
+      [input.organizationId, input.workspaceId],
+    );
+    return result.rows.map(toProject);
   }
   async save(input: {
     project: Project;
@@ -1132,7 +1329,7 @@ async function insertProject(
       project.name,
       project.sponsorActorId,
       project.leadActorId,
-      project.participants,
+      asJson(project.participants),
       project.status,
       project.version,
       project.createdAt,
@@ -1160,5 +1357,19 @@ async function insertOutboxEvent(
       event.schemaVersion,
       event.payload,
     ],
+  );
+}
+
+function asJson(value: unknown): string {
+  return JSON.stringify(value);
+}
+
+function isProjectConversionConflict(error: unknown): boolean {
+  if (!error || typeof error !== "object" || !("code" in error)) return false;
+  const databaseError = error as { code?: unknown; constraint?: unknown };
+  return (
+    databaseError.code === "23505" &&
+    (databaseError.constraint === "projects_source_initiative_id_key" ||
+      databaseError.constraint === "projects_source_decision_id_key")
   );
 }

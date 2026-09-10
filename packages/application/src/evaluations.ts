@@ -21,6 +21,9 @@ import {
 export interface EvaluationStandardStore {
   create(standard: EvaluationStandard): Promise<void>;
   findById(standardId: string): Promise<EvaluationStandard | null>;
+  list(input: {
+    organizationId: string;
+  }): Promise<readonly EvaluationStandard[]>;
   activate(input: {
     organizationId: string;
     standardId: string;
@@ -88,6 +91,39 @@ export class EvaluationService {
       organizationId: input.organizationId,
       standardId: input.standardId,
     });
+  }
+  async listStandards(input: {
+    actorId: string;
+    organizationId: string;
+  }): Promise<readonly EvaluationStandard[]> {
+    await this.assertOrganizationManager(input.actorId, input.organizationId);
+    return this.dependencies.standards.list(input);
+  }
+  async getEvaluation(input: {
+    actorId: string;
+    organizationId: string;
+    evaluationId: string;
+  }): Promise<InitiativeEvaluation> {
+    await this.assertOrganizationManager(input.actorId, input.organizationId);
+    const evaluation = await this.dependencies.evaluations.findEvaluation(
+      input.evaluationId,
+    );
+    if (!evaluation || evaluation.organizationId !== input.organizationId)
+      throw new ResourceNotFoundError("INITIATIVE_NOT_FOUND");
+    return evaluation;
+  }
+  async getDecision(input: {
+    actorId: string;
+    organizationId: string;
+    decisionId: string;
+  }): Promise<InitiativeDecision> {
+    await this.assertOrganizationManager(input.actorId, input.organizationId);
+    const decision = await this.dependencies.evaluations.findDecision(
+      input.decisionId,
+    );
+    if (!decision || decision.organizationId !== input.organizationId)
+      throw new ResourceNotFoundError("INITIATIVE_NOT_FOUND");
+    return decision;
   }
 
   async review(input: {
