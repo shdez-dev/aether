@@ -7,6 +7,7 @@ export const AuditResourceTypeSchema = z.enum([
   "evaluation",
   "decision",
   "project",
+  "document",
 ]);
 export const AuditHistoryQuerySchema = z.object({
   organizationId: UuidSchema,

@@ -22,6 +22,10 @@ import {
   InvitationError,
   ResourceNotFoundError,
   TenantService,
+  DocumentService,
+  DocumentAccessDeniedError,
+  DocumentNotFoundError,
+  DocumentValidationError,
 } from "@aether/application";
 import {
   CreateInvitationRequestSchema,
@@ -39,6 +43,10 @@ import {
   StartReviewRequestSchema,
   SubmitInitiativeRequestSchema,
   UpdateInitiativeRequestSchema,
+  BeginDocumentUploadRequestSchema,
+  DocumentListQuerySchema,
+  BeginDocumentReplacementRequestSchema,
+  WithdrawDocumentVersionRequestSchema,
 } from "@aether/contracts";
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
@@ -69,6 +77,7 @@ export async function buildServer(input: {
   initiatives: InitiativeService;
   evaluations: EvaluationService;
   projects: ProjectService;
+  documents?: DocumentService;
   idempotency: IdempotencyStore;
   auditHistory?: AuditHistoryService;
   readinessCheck?: () => Promise<void>;
@@ -232,9 +241,11 @@ export async function buildServer(input: {
             ? 409
             : error instanceof CsrfError ||
                 error instanceof AccessDeniedError ||
+                error instanceof DocumentAccessDeniedError ||
                 error instanceof IdentityEmailRequiredError
               ? 403
-              : error instanceof ResourceNotFoundError
+              : error instanceof ResourceNotFoundError ||
+                  error instanceof DocumentNotFoundError
                 ? 404
                 : error instanceof InitiativeVersionConflictError ||
                     error instanceof ProjectVersionConflictError
@@ -274,14 +285,17 @@ export async function buildServer(input: {
                     ? "CONFLICT"
                     : error instanceof CsrfError ||
                         error instanceof AccessDeniedError ||
+                        error instanceof DocumentAccessDeniedError ||
                         error instanceof IdentityEmailRequiredError
                       ? "FORBIDDEN"
-                      : error instanceof ResourceNotFoundError
+                      : error instanceof ResourceNotFoundError ||
+                          error instanceof DocumentNotFoundError
                         ? "NOT_FOUND"
                         : error instanceof InitiativeVersionConflictError ||
                             error instanceof ProjectVersionConflictError
                           ? "CONFLICT"
                           : error instanceof InitiativeDomainError ||
+                              error instanceof DocumentValidationError ||
                               error instanceof ProjectDomainError
                             ? "PRECONDITION_FAILED"
                             : error instanceof InvitationError
@@ -550,6 +564,118 @@ export async function buildServer(input: {
       return reply.code(201).send({
         ...result.invitation,
         expiresAt: result.invitation.expiresAt.toISOString(),
+      });
+    },
+  );
+  app.post("/v1/documents/:documentId/replacements", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    if (!input.documents) throw new Error("Document service is not configured");
+    const { documentId } = z
+      .object({ documentId: z.string().uuid() })
+      .parse(request.params);
+    const body = BeginDocumentReplacementRequestSchema.parse(request.body);
+    return respondIdempotently({
+      request,
+      reply,
+      store: input.idempotency,
+      actorId: session.actorId,
+      operation: `document.replacement.begin:${documentId}:${body.replacedVersionId}`,
+      requestPayload: body,
+      execute: async () => {
+        const result = await input.documents!.beginReplacement({
+          actorId: session.actorId,
+          correlationId: correlationId(reply),
+          documentId,
+          ...body,
+        });
+        return {
+          statusCode: 201,
+          body: {
+            documentId: result.document.id,
+            versionId: result.version.id,
+            status: result.version.status,
+            upload: {
+              url: result.upload.url,
+              headers: result.upload.headers,
+              expiresAt: result.expiresAt.toISOString(),
+            },
+          },
+        };
+      },
+    });
+  });
+  app.post(
+    "/v1/documents/:documentId/versions/:versionId/withdraw",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      if (!input.documents)
+        throw new Error("Document service is not configured");
+      const params = z
+        .object({ documentId: z.string().uuid(), versionId: z.string().uuid() })
+        .parse(request.params);
+      const body = WithdrawDocumentVersionRequestSchema.parse(request.body);
+      return respondIdempotently({
+        request,
+        reply,
+        store: input.idempotency,
+        actorId: session.actorId,
+        operation: `document.withdraw:${params.documentId}:${params.versionId}`,
+        requestPayload: body,
+        execute: async () => ({
+          statusCode: 200,
+          body: toDocumentVersionResponse(
+            await input.documents!.withdraw({
+              actorId: session.actorId,
+              correlationId: correlationId(reply),
+              ...params,
+              ...body,
+            }),
+          ),
+        }),
+      });
+    },
+  );
+  app.post(
+    "/v1/documents/:documentId/versions/:versionId/restore",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      if (!input.documents)
+        throw new Error("Document service is not configured");
+      const params = z
+        .object({ documentId: z.string().uuid(), versionId: z.string().uuid() })
+        .parse(request.params);
+      return respondIdempotently({
+        request,
+        reply,
+        store: input.idempotency,
+        actorId: session.actorId,
+        operation: `document.restore:${params.documentId}:${params.versionId}`,
+        requestPayload: params,
+        execute: async () => ({
+          statusCode: 202,
+          body: toDocumentVersionResponse(
+            await input.documents!.restoreVersion({
+              actorId: session.actorId,
+              correlationId: correlationId(reply),
+              ...params,
+            }),
+          ),
+        }),
       });
     },
   );
@@ -1139,6 +1265,113 @@ export async function buildServer(input: {
       occurredAt: event.occurredAt.toISOString(),
     }));
   });
+  app.post("/v1/documents/uploads", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    if (!input.documents) throw new Error("Document service is not configured");
+    const body = BeginDocumentUploadRequestSchema.parse(request.body);
+    return respondIdempotently({
+      request,
+      reply,
+      store: input.idempotency,
+      actorId: session.actorId,
+      operation: `document.upload.begin:${body.resourceType}:${body.resourceId}`,
+      requestPayload: body,
+      execute: async () => {
+        const result = await input.documents!.beginUpload({
+          actorId: session.actorId,
+          correlationId: correlationId(reply),
+          ...body,
+        });
+        return {
+          statusCode: 201,
+          body: {
+            documentId: result.document.id,
+            versionId: result.version.id,
+            status: result.version.status,
+            upload: {
+              url: result.upload.url,
+              headers: result.upload.headers,
+              expiresAt: result.expiresAt.toISOString(),
+            },
+          },
+        };
+      },
+    });
+  });
+  app.post(
+    "/v1/documents/:documentId/versions/:versionId/complete",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      if (!input.documents)
+        throw new Error("Document service is not configured");
+      const params = z
+        .object({ documentId: z.string().uuid(), versionId: z.string().uuid() })
+        .parse(request.params);
+      return respondIdempotently({
+        request,
+        reply,
+        store: input.idempotency,
+        actorId: session.actorId,
+        operation: `document.upload.complete:${params.documentId}:${params.versionId}`,
+        requestPayload: params,
+        execute: async () => ({
+          statusCode: 200,
+          body: toDocumentVersionResponse(
+            await input.documents!.completeUpload({
+              actorId: session.actorId,
+              correlationId: correlationId(reply),
+              ...params,
+            }),
+          ),
+        }),
+      });
+    },
+  );
+  app.get("/v1/documents", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    if (!input.documents) throw new Error("Document service is not configured");
+    const query = DocumentListQuerySchema.parse(request.query);
+    return (
+      await input.documents.list({ actorId: session.actorId, ...query })
+    ).map(toDocumentVersionResponse);
+  });
+  app.get(
+    "/v1/documents/:documentId/versions/:versionId/download",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      if (!input.documents)
+        throw new Error("Document service is not configured");
+      const params = z
+        .object({ documentId: z.string().uuid(), versionId: z.string().uuid() })
+        .parse(request.params);
+      const download = await input.documents.download({
+        actorId: session.actorId,
+        correlationId: correlationId(reply),
+        ...params,
+      });
+      return { url: download.url, expiresAt: download.expiresAt.toISOString() };
+    },
+  );
   return app;
 }
 
@@ -1170,6 +1403,47 @@ function toProjectResponse(
     ...project,
     createdAt: project.createdAt.toISOString(),
     updatedAt: project.updatedAt.toISOString(),
+  };
+}
+function toDocumentVersionResponse(value: {
+  document: {
+    id: string;
+    resourceType: string;
+    resourceId: string;
+    classification: string;
+  };
+  version: {
+    id: string;
+    versionNumber: number;
+    originalName: string;
+    declaredContentType: string;
+    byteLength: number;
+    sha256: string;
+    status: string;
+    createdAt: Date;
+    publishedAt: Date | null;
+    retentionUntil: Date | null;
+    evidenceStatus: string;
+    supersedesVersionId: string | null;
+  };
+}) {
+  return {
+    documentId: value.document.id,
+    versionId: value.version.id,
+    resourceType: value.document.resourceType,
+    resourceId: value.document.resourceId,
+    classification: value.document.classification,
+    versionNumber: value.version.versionNumber,
+    fileName: value.version.originalName,
+    contentType: value.version.declaredContentType,
+    byteLength: value.version.byteLength,
+    sha256: value.version.sha256,
+    status: value.version.status,
+    evidenceStatus: value.version.evidenceStatus,
+    createdAt: value.version.createdAt.toISOString(),
+    publishedAt: value.version.publishedAt?.toISOString() ?? null,
+    retentionUntil: value.version.retentionUntil?.toISOString() ?? null,
+    supersedesVersionId: value.version.supersedesVersionId,
   };
 }
 function correlationId(reply: FastifyReply): string {

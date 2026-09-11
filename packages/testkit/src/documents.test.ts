@@ -1,0 +1,368 @@
+import { describe, expect, it } from "vitest";
+import {
+  DocumentAccessDeniedError,
+  DocumentService,
+  DocumentScanService,
+  DocumentValidationError,
+  TenantService,
+} from "@aether/application";
+import {
+  InMemoryDocumentObjectStore,
+  InMemoryDocumentStore,
+} from "./documents.js";
+import { InMemoryTenantStore } from "./tenancy.js";
+
+describe("document evidence slice", () => {
+  it("mantiene el binario en cuarentena, publica sólo contenido verificado y aísla organizaciones", async () => {
+    let sequence = 0;
+    const ids = {
+      next: () =>
+        `00000000-0000-4000-8000-${String(++sequence).padStart(12, "0")}`,
+    };
+    const clock = { now: () => new Date("2026-09-10T12:00:00.000Z") };
+    const tenancy = new InMemoryTenantStore();
+    const tenants = new TenantService({
+      store: tenancy,
+      ids,
+      tokens: { generate: () => "x".repeat(43), hash: (value) => value },
+      clock,
+    });
+    const organization = await tenants.createOrganization({
+      actorId: "owner",
+      actorEmail: "owner@test",
+      name: "Org",
+      timezone: "UTC",
+      locale: "es-CL",
+    });
+    const workspace = await tenants.createWorkspace({
+      actorId: "owner",
+      organizationId: organization.id,
+      name: "Evidence",
+      mode: "team",
+    });
+    const foreign = await tenants.createOrganization({
+      actorId: "foreign",
+      actorEmail: "foreign@test",
+      name: "Foreign",
+      timezone: "UTC",
+      locale: "es-CL",
+    });
+    const store = new InMemoryDocumentStore();
+    const objects = new InMemoryDocumentObjectStore();
+    const initiativeId = ids.next();
+    store.addResource("initiative", initiativeId, {
+      organizationId: organization.id,
+      workspaceId: workspace.id,
+    });
+    const documents = new DocumentService({
+      store,
+      audit: store,
+      objects,
+      tenancy,
+      ids,
+      clock,
+      maxBytes: 1_000_000,
+      urlTtlSeconds: 300,
+    });
+    const checksum = "a".repeat(64);
+    const started = await documents.beginUpload({
+      actorId: "owner",
+      correlationId: ids.next(),
+      resourceType: "initiative",
+      resourceId: initiativeId,
+      classification: "confidential",
+      fileName: "evidence.pdf",
+      contentType: "application/pdf",
+      contentLength: 42,
+      sha256: checksum,
+    });
+    expect(started.version.status).toBe("quarantined");
+    expect(objects.published.size).toBe(0);
+    objects.putQuarantined(started.version.quarantineKey, {
+      bytes: 42,
+      sha256: checksum,
+      contentType: "application/pdf",
+    });
+    const published = await documents.completeUpload({
+      actorId: "owner",
+      correlationId: ids.next(),
+      documentId: started.document.id,
+      versionId: started.version.id,
+    });
+    expect(published.version.status).toBe("pending_scan");
+    const scans = new DocumentScanService({
+      store,
+      audit: store,
+      objects,
+      scanner: {
+        async scan() {
+          return { clean: true, signature: null };
+        },
+      },
+      ids,
+      clock,
+      retentionDays: { internal: 365, confidential: 1095, restricted: 2555 },
+    });
+    await scans.handle(store.events[0]!);
+    const complete = await store.findVersion({
+      documentId: started.document.id,
+      versionId: started.version.id,
+    });
+    expect(complete?.version.status).toBe("published");
+    const download = await documents.download({
+      actorId: "owner",
+      correlationId: ids.next(),
+      documentId: started.document.id,
+      versionId: started.version.id,
+    });
+    expect(new URL(download.url).searchParams.get("expires")).toBe(
+      String(download.expiresAt.getTime()),
+    );
+    await expect(
+      documents.download({
+        actorId: "foreign",
+        correlationId: ids.next(),
+        documentId: started.document.id,
+        versionId: started.version.id,
+      }),
+    ).rejects.toBeInstanceOf(DocumentAccessDeniedError);
+    expect(foreign.id).not.toBe(organization.id);
+    expect(store.audits.map((event) => event.eventType)).toEqual([
+      "document.upload_started.v1",
+      "document.scan_queued.v1",
+      "document.published.v1",
+      "document.download_url_issued.v1",
+    ]);
+    const replacement = await documents.beginReplacement({
+      actorId: "owner",
+      correlationId: ids.next(),
+      documentId: started.document.id,
+      replacedVersionId: started.version.id,
+      fileName: "evidence-v2.pdf",
+      contentType: "application/pdf",
+      contentLength: 42,
+      sha256: "f".repeat(64),
+    });
+    objects.putQuarantined(replacement.version.quarantineKey, {
+      bytes: 42,
+      sha256: "f".repeat(64),
+      contentType: "application/pdf",
+    });
+    await documents.completeUpload({
+      actorId: "owner",
+      correlationId: ids.next(),
+      documentId: started.document.id,
+      versionId: replacement.version.id,
+    });
+    await scans.handle(store.events[1]!);
+    expect(store.versions.get(started.version.id)?.status).toBe("superseded");
+    expect(store.versions.get(replacement.version.id)?.status).toBe(
+      "published",
+    );
+    const restored = await documents.restoreVersion({
+      actorId: "owner",
+      correlationId: ids.next(),
+      documentId: started.document.id,
+      versionId: started.version.id,
+    });
+    expect(restored.version.status).toBe("pending_scan");
+    await scans.handle(store.events[2]!);
+    expect(store.versions.get(replacement.version.id)?.status).toBe(
+      "superseded",
+    );
+    expect(store.versions.get(restored.version.id)?.sha256).toBe(checksum);
+    expect(store.versions.get(restored.version.id)?.status).toBe("published");
+    const retained = store.versions.get(started.version.id)!;
+    store.versions.set(retained.id, {
+      ...retained,
+      retentionUntil: new Date("2026-09-09T00:00:00.000Z"),
+    });
+    await expect(scans.purgeExpired()).resolves.toBe(1);
+    expect(store.versions.get(retained.id)?.status).toBe("purged");
+    expect(objects.published.size).toBe(2);
+  });
+  it("rechaza antes de publicar cuando checksum o MIME no coinciden", async () => {
+    const ids = {
+      next: (() => {
+        let n = 0;
+        return () => `00000000-0000-4000-8000-${String(++n).padStart(12, "0")}`;
+      })(),
+    };
+    const clock = { now: () => new Date("2026-09-10T12:00:00.000Z") };
+    const tenancy = new InMemoryTenantStore();
+    await tenancy.bootstrapOrganization({
+      organization: {
+        id: ids.next(),
+        name: "Org",
+        timezone: "UTC",
+        locale: "es",
+        version: 0,
+      },
+      ownerActorId: "owner",
+      ownerEmail: "x@test",
+    });
+    const workspaceId = ids.next();
+    await tenancy.createWorkspace({
+      id: workspaceId,
+      organizationId: [...tenancy.organizations.keys()][0]!,
+      name: "W",
+      mode: "team",
+      version: 0,
+    });
+    const store = new InMemoryDocumentStore();
+    const objects = new InMemoryDocumentObjectStore();
+    const resourceId = ids.next();
+    store.addResource("initiative", resourceId, {
+      organizationId: [...tenancy.organizations.keys()][0]!,
+      workspaceId,
+    });
+    const service = new DocumentService({
+      store,
+      audit: store,
+      objects,
+      tenancy,
+      ids,
+      clock,
+      maxBytes: 1_000,
+      urlTtlSeconds: 60,
+    });
+    const started = await service.beginUpload({
+      actorId: "owner",
+      correlationId: ids.next(),
+      resourceType: "initiative",
+      resourceId,
+      classification: "internal",
+      fileName: "wrong.pdf",
+      contentType: "application/pdf",
+      contentLength: 5,
+      sha256: "b".repeat(64),
+    });
+    objects.putQuarantined(started.version.quarantineKey, {
+      bytes: 5,
+      sha256: "c".repeat(64),
+      contentType: "text/plain",
+    });
+    await expect(
+      service.completeUpload({
+        actorId: "owner",
+        correlationId: ids.next(),
+        documentId: started.document.id,
+        versionId: started.version.id,
+      }),
+    ).rejects.toBeInstanceOf(DocumentValidationError);
+    expect(objects.published.size).toBe(0);
+    expect(
+      (
+        await store.findVersion({
+          documentId: started.document.id,
+          versionId: started.version.id,
+        })
+      )?.version.status,
+    ).toBe("rejected");
+  });
+  it("bloquea extensiones falsas y conserva la evidencia infectada fuera del área publicada", async () => {
+    let sequence = 0;
+    const ids = {
+      next: () =>
+        `00000000-0000-4000-8000-${String(++sequence).padStart(12, "0")}`,
+    };
+    const clock = { now: () => new Date("2026-09-10T12:00:00.000Z") };
+    const tenancy = new InMemoryTenantStore();
+    const organization = {
+      id: ids.next(),
+      name: "Org",
+      timezone: "UTC",
+      locale: "es",
+      version: 0,
+    };
+    await tenancy.bootstrapOrganization({
+      organization,
+      ownerActorId: "owner",
+      ownerEmail: "owner@test",
+    });
+    const workspaceId = ids.next();
+    await tenancy.createWorkspace({
+      id: workspaceId,
+      organizationId: organization.id,
+      name: "W",
+      mode: "team",
+      version: 0,
+    });
+    const store = new InMemoryDocumentStore();
+    const objects = new InMemoryDocumentObjectStore();
+    const resourceId = ids.next();
+    store.addResource("initiative", resourceId, {
+      organizationId: organization.id,
+      workspaceId,
+    });
+    const service = new DocumentService({
+      store,
+      audit: store,
+      objects,
+      tenancy,
+      ids,
+      clock,
+      maxBytes: 100,
+      urlTtlSeconds: 60,
+    });
+    await expect(
+      service.beginUpload({
+        actorId: "owner",
+        correlationId: ids.next(),
+        resourceType: "initiative",
+        resourceId,
+        classification: "internal",
+        fileName: "disfrazado.png",
+        contentType: "application/pdf",
+        contentLength: 10,
+        sha256: "d".repeat(64),
+      }),
+    ).rejects.toBeInstanceOf(DocumentValidationError);
+    const started = await service.beginUpload({
+      actorId: "owner",
+      correlationId: ids.next(),
+      resourceType: "initiative",
+      resourceId,
+      classification: "internal",
+      fileName: "eicar.txt",
+      contentType: "text/plain",
+      contentLength: 10,
+      sha256: "e".repeat(64),
+    });
+    objects.putQuarantined(started.version.quarantineKey, {
+      bytes: 10,
+      sha256: "e".repeat(64),
+      contentType: "text/plain",
+    });
+    await service.completeUpload({
+      actorId: "owner",
+      correlationId: ids.next(),
+      documentId: started.document.id,
+      versionId: started.version.id,
+    });
+    const scans = new DocumentScanService({
+      store,
+      audit: store,
+      objects,
+      scanner: {
+        async scan() {
+          return { clean: false, signature: "Eicar-Test-Signature" };
+        },
+      },
+      ids,
+      clock,
+      retentionDays: { internal: 1, confidential: 1, restricted: 1 },
+    });
+    await scans.handle(store.events[0]!);
+    expect(
+      (
+        await store.findVersion({
+          documentId: started.document.id,
+          versionId: started.version.id,
+        })
+      )?.version.status,
+    ).toBe("rejected");
+    expect(objects.published.size).toBe(0);
+    expect(store.audits.at(-1)?.eventType).toBe("document.malware_rejected.v1");
+  });
+});

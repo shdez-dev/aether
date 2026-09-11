@@ -17,6 +17,7 @@
     "@aether/contracts": "workspace:*",
     "@aether/database": "workspace:*",
     "@aether/observability": "workspace:*",
+    "@aether/storage": "workspace:*",
     "@fastify/cookie": "^11.0.0",
     "@fastify/cors": "^11.3.0",
     "@fastify/helmet": "^13.1.1",

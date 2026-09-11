@@ -24,6 +24,11 @@ import type {
   IdempotencyStore,
   AuditEvent,
   AuditHistoryStore,
+  DocumentAuditEvent,
+  DocumentAuditStore,
+  DocumentStore,
+  DocumentVersionAccess,
+  DocumentResource,
   Invitation,
   Organization,
   TenantStore,
@@ -41,6 +46,9 @@ import type {
   ProjectNextAction,
   OrganizationRole,
   WorkspaceRole,
+  DocumentVersion,
+  InstitutionalDocument,
+  DocumentResourceType,
 } from "@aether/domain";
 import type { Pool, PoolClient } from "pg";
 
@@ -941,6 +949,252 @@ export class PostgresAuditHistoryStore implements AuditHistoryStore {
   }
 }
 
+/** Metadatos de documentos y bitácora insertados atómicamente en PostgreSQL. */
+export class PostgresDocumentStore
+  implements DocumentStore, DocumentAuditStore
+{
+  constructor(private readonly pool: Pool) {}
+
+  async resolveResource(input: {
+    resourceType: DocumentResourceType;
+    resourceId: string;
+  }): Promise<DocumentResource | null> {
+    const query = resourceLookupQuery(input.resourceType);
+    const result = await this.pool.query<DocumentResourceRow>(query, [
+      input.resourceId,
+    ]);
+    return result.rows[0] ? toDocumentResource(result.rows[0]) : null;
+  }
+  async createQuarantined(input: {
+    document: InstitutionalDocument;
+    version: DocumentVersion;
+    audit: DocumentAuditEvent;
+  }): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await insertDocument(client, input.document);
+      await insertDocumentVersion(client, input.version);
+      await insertDocumentAudit(client, input.audit);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+  async findVersion(input: {
+    documentId: string;
+    versionId: string;
+  }): Promise<DocumentVersionAccess | null> {
+    const result = await this.pool.query<DocumentVersionRow>(
+      `${documentVersionSelect} WHERE documents.id = $1 AND document_versions.id = $2`,
+      [input.documentId, input.versionId],
+    );
+    return result.rows[0] ? toDocumentVersionAccess(result.rows[0]) : null;
+  }
+  async findLatestVersion(
+    documentId: string,
+  ): Promise<DocumentVersionAccess | null> {
+    const result = await this.pool.query<DocumentVersionRow>(
+      `${documentVersionSelect} WHERE documents.id = $1 ORDER BY document_versions.version_number DESC LIMIT 1`,
+      [documentId],
+    );
+    return result.rows[0] ? toDocumentVersionAccess(result.rows[0]) : null;
+  }
+  async listByResource(input: {
+    organizationId: string;
+    resourceType: DocumentResourceType;
+    resourceId: string;
+  }): Promise<readonly DocumentVersionAccess[]> {
+    const result = await this.pool.query<DocumentVersionRow>(
+      `${documentVersionSelect} WHERE documents.organization_id = $1 AND documents.resource_type = $2 AND documents.resource_id = $3 ORDER BY documents.created_at ASC, document_versions.version_number DESC`,
+      [input.organizationId, input.resourceType, input.resourceId],
+    );
+    return result.rows.map(toDocumentVersionAccess);
+  }
+  async publish(input: {
+    version: DocumentVersion;
+    audit: DocumentAuditEvent;
+  }): Promise<boolean> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const updated = await client.query(
+        `UPDATE document_versions SET detected_content_type = $2, status = 'published', evidence_status = 'valid', published_at = $3, retention_until = $4 WHERE id = $1 AND status = 'pending_scan'`,
+        [
+          input.version.id,
+          input.version.detectedContentType,
+          input.version.publishedAt,
+          input.version.retentionUntil,
+        ],
+      );
+      if ((updated.rowCount ?? 0) === 1) {
+        await client.query(
+          "UPDATE document_binaries SET object_key = $2 WHERE version_id = $1",
+          [input.version.id, input.version.objectKey],
+        );
+        if (input.version.supersedesVersionId)
+          await client.query(
+            `UPDATE document_versions SET status = 'superseded', evidence_status = 'replaced', replaced_by_version_id = $2 WHERE id = $1 AND status IN ('published', 'withdrawn')`,
+            [input.version.supersedesVersionId, input.version.id],
+          );
+        await insertDocumentAudit(client, input.audit);
+      }
+      await client.query("COMMIT");
+      return (updated.rowCount ?? 0) === 1;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+  async reject(input: {
+    version: DocumentVersion;
+    audit: DocumentAuditEvent;
+  }): Promise<boolean> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const updated = await client.query(
+        `UPDATE document_versions SET status = 'rejected', evidence_status = 'withdrawn', rejected_at = $2 WHERE id = $1 AND status IN ('quarantined', 'pending_scan')`,
+        [input.version.id, input.version.rejectedAt],
+      );
+      if ((updated.rowCount ?? 0) === 1)
+        await insertDocumentAudit(client, input.audit);
+      await client.query("COMMIT");
+      return (updated.rowCount ?? 0) === 1;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+  async queueForScan(input: {
+    version: DocumentVersion;
+    audit: DocumentAuditEvent;
+    event: DurableDomainEvent;
+  }): Promise<boolean> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const updated = await client.query(
+        `UPDATE document_versions SET detected_content_type = $2, status = 'pending_scan' WHERE id = $1 AND status = 'quarantined'`,
+        [input.version.id, input.version.detectedContentType],
+      );
+      if ((updated.rowCount ?? 0) === 1) {
+        await insertDocumentAudit(client, input.audit);
+        await insertOutboxEvent(client, input.event);
+      }
+      await client.query("COMMIT");
+      return (updated.rowCount ?? 0) === 1;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+  async createReplacement(input: {
+    version: DocumentVersion;
+    audit: DocumentAuditEvent;
+  }): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await insertDocumentVersion(client, input.version);
+      await insertDocumentAudit(client, input.audit);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+  async restore(input: {
+    version: DocumentVersion;
+    audit: DocumentAuditEvent;
+    event: DurableDomainEvent;
+  }): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await insertDocumentVersion(client, input.version);
+      await insertDocumentAudit(client, input.audit);
+      await insertOutboxEvent(client, input.event);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+  async withdraw(input: {
+    version: DocumentVersion;
+    audit: DocumentAuditEvent;
+  }): Promise<boolean> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const updated = await client.query(
+        `UPDATE document_versions SET status = 'withdrawn', evidence_status = 'withdrawn', withdrawn_at = $2 WHERE id = $1 AND status = 'published'`,
+        [input.version.id, input.version.withdrawnAt],
+      );
+      if ((updated.rowCount ?? 0) === 1)
+        await insertDocumentAudit(client, input.audit);
+      await client.query("COMMIT");
+      return (updated.rowCount ?? 0) === 1;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+  async listExpired(now: Date): Promise<readonly DocumentVersionAccess[]> {
+    const result = await this.pool.query<DocumentVersionRow>(
+      `${documentVersionSelect} WHERE document_versions.retention_until <= $1 AND document_versions.status IN ('published', 'withdrawn', 'superseded')`,
+      [now],
+    );
+    return result.rows.map(toDocumentVersionAccess);
+  }
+  async purge(input: {
+    version: DocumentVersion;
+    audit: DocumentAuditEvent;
+  }): Promise<boolean> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const updated = await client.query(
+        `UPDATE document_versions SET status = 'purged', evidence_status = 'withdrawn' WHERE id = $1 AND status IN ('published', 'withdrawn', 'superseded')`,
+        [input.version.id],
+      );
+      if ((updated.rowCount ?? 0) === 1) {
+        await client.query(
+          "UPDATE document_binaries SET object_key = NULL WHERE version_id = $1",
+          [input.version.id],
+        );
+        await insertDocumentAudit(client, input.audit);
+      }
+      await client.query("COMMIT");
+      return (updated.rowCount ?? 0) === 1;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+  async record(event: DocumentAuditEvent): Promise<void> {
+    await insertDocumentAudit(this.pool, event);
+  }
+}
+
 export class PostgresOutboxStore implements OutboxStore {
   constructor(private readonly pool: Pool) {}
   async claim(input: {
@@ -1180,6 +1434,35 @@ type AuditRow = {
   async_event_id: string | null;
   payload: Record<string, unknown>;
 };
+type DocumentResourceRow = { organization_id: string; workspace_id: string };
+type DocumentVersionRow = {
+  document_id: string;
+  organization_id: string;
+  workspace_id: string;
+  resource_type: DocumentResourceType;
+  resource_id: string;
+  classification: InstitutionalDocument["classification"];
+  created_by_actor_id: string;
+  document_created_at: Date;
+  version_id: string;
+  version_number: number;
+  original_name: string;
+  declared_content_type: string;
+  detected_content_type: string | null;
+  byte_length: string | number;
+  sha256: string;
+  status: DocumentVersion["status"];
+  quarantine_key: string;
+  object_key: string | null;
+  version_created_at: Date;
+  published_at: Date | null;
+  rejected_at: Date | null;
+  withdrawn_at: Date | null;
+  retention_until: Date | null;
+  evidence_status: DocumentVersion["evidenceStatus"];
+  supersedes_version_id: string | null;
+  replaced_by_version_id: string | null;
+};
 type OutboxRow = {
   event_id: string;
   event_type: string;
@@ -1292,6 +1575,46 @@ function toAuditEvent(row: AuditRow): AuditEvent {
     payload: row.payload,
   };
 }
+function toDocumentResource(row: DocumentResourceRow): DocumentResource {
+  return { organizationId: row.organization_id, workspaceId: row.workspace_id };
+}
+function toDocumentVersionAccess(
+  row: DocumentVersionRow,
+): DocumentVersionAccess {
+  return {
+    document: {
+      id: row.document_id,
+      organizationId: row.organization_id,
+      workspaceId: row.workspace_id,
+      resourceType: row.resource_type,
+      resourceId: row.resource_id,
+      classification: row.classification,
+      createdByActorId: row.created_by_actor_id,
+      createdAt: row.document_created_at,
+    },
+    version: {
+      id: row.version_id,
+      documentId: row.document_id,
+      versionNumber: row.version_number,
+      originalName: row.original_name,
+      declaredContentType: row.declared_content_type,
+      detectedContentType: row.detected_content_type,
+      byteLength: Number(row.byte_length),
+      sha256: row.sha256,
+      status: row.status,
+      quarantineKey: row.quarantine_key,
+      objectKey: row.object_key,
+      createdAt: row.version_created_at,
+      publishedAt: row.published_at,
+      rejectedAt: row.rejected_at,
+      withdrawnAt: row.withdrawn_at,
+      retentionUntil: row.retention_until,
+      evidenceStatus: row.evidence_status,
+      supersedesVersionId: row.supersedes_version_id,
+      replacedByVersionId: row.replaced_by_version_id,
+    },
+  };
+}
 function toOutboxMessage(row: OutboxRow): OutboxMessage {
   return {
     eventId: row.event_id,
@@ -1334,6 +1657,88 @@ async function insertProject(
       project.version,
       project.createdAt,
       project.updatedAt,
+    ],
+  );
+}
+const documentVersionSelect = `SELECT documents.id AS document_id, documents.organization_id, documents.workspace_id, documents.resource_type, documents.resource_id, documents.classification, documents.created_by_actor_id, documents.created_at AS document_created_at, document_versions.id AS version_id, document_versions.version_number, document_versions.original_name, document_versions.declared_content_type, document_versions.detected_content_type, document_versions.byte_length, document_versions.sha256, document_versions.status, document_binaries.quarantine_key, document_binaries.object_key, document_versions.created_at AS version_created_at, document_versions.published_at, document_versions.rejected_at, document_versions.withdrawn_at, document_versions.retention_until, document_versions.evidence_status, document_versions.supersedes_version_id, document_versions.replaced_by_version_id FROM documents JOIN document_versions ON document_versions.document_id = documents.id JOIN document_binaries ON document_binaries.version_id = document_versions.id`;
+function resourceLookupQuery(resourceType: DocumentResourceType): string {
+  switch (resourceType) {
+    case "initiative":
+      return "SELECT organization_id, workspace_id FROM initiatives WHERE id = $1";
+    case "evaluation":
+      return "SELECT organization_id, workspace_id FROM initiative_evaluations WHERE id = $1";
+    case "decision":
+      return "SELECT organization_id, workspace_id FROM initiative_decisions WHERE id = $1";
+    case "project":
+      return "SELECT organization_id, workspace_id FROM projects WHERE id = $1";
+  }
+}
+async function insertDocument(
+  client: Pool | PoolClient,
+  document: InstitutionalDocument,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO documents (id, organization_id, workspace_id, resource_type, resource_id, classification, created_by_actor_id, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+    [
+      document.id,
+      document.organizationId,
+      document.workspaceId,
+      document.resourceType,
+      document.resourceId,
+      document.classification,
+      document.createdByActorId,
+      document.createdAt,
+    ],
+  );
+}
+async function insertDocumentVersion(
+  client: Pool | PoolClient,
+  version: DocumentVersion,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO document_versions (id, document_id, version_number, original_name, declared_content_type, detected_content_type, byte_length, sha256, status, created_at, published_at, rejected_at, withdrawn_at, retention_until, evidence_status, supersedes_version_id, replaced_by_version_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
+    [
+      version.id,
+      version.documentId,
+      version.versionNumber,
+      version.originalName,
+      version.declaredContentType,
+      version.detectedContentType,
+      version.byteLength,
+      version.sha256,
+      version.status,
+      version.createdAt,
+      version.publishedAt,
+      version.rejectedAt,
+      version.withdrawnAt,
+      version.retentionUntil,
+      version.evidenceStatus,
+      version.supersedesVersionId,
+      version.replacedByVersionId,
+    ],
+  );
+  await client.query(
+    `INSERT INTO document_binaries (version_id, quarantine_key, object_key) VALUES ($1,$2,$3)`,
+    [version.id, version.quarantineKey, version.objectKey],
+  );
+}
+async function insertDocumentAudit(
+  client: Pool | PoolClient,
+  event: DocumentAuditEvent,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO document_audit_events (id, event_type, document_id, version_id, organization_id, workspace_id, actor_id, correlation_id, occurred_at, payload) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+    [
+      event.id,
+      event.eventType,
+      event.documentId,
+      event.versionId,
+      event.organizationId,
+      event.workspaceId,
+      event.actorId,
+      event.correlationId,
+      event.occurredAt,
+      asJson(event.payload),
     ],
   );
 }

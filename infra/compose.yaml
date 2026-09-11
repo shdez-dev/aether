@@ -55,7 +55,13 @@ services:
     entrypoint: >-
       /bin/sh -c "until mc alias set local http://minio:9000 aether-local aether_local_only_minio_secret; do sleep 2; done; mc mb --ignore-existing local/aether-local"
 
+  clamav:
+    image: clamav/clamav:latest
+    ports: ["3310:3310"]
+    volumes: [clamav-data:/var/lib/clamav]
+
 volumes:
   postgres-data:
   redis-data:
   minio-data:
+  clamav-data:

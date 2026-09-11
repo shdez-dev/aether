@@ -134,6 +134,12 @@ const config: ServerConfig = {
   rateLimitWindowSeconds: 60,
   logLevel: "info",
   secureCookies: false,
+  s3Endpoint: "http://127.0.0.1:9000",
+  s3Bucket: "aether-test",
+  s3AccessKeyId: "test",
+  s3SecretAccessKey: "test",
+  s3PresignTtlSeconds: 300,
+  maxDocumentBytes: 1_048_576,
 };
 const oidc: OidcProvider = {
   async buildAuthorizationUrl({ state }) {

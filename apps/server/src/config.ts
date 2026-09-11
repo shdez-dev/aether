@@ -48,6 +48,17 @@ const configSchema = z.object({
     .or(z.literal(""))
     .optional()
     .transform((value) => value || undefined),
+  S3_ENDPOINT: z.string().url(),
+  S3_BUCKET: z.string().min(3).max(63),
+  S3_ACCESS_KEY_ID: z.string().min(1),
+  S3_SECRET_ACCESS_KEY: z.string().min(1),
+  S3_PRESIGN_TTL_SECONDS: z.coerce.number().int().min(60).max(900).default(300),
+  MAX_DOCUMENT_BYTES: z.coerce
+    .number()
+    .int()
+    .min(1_024)
+    .max(26_214_400)
+    .default(10_485_760),
 });
 
 export type ServerConfig = Readonly<{
@@ -70,6 +81,12 @@ export type ServerConfig = Readonly<{
   metricsToken?: string;
   otelExporterOtlpEndpoint?: string;
   secureCookies: boolean;
+  s3Endpoint: string;
+  s3Bucket: string;
+  s3AccessKeyId: string;
+  s3SecretAccessKey: string;
+  s3PresignTtlSeconds: number;
+  maxDocumentBytes: number;
 }>;
 
 export function readServerConfig(
@@ -106,5 +123,11 @@ export function readServerConfig(
       ? { otelExporterOtlpEndpoint: value.OTEL_EXPORTER_OTLP_ENDPOINT }
       : {}),
     secureCookies: value.NODE_ENV === "production",
+    s3Endpoint: value.S3_ENDPOINT,
+    s3Bucket: value.S3_BUCKET,
+    s3AccessKeyId: value.S3_ACCESS_KEY_ID,
+    s3SecretAccessKey: value.S3_SECRET_ACCESS_KEY,
+    s3PresignTtlSeconds: value.S3_PRESIGN_TTL_SECONDS,
+    maxDocumentBytes: value.MAX_DOCUMENT_BYTES,
   };
 }

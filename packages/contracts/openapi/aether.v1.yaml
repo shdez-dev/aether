@@ -28,6 +28,8 @@ tags:
     description: Compromisos ejecutables con trazabilidad de iniciativa y decisión.
   - name: Audit
     description: Línea temporal autorizada de acciones y eventos.
+  - name: Documents
+    description: "Evidencia privada: carga en cuarentena y descarga con URL temporal autorizada."
 paths:
   /health:
     get:
@@ -894,7 +896,10 @@ paths:
           in: query
           required: true
           schema:
-            { type: string, enum: [initiative, evaluation, decision, project] }
+            {
+              type: string,
+              enum: [initiative, evaluation, decision, project, document],
+            }
         - name: resourceId
           in: query
           required: true
@@ -917,6 +922,178 @@ paths:
           $ref: "#/components/responses/Problem"
         default:
           $ref: "#/components/responses/Problem"
+  /v1/documents/uploads:
+    post:
+      tags: [Documents]
+      operationId: beginDocumentUpload
+      summary: Reservar una carga privada en cuarentena
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BeginDocumentUploadRequest" }
+      responses:
+        "201": { description: URL firmada PUT de corta vida para cuarentena. }
+        default: { $ref: "#/components/responses/Problem" }
+  /v1/documents:
+    get:
+      tags: [Documents]
+      operationId: listDocumentsForResource
+      summary: Listar metadatos de evidencia autorizada
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: resourceType
+          in: query
+          required: true
+          schema:
+            { type: string, enum: [initiative, evaluation, decision, project] }
+        - name: resourceId
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Versiones de documento, sin claves de almacenamiento.
+          content:
+            application/json:
+              schema:
+                {
+                  type: array,
+                  items: { $ref: "#/components/schemas/DocumentVersion" },
+                }
+        default: { $ref: "#/components/responses/Problem" }
+  /v1/documents/{documentId}/versions/{versionId}/complete:
+    post:
+      tags: [Documents]
+      operationId: completeDocumentUpload
+      summary: Verificar y publicar una carga en cuarentena
+      security: [{ cookieSession: [] }]
+      parameters:
+        - {
+            name: documentId,
+            in: path,
+            required: true,
+            schema: { type: string, format: uuid },
+          }
+        - {
+            name: versionId,
+            in: path,
+            required: true,
+            schema: { type: string, format: uuid },
+          }
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Documento publicado.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DocumentVersion" }
+        default: { $ref: "#/components/responses/Problem" }
+  /v1/documents/{documentId}/replacements:
+    post:
+      tags: [Documents]
+      operationId: beginDocumentReplacement
+      summary: Crear una versión de reemplazo sin borrar la evidencia anterior
+      security: [{ cookieSession: [] }]
+      parameters:
+        - {
+            name: documentId,
+            in: path,
+            required: true,
+            schema: { type: string, format: uuid },
+          }
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              { $ref: "#/components/schemas/BeginDocumentReplacementRequest" }
+      responses:
+        "201": { description: Nueva versión en cuarentena. }
+        default: { $ref: "#/components/responses/Problem" }
+  /v1/documents/{documentId}/versions/{versionId}/withdraw:
+    post:
+      tags: [Documents]
+      operationId: withdrawDocumentVersion
+      summary: Retirar evidencia vigente sin modificar decisiones históricas
+      security: [{ cookieSession: [] }]
+      parameters:
+        - {
+            name: documentId,
+            in: path,
+            required: true,
+            schema: { type: string, format: uuid },
+          }
+        - {
+            name: versionId,
+            in: path,
+            required: true,
+            schema: { type: string, format: uuid },
+          }
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              { $ref: "#/components/schemas/WithdrawDocumentVersionRequest" }
+      responses:
+        "200": { description: Evidencia retirada y auditada. }
+        default: { $ref: "#/components/responses/Problem" }
+  /v1/documents/{documentId}/versions/{versionId}/restore:
+    post:
+      tags: [Documents]
+      operationId: restoreDocumentVersion
+      summary: Restaurar una versión histórica como nueva cabeza, reescaneada antes de publicar
+      security: [{ cookieSession: [] }]
+      parameters:
+        - {
+            name: documentId,
+            in: path,
+            required: true,
+            schema: { type: string, format: uuid },
+          }
+        - {
+            name: versionId,
+            in: path,
+            required: true,
+            schema: { type: string, format: uuid },
+          }
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "202": { description: Nueva versión en espera de escaneo. }
+        default: { $ref: "#/components/responses/Problem" }
+  /v1/documents/{documentId}/versions/{versionId}/download:
+    get:
+      tags: [Documents]
+      operationId: getDocumentDownloadUrl
+      summary: Emitir una URL temporal de descarga tras autorizar cada solicitud
+      security: [{ cookieSession: [] }]
+      parameters:
+        - {
+            name: documentId,
+            in: path,
+            required: true,
+            schema: { type: string, format: uuid },
+          }
+        - {
+            name: versionId,
+            in: path,
+            required: true,
+            schema: { type: string, format: uuid },
+          }
+      responses:
+        "200": { description: URL temporal privada. }
+        default: { $ref: "#/components/responses/Problem" }
 components:
   securitySchemes:
     cookieSession:
@@ -1544,7 +1721,116 @@ components:
         id: { type: string, format: uuid }
         action: { type: string, example: initiative.presented.v1 }
         resourceType:
+          {
+            type: string,
+            enum: [initiative, evaluation, decision, project, document],
+          }
+    BeginDocumentUploadRequest:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          resourceType,
+          resourceId,
+          classification,
+          fileName,
+          contentType,
+          contentLength,
+          sha256,
+        ]
+      properties:
+        resourceType:
           { type: string, enum: [initiative, evaluation, decision, project] }
+        resourceId: { type: string, format: uuid }
+        classification:
+          { type: string, enum: [internal, confidential, restricted] }
+        fileName: { type: string, minLength: 1, maxLength: 255 }
+        contentType:
+          {
+            type: string,
+            enum: [application/pdf, image/png, image/jpeg, text/plain],
+          }
+        contentLength: { type: integer, minimum: 1, maximum: 26214400 }
+        sha256: { type: string, pattern: "^[a-fA-F0-9]{64}$" }
+    DocumentVersion:
+      type: object
+      required:
+        [
+          documentId,
+          versionId,
+          resourceType,
+          resourceId,
+          classification,
+          versionNumber,
+          fileName,
+          contentType,
+          byteLength,
+          sha256,
+          status,
+          evidenceStatus,
+          createdAt,
+          publishedAt,
+          retentionUntil,
+          supersedesVersionId,
+        ]
+      properties:
+        documentId: { type: string, format: uuid }
+        versionId: { type: string, format: uuid }
+        resourceType:
+          { type: string, enum: [initiative, evaluation, decision, project] }
+        resourceId: { type: string, format: uuid }
+        classification:
+          { type: string, enum: [internal, confidential, restricted] }
+        versionNumber: { type: integer, minimum: 1 }
+        fileName: { type: string }
+        contentType:
+          {
+            type: string,
+            enum: [application/pdf, image/png, image/jpeg, text/plain],
+          }
+        byteLength: { type: integer, minimum: 1 }
+        sha256: { type: string }
+        status:
+          {
+            type: string,
+            enum:
+              [
+                quarantined,
+                pending_scan,
+                published,
+                rejected,
+                withdrawn,
+                superseded,
+                purged,
+              ],
+          }
+        evidenceStatus:
+          { type: string, enum: [pending, valid, withdrawn, replaced] }
+        createdAt: { type: string, format: date-time }
+        publishedAt: { type: [string, "null"], format: date-time }
+        retentionUntil: { type: [string, "null"], format: date-time }
+        supersedesVersionId: { type: [string, "null"], format: uuid }
+    BeginDocumentReplacementRequest:
+      type: object
+      additionalProperties: false
+      required:
+        [replacedVersionId, fileName, contentType, contentLength, sha256]
+      properties:
+        replacedVersionId: { type: string, format: uuid }
+        fileName: { type: string, minLength: 1, maxLength: 255 }
+        contentType:
+          {
+            type: string,
+            enum: [application/pdf, image/png, image/jpeg, text/plain],
+          }
+        contentLength: { type: integer, minimum: 1, maximum: 26214400 }
+        sha256: { type: string, pattern: "^[a-fA-F0-9]{64}$" }
+    WithdrawDocumentVersionRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 1, maxLength: 2000 }
         resourceId: { type: string, format: uuid }
         actorId: { type: string }
         organizationId: { type: string, format: uuid }

@@ -5,6 +5,7 @@ export const auditResourceTypes = [
   "evaluation",
   "decision",
   "project",
+  "document",
 ] as const;
 export type AuditResourceType = (typeof auditResourceTypes)[number];
 export type AuditEvent = Readonly<{

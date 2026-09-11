@@ -1,0 +1,2 @@
+ALTER TABLE document_audit_events DROP CONSTRAINT document_audit_events_event_type_check;
+ALTER TABLE document_audit_events ADD CONSTRAINT document_audit_events_event_type_check CHECK (event_type IN ('document.upload_started.v1', 'document.scan_queued.v1', 'document.published.v1', 'document.rejected.v1', 'document.malware_rejected.v1', 'document.withdrawn.v1', 'document.replaced.v1', 'document.restored.v1', 'document.purged.v1', 'document.download_url_issued.v1'));

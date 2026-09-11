@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import {
   EvaluationService,
+  DocumentService,
   AuditHistoryService,
   InitiativeService,
   ProjectService,
@@ -26,11 +27,13 @@ import {
   PostgresEvaluationStandardStore,
   PostgresEvaluationStore,
   PostgresTenantStore,
+  PostgresDocumentStore,
 } from "@aether/database";
 import {
   createOperationalMetrics,
   initializeTelemetry,
 } from "@aether/observability";
+import { S3DocumentObjectStore } from "@aether/storage";
 import { Pool } from "pg";
 
 import { buildServer } from "./app.js";
@@ -93,6 +96,22 @@ const projects = new ProjectService({
   ids: { next: randomUUID },
   clock: { now: () => new Date() },
 });
+const documents = new DocumentService({
+  store: new PostgresDocumentStore(pool),
+  audit: new PostgresDocumentStore(pool),
+  objects: new S3DocumentObjectStore({
+    endpoint: config.s3Endpoint,
+    bucket: config.s3Bucket,
+    accessKeyId: config.s3AccessKeyId,
+    secretAccessKey: config.s3SecretAccessKey,
+    maxBytes: config.maxDocumentBytes,
+  }),
+  tenancy: new PostgresTenantStore(pool),
+  ids: { next: randomUUID },
+  clock: { now: () => new Date() },
+  maxBytes: config.maxDocumentBytes,
+  urlTtlSeconds: config.s3PresignTtlSeconds,
+});
 const auditHistory = new AuditHistoryService({
   store: new PostgresAuditHistoryStore(pool),
   tenancy: new PostgresTenantStore(pool),
@@ -104,6 +123,7 @@ const app = await buildServer({
   initiatives,
   evaluations,
   projects,
+  documents,
   idempotency: new PostgresIdempotencyStore(pool),
   auditHistory,
   metrics,
