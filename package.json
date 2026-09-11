@@ -16,6 +16,8 @@
     "typecheck": "turbo run typecheck && tsc --noEmit --project tsconfig.json",
     "test": "turbo run test",
     "test:e2e": "turbo run test:e2e",
+    "secrets:scan": "node scripts/scan-secrets.mjs",
+    "prepare": "node scripts/install-git-hooks.mjs",
     "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
     "db:migrate": "pnpm --filter @aether/database migrate",
     "local:up": "docker compose -f infra/compose.yaml up -d",

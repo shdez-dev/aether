@@ -29,7 +29,7 @@ Los secretos se inyectan en runtime desde un gestor administrado; no se incorpor
 ## Controles obligatorios
 
 1. `.env` y variantes reales están ignorados; los `.env.example` no contienen valores reales.
-2. Pre-commit y CI escanean secretos. Un hallazgo bloquea integración hasta revocarlo y sanear historial si corresponde.
+2. Pre-commit y CI escanean secretos con Gitleaks 8.24.3. El hook ejecuta `pnpm secrets:scan` sobre cambios preparados y usa el binario local o la imagen oficial `ghcr.io/gitleaks/gitleaks:v8.24.3`; CI usa la misma imagen para evitar dependencias de runtime de acciones. Un hallazgo bloquea integración hasta revocarlo y sanear historial si corresponde.
 3. CI usa secretos con alcance mínimo, enmascaramiento y preferentemente credenciales efímeras u OIDC.
 4. Acciones de alto impacto registran correlation ID, nunca credenciales.
 5. Un secreto expuesto se considera comprometido aunque se elimine del archivo: se revoca, rota y documenta el incidente.

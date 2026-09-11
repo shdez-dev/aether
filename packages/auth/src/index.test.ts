@@ -10,6 +10,7 @@ import {
   type OidcProvider,
 } from "./index.js";
 
+const testSessionEncryptionKey = Buffer.alloc(32).toString("base64");
 class InMemoryAuthStore implements AuthStore {
   readonly sessions = new Map<string, AuthSession>();
   readonly transactions = new Map<string, LoginTransaction>();
@@ -112,9 +113,7 @@ describe("AuthService", () => {
     let now = new Date("2026-09-08T12:00:00.000Z");
     const auth = new AuthService({
       store,
-      cipher: createAesGcmCipher(
-        "K5Ahk0FQ4+zxKxg4atlrPkS0vP0w+ZsSCx6x8v4hX3c=",
-      ),
+      cipher: createAesGcmCipher(testSessionEncryptionKey),
       oidc: fakeOidc,
       issuer: "https://identity.example",
       sessionTtlSeconds: 3600,

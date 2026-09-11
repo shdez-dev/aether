@@ -12,6 +12,7 @@ import { InMemoryIdempotencyStore } from "@aether/testkit";
 import { buildServer } from "./app.js";
 import type { ServerConfig } from "./config.js";
 
+const testSessionEncryptionKey = Buffer.alloc(32).toString("base64");
 const config: ServerConfig = {
   nodeEnv: "test",
   port: 4000,
@@ -22,7 +23,7 @@ const config: ServerConfig = {
   oidcClientId: "test",
   oidcClientSecret: "test",
   oidcRedirectUri: "http://127.0.0.1:4000/auth/callback",
-  sessionEncryptionKey: "K5Ahk0FQ4+zxKxg4atlrPkS0vP0w+ZsSCx6x8v4hX3c=",
+  sessionEncryptionKey: testSessionEncryptionKey,
   sessionTtlSeconds: 3600,
   sessionRenewalWindowSeconds: 600,
   maxRequestBodyBytes: 1_024,
