@@ -29,6 +29,7 @@ import {
   PostgresEvaluationStore,
   PostgresTenantStore,
   PostgresDocumentStore,
+  PostgresDocumentProjectAccess,
   PostgresEvidenceStore,
   PostgresProjectClosureStore,
 } from "@aether/database";
@@ -113,6 +114,7 @@ const documents = new DocumentService({
     maxBytes: config.maxDocumentBytes,
   }),
   tenancy: new PostgresTenantStore(pool),
+  projectAccess: new PostgresDocumentProjectAccess(pool),
   ids: { next: randomUUID },
   clock: { now: () => new Date() },
   maxBytes: config.maxDocumentBytes,

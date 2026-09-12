@@ -131,6 +131,13 @@ export interface DocumentMalwareScanner {
     fileName: string;
   }): Promise<{ clean: boolean; signature: string | null }>;
 }
+/** Consulta de autorización específica de proyecto, aislada del transporte HTTP. */
+export interface DocumentProjectAccess {
+  isParticipant(input: {
+    actorId: string;
+    projectId: string;
+  }): Promise<boolean>;
+}
 
 export class DocumentService {
   constructor(
@@ -141,6 +148,7 @@ export class DocumentService {
       tenancy: TenantStore;
       ids: DocumentIdGenerator;
       clock: DocumentClock;
+      projectAccess?: DocumentProjectAccess;
       maxBytes: number;
       urlTtlSeconds: number;
     },
@@ -323,11 +331,7 @@ export class DocumentService {
       input.documentId,
       input.versionId,
     );
-    await this.assertRead(
-      input.actorId,
-      current.document.organizationId,
-      current.document.workspaceId,
-    );
+    await this.assertRead(input.actorId, current.document);
     if (current.version.status !== "published" || !current.version.objectKey)
       throw new DocumentNotFoundError();
     const now = this.dependencies.clock.now();
@@ -605,11 +609,12 @@ export class DocumentService {
     resourceId: string,
   ) {
     const resource = await this.requireResource(resourceType, resourceId);
-    await this.assertRead(
-      actorId,
-      resource.organizationId,
-      resource.workspaceId,
-    );
+    await this.assertRead(actorId, {
+      organizationId: resource.organizationId,
+      workspaceId: resource.workspaceId,
+      resourceType,
+      resourceId,
+    });
     return resource;
   }
   private async requireResource(
@@ -653,13 +658,28 @@ export class DocumentService {
   }
   private async assertRead(
     actorId: string,
-    organizationId: string,
-    workspaceId: string,
+    resource: Pick<
+      InstitutionalDocument,
+      "organizationId" | "workspaceId" | "resourceType" | "resourceId"
+    >,
   ) {
-    const roles = await this.roles(actorId, organizationId, workspaceId);
+    const roles = await this.roles(
+      actorId,
+      resource.organizationId,
+      resource.workspaceId,
+    );
     const organizationManager =
       roles.organizationRole === "owner" || roles.organizationRole === "admin";
     if (!organizationManager && !roles.workspaceRole)
+      throw new DocumentAccessDeniedError();
+    if (
+      !organizationManager &&
+      resource.resourceType === "project" &&
+      !(await this.dependencies.projectAccess?.isParticipant({
+        actorId,
+        projectId: resource.resourceId,
+      }))
+    )
       throw new DocumentAccessDeniedError();
   }
   private event(

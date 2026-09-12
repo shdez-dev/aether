@@ -29,6 +29,7 @@ import type {
   DocumentStore,
   DocumentVersionAccess,
   DocumentResource,
+  DocumentProjectAccess,
   EvidenceReferenceStore,
   EvidenceSubjectLookup,
   ProjectClosureStore,
@@ -1295,6 +1296,23 @@ export class PostgresDocumentStore
   }
   async record(event: DocumentAuditEvent): Promise<void> {
     await insertDocumentAudit(this.pool, event);
+  }
+}
+
+/** Consulta mínima para autorizar un documento cuyo padre es un proyecto. */
+export class PostgresDocumentProjectAccess implements DocumentProjectAccess {
+  constructor(private readonly pool: Pool) {}
+  async isParticipant(input: {
+    actorId: string;
+    projectId: string;
+  }): Promise<boolean> {
+    const result = await this.pool.query(
+      `SELECT 1 FROM projects
+       WHERE id = $1
+         AND (lead_actor_id = $2 OR participants @> jsonb_build_array(jsonb_build_object('actorId', $2)))`,
+      [input.projectId, input.actorId],
+    );
+    return result.rowCount === 1;
   }
 }
 

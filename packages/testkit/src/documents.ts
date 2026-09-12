@@ -5,6 +5,7 @@ import type {
   DocumentResource,
   DocumentStore,
   DocumentVersionAccess,
+  DocumentProjectAccess,
 } from "@aether/application";
 import type {
   DocumentResourceType,
@@ -168,6 +169,18 @@ export class InMemoryDocumentStore
   }
   async record(event: DocumentAuditEvent) {
     this.audits.push(event);
+  }
+}
+export class InMemoryDocumentProjectAccess implements DocumentProjectAccess {
+  readonly participants = new Set<string>();
+  grant(projectId: string, actorId: string): void {
+    this.participants.add(`${projectId}:${actorId}`);
+  }
+  async isParticipant(input: {
+    actorId: string;
+    projectId: string;
+  }): Promise<boolean> {
+    return this.participants.has(`${input.projectId}:${input.actorId}`);
   }
 }
 export class InMemoryDocumentObjectStore implements DocumentObjectStore {

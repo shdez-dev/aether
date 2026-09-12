@@ -8,6 +8,7 @@ import {
 } from "@aether/application";
 import {
   InMemoryDocumentObjectStore,
+  InMemoryDocumentProjectAccess,
   InMemoryDocumentStore,
 } from "./documents.js";
 import { InMemoryTenantStore } from "./tenancy.js";
@@ -386,5 +387,118 @@ describe("document evidence slice", () => {
     ).toBe("rejected");
     expect(objects.published.size).toBe(0);
     expect(store.audits.at(-1)?.eventType).toBe("document.malware_rejected.v1");
+  });
+  it("impide descargar el documento de un proyecto ajeno dentro del mismo workspace", async () => {
+    let sequence = 0;
+    const ids = {
+      next: () =>
+        `00000000-0000-4000-8000-${String(++sequence).padStart(12, "0")}`,
+    };
+    const clock = { now: () => new Date("2026-09-12T12:00:00.000Z") };
+    const tenancy = new InMemoryTenantStore();
+    const tenants = new TenantService({
+      store: tenancy,
+      ids,
+      tokens: { generate: () => "x".repeat(43), hash: (value) => value },
+      clock,
+    });
+    const organization = await tenants.createOrganization({
+      actorId: "owner",
+      actorEmail: "owner@test",
+      name: "Org",
+      timezone: "UTC",
+      locale: "es-CL",
+    });
+    const workspace = await tenants.createWorkspace({
+      actorId: "owner",
+      organizationId: organization.id,
+      name: "Equipo",
+      mode: "team",
+    });
+    const invitation = await tenants.invite({
+      actorId: "owner",
+      organizationId: organization.id,
+      email: "member@test",
+      organizationRole: "member",
+      workspaceIds: [workspace.id],
+      workspaceRole: "member",
+      expiresInDays: 1,
+    });
+    await tenants.acceptInvitation({
+      token: invitation.deliveryToken,
+      actorId: "member",
+      actorEmail: "member@test",
+    });
+    const store = new InMemoryDocumentStore();
+    const objects = new InMemoryDocumentObjectStore();
+    const projectAccess = new InMemoryDocumentProjectAccess();
+    const projectId = ids.next();
+    store.addResource("project", projectId, {
+      organizationId: organization.id,
+      workspaceId: workspace.id,
+    });
+    const service = new DocumentService({
+      store,
+      audit: store,
+      objects,
+      tenancy,
+      projectAccess,
+      ids,
+      clock,
+      maxBytes: 1_000,
+      urlTtlSeconds: 60,
+    });
+    const started = await service.beginUpload({
+      actorId: "owner",
+      correlationId: ids.next(),
+      resourceType: "project",
+      resourceId: projectId,
+      classification: "internal",
+      fileName: "entrega.pdf",
+      contentType: "application/pdf",
+      contentLength: 10,
+      sha256: "f".repeat(64),
+    });
+    objects.putQuarantined(started.version.quarantineKey, {
+      bytes: 10,
+      sha256: "f".repeat(64),
+      contentType: "application/pdf",
+    });
+    await service.completeUpload({
+      actorId: "owner",
+      correlationId: ids.next(),
+      documentId: started.document.id,
+      versionId: started.version.id,
+    });
+    await new DocumentScanService({
+      store,
+      audit: store,
+      objects,
+      scanner: {
+        async scan() {
+          return { clean: true, signature: null };
+        },
+      },
+      ids,
+      clock,
+      retentionDays: { internal: 1, confidential: 1, restricted: 1 },
+    }).handle(store.events[0]!);
+    await expect(
+      service.download({
+        actorId: "member",
+        correlationId: ids.next(),
+        documentId: started.document.id,
+        versionId: started.version.id,
+      }),
+    ).rejects.toBeInstanceOf(DocumentAccessDeniedError);
+    projectAccess.grant(projectId, "member");
+    await expect(
+      service.download({
+        actorId: "member",
+        correlationId: ids.next(),
+        documentId: started.document.id,
+        versionId: started.version.id,
+      }),
+    ).resolves.toEqual(expect.objectContaining({ url: expect.any(String) }));
   });
 });
