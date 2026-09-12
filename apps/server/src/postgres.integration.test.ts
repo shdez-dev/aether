@@ -27,7 +27,9 @@ import {
   PostgresOutboxStore,
   PostgresProjectAuditStore,
   PostgresProjectExecutionStore,
+  PostgresProjectClosureStore,
   PostgresProjectStore,
+  PostgresDocumentStore,
   PostgresTenantStore,
   migratePool,
 } from "@aether/database";
@@ -220,6 +222,8 @@ describe("PostgreSQL integration", () => {
       const projectService = new ProjectService({
         projects: new PostgresProjectStore(pool),
         execution: new PostgresProjectExecutionStore(pool),
+        closures: new PostgresProjectClosureStore(pool),
+        documents: new PostgresDocumentStore(pool),
         audit: new PostgresProjectAuditStore(pool),
         decisions: evaluationsStore,
         initiatives: initiativesStore,

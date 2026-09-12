@@ -29,7 +29,8 @@ export type DocumentAuditEvent = Readonly<{
     | "document.replaced.v1"
     | "document.restored.v1"
     | "document.purged.v1"
-    | "document.download_url_issued.v1";
+    | "document.download_url_issued.v1"
+    | "document.evidence_linked.v1";
   documentId: string;
   versionId: string;
   organizationId: string;
@@ -656,7 +657,9 @@ export class DocumentService {
     workspaceId: string,
   ) {
     const roles = await this.roles(actorId, organizationId, workspaceId);
-    if (!roles.organizationRole && !roles.workspaceRole)
+    const organizationManager =
+      roles.organizationRole === "owner" || roles.organizationRole === "admin";
+    if (!organizationManager && !roles.workspaceRole)
       throw new DocumentAccessDeniedError();
   }
   private event(

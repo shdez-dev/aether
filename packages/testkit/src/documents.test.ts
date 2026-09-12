@@ -47,6 +47,20 @@ describe("document evidence slice", () => {
       timezone: "UTC",
       locale: "es-CL",
     });
+    const otherWorkspaceMember = await tenants.invite({
+      actorId: "owner",
+      organizationId: organization.id,
+      email: "other-workspace@test",
+      organizationRole: "member",
+      workspaceIds: [],
+      workspaceRole: "viewer",
+      expiresInDays: 7,
+    });
+    await tenants.acceptInvitation({
+      token: otherWorkspaceMember.deliveryToken,
+      actorId: "other-workspace-member",
+      actorEmail: "other-workspace@test",
+    });
     const store = new InMemoryDocumentStore();
     const objects = new InMemoryDocumentObjectStore();
     const initiativeId = ids.next();
@@ -121,6 +135,14 @@ describe("document evidence slice", () => {
     await expect(
       documents.download({
         actorId: "foreign",
+        correlationId: ids.next(),
+        documentId: started.document.id,
+        versionId: started.version.id,
+      }),
+    ).rejects.toBeInstanceOf(DocumentAccessDeniedError);
+    await expect(
+      documents.download({
+        actorId: "other-workspace-member",
         correlationId: ids.next(),
         documentId: started.document.id,
         versionId: started.version.id,

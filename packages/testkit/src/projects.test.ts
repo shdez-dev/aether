@@ -6,6 +6,7 @@ import {
   TenantService,
 } from "@aether/application";
 import { createInitiative, transitionInitiative } from "@aether/domain";
+import type { DocumentVersion, InstitutionalDocument } from "@aether/domain";
 
 import {
   InMemoryAuditHistoryStore,
@@ -15,9 +16,11 @@ import {
 } from "./initiatives.js";
 import {
   InMemoryProjectAuditStore,
+  InMemoryProjectClosureStore,
   InMemoryProjectExecutionStore,
   InMemoryProjectStore,
 } from "./projects.js";
+import { InMemoryDocumentStore } from "./documents.js";
 import { InMemoryTenantStore } from "./tenancy.js";
 
 describe("project conversion and execution", () => {
@@ -108,10 +111,14 @@ describe("project conversion and execution", () => {
     });
     const projectStore = new InMemoryProjectStore();
     const execution = new InMemoryProjectExecutionStore();
+    const closures = new InMemoryProjectClosureStore();
+    const documentStore = new InMemoryDocumentStore();
     const audit = new InMemoryProjectAuditStore();
     const projects = new ProjectService({
       projects: projectStore,
       execution,
+      closures,
+      documents: documentStore,
       audit,
       decisions,
       initiatives,
@@ -171,11 +178,76 @@ describe("project conversion and execution", () => {
       dueOn: "2026-09-20",
       correlationId: ids.next(),
     });
+    const completed = await projects.changeStatus({
+      actorId: "lead",
+      organizationId: organization.id,
+      projectId: project.id,
+      expectedVersion: active.version,
+      status: "completed",
+      correlationId: ids.next(),
+    });
+    const documentId = ids.next();
+    const documentVersionId = ids.next();
+    const document: InstitutionalDocument = {
+      id: documentId,
+      organizationId: organization.id,
+      workspaceId: workspace.id,
+      resourceType: "project",
+      resourceId: project.id,
+      classification: "internal",
+      createdByActorId: "lead",
+      createdAt: new Date(),
+    };
+    const version: DocumentVersion = {
+      id: documentVersionId,
+      documentId,
+      versionNumber: 1,
+      originalName: "entrega.pdf",
+      declaredContentType: "application/pdf",
+      detectedContentType: "application/pdf",
+      byteLength: 10,
+      sha256: "a".repeat(64),
+      status: "published",
+      quarantineKey: "q",
+      objectKey: "p",
+      createdAt: document.createdAt,
+      publishedAt: document.createdAt,
+      rejectedAt: null,
+      withdrawnAt: null,
+      retentionUntil: null,
+      evidenceStatus: "valid",
+      supersedesVersionId: null,
+      replacedByVersionId: null,
+    };
+    documentStore.documents.set(document.id, document);
+    documentStore.versions.set(version.id, version);
+    const deliverable = await projects.acceptDeliverable({
+      actorId: "lead",
+      organizationId: organization.id,
+      projectId: project.id,
+      name: "Informe final",
+      documentId,
+      documentVersionId,
+      correlationId: ids.next(),
+    });
+    const closure = await projects.close({
+      actorId: "lead",
+      organizationId: organization.id,
+      projectId: project.id,
+      outcomes: "Piloto completado",
+      lessonsLearned: "Validar evidencia al inicio.",
+      pendingItems: ["Medir adopción"],
+      correlationId: ids.next(),
+    });
     expect(active.status).toBe("active");
     expect(execution.milestones).toHaveLength(1);
     expect(execution.actions).toHaveLength(1);
+    expect(completed.status).toBe("completed");
+    expect(deliverable.documentVersionId).toBe(documentVersionId);
+    expect(closures.closures.get(project.id)).toEqual(closure);
     expect(projectStore.durableEvents.map((event) => event.eventType)).toEqual([
       "project.created.v1",
+      "project.status_changed.v1",
       "project.status_changed.v1",
     ]);
     const projectHistory = await new InMemoryAuditHistoryStore(
@@ -191,12 +263,18 @@ describe("project conversion and execution", () => {
       "project.status_changed.v1",
       "project.milestone_added.v1",
       "project.next_action_added.v1",
+      "project.status_changed.v1",
+      "project.deliverable_accepted.v1",
+      "project.closed.v1",
     ]);
     expect(audit.events.map((event) => event.eventType)).toEqual([
       "project.created_from_initiative.v1",
       "project.status_changed.v1",
       "project.milestone_added.v1",
       "project.next_action_added.v1",
+      "project.status_changed.v1",
+      "project.deliverable_accepted.v1",
+      "project.closed.v1",
     ]);
   });
 });

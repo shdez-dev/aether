@@ -29,6 +29,9 @@ import type {
   DocumentStore,
   DocumentVersionAccess,
   DocumentResource,
+  EvidenceReferenceStore,
+  EvidenceSubjectLookup,
+  ProjectClosureStore,
   Invitation,
   Organization,
   TenantStore,
@@ -49,6 +52,10 @@ import type {
   DocumentVersion,
   InstitutionalDocument,
   DocumentResourceType,
+  EvidenceReference,
+  EvidenceReferenceSubjectType,
+  ProjectClosure,
+  ProjectDeliverableAcceptance,
 } from "@aether/domain";
 import type { Pool, PoolClient } from "pg";
 
@@ -901,6 +908,102 @@ export class PostgresProjectExecutionStore implements ProjectExecutionStore {
     );
   }
 }
+export class PostgresProjectClosureStore implements ProjectClosureStore {
+  constructor(private readonly pool: Pool) {}
+  async createClosure(closure: ProjectClosure): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO project_closures (id, project_id, organization_id, workspace_id, outcomes, lessons_learned, pending_items, closed_by_actor_id, closed_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [
+        closure.id,
+        closure.projectId,
+        closure.organizationId,
+        closure.workspaceId,
+        closure.outcomes,
+        closure.lessonsLearned,
+        asJson(closure.pendingItems),
+        closure.closedByActorId,
+        closure.closedAt,
+      ],
+    );
+  }
+  async findClosure(projectId: string): Promise<ProjectClosure | null> {
+    const result = await this.pool.query<ProjectClosureRow>(
+      `SELECT id, project_id, organization_id, workspace_id, outcomes, lessons_learned, pending_items, closed_by_actor_id, closed_at
+       FROM project_closures WHERE project_id = $1`,
+      [projectId],
+    );
+    return result.rows[0] ? toProjectClosure(result.rows[0]) : null;
+  }
+  async acceptDeliverable(
+    acceptance: ProjectDeliverableAcceptance,
+  ): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO project_deliverable_acceptances (id, project_id, organization_id, workspace_id, name, document_id, document_version_id, accepted_by_actor_id, accepted_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [
+        acceptance.id,
+        acceptance.projectId,
+        acceptance.organizationId,
+        acceptance.workspaceId,
+        acceptance.name,
+        acceptance.documentId,
+        acceptance.documentVersionId,
+        acceptance.acceptedByActorId,
+        acceptance.acceptedAt,
+      ],
+    );
+  }
+}
+
+export class PostgresEvidenceStore
+  implements EvidenceReferenceStore, EvidenceSubjectLookup
+{
+  constructor(private readonly pool: Pool) {}
+  async create(reference: EvidenceReference): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO evidence_references (id, organization_id, workspace_id, subject_type, subject_id, document_id, document_version_id, linked_by_actor_id, linked_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [
+        reference.id,
+        reference.organizationId,
+        reference.workspaceId,
+        reference.subjectType,
+        reference.subjectId,
+        reference.documentId,
+        reference.documentVersionId,
+        reference.linkedByActorId,
+        reference.linkedAt,
+      ],
+    );
+  }
+  async list(input: {
+    subjectType: EvidenceReferenceSubjectType;
+    subjectId: string;
+  }): Promise<readonly EvidenceReference[]> {
+    const result = await this.pool.query<EvidenceReferenceRow>(
+      `SELECT id, organization_id, workspace_id, subject_type, subject_id, document_id, document_version_id, linked_by_actor_id, linked_at
+       FROM evidence_references WHERE subject_type = $1 AND subject_id = $2 ORDER BY linked_at ASC, id ASC`,
+      [input.subjectType, input.subjectId],
+    );
+    return result.rows.map(toEvidenceReference);
+  }
+  async resolve(input: {
+    subjectType: EvidenceReferenceSubjectType;
+    subjectId: string;
+  }): Promise<{ organizationId: string; workspaceId: string } | null> {
+    const source = {
+      evaluation: "initiative_evaluations",
+      decision: "initiative_decisions",
+      project_closure: "project_closures",
+    }[input.subjectType];
+    const result = await this.pool.query<DocumentResourceRow>(
+      `SELECT organization_id, workspace_id FROM ${source} WHERE id = $1`,
+      [input.subjectId],
+    );
+    return result.rows[0] ? toDocumentResource(result.rows[0]) : null;
+  }
+}
 export class PostgresProjectAuditStore implements ProjectAuditStore {
   constructor(private readonly pool: Pool) {}
   async record(event: ProjectAuditEvent): Promise<void> {
@@ -1419,6 +1522,28 @@ type ProjectAuditRow = {
   occurred_at: Date;
   payload: Record<string, unknown>;
 };
+type ProjectClosureRow = {
+  id: string;
+  project_id: string;
+  organization_id: string;
+  workspace_id: string;
+  outcomes: string;
+  lessons_learned: string;
+  pending_items: string[];
+  closed_by_actor_id: string;
+  closed_at: Date;
+};
+type EvidenceReferenceRow = {
+  id: string;
+  organization_id: string;
+  workspace_id: string;
+  subject_type: EvidenceReferenceSubjectType;
+  subject_id: string;
+  document_id: string;
+  document_version_id: string;
+  linked_by_actor_id: string;
+  linked_at: Date;
+};
 type AuditRow = {
   id: string;
   action: string;
@@ -1556,6 +1681,32 @@ function toProjectAuditEvent(row: ProjectAuditRow): ProjectAuditEvent {
     correlationId: row.correlation_id,
     occurredAt: row.occurred_at,
     payload: row.payload,
+  };
+}
+function toProjectClosure(row: ProjectClosureRow): ProjectClosure {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    organizationId: row.organization_id,
+    workspaceId: row.workspace_id,
+    outcomes: row.outcomes,
+    lessonsLearned: row.lessons_learned,
+    pendingItems: row.pending_items,
+    closedByActorId: row.closed_by_actor_id,
+    closedAt: row.closed_at,
+  };
+}
+function toEvidenceReference(row: EvidenceReferenceRow): EvidenceReference {
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    workspaceId: row.workspace_id,
+    subjectType: row.subject_type,
+    subjectId: row.subject_id,
+    documentId: row.document_id,
+    documentVersionId: row.document_version_id,
+    linkedByActorId: row.linked_by_actor_id,
+    linkedAt: row.linked_at,
   };
 }
 function toAuditEvent(row: AuditRow): AuditEvent {

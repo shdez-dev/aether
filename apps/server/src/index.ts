@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import {
   EvaluationService,
   DocumentService,
+  EvidenceService,
   AuditHistoryService,
   InitiativeService,
   ProjectService,
@@ -28,6 +29,8 @@ import {
   PostgresEvaluationStore,
   PostgresTenantStore,
   PostgresDocumentStore,
+  PostgresEvidenceStore,
+  PostgresProjectClosureStore,
 } from "@aether/database";
 import {
   createOperationalMetrics,
@@ -86,9 +89,12 @@ const evaluations = new EvaluationService({
   ids: { next: randomUUID },
   clock: { now: () => new Date() },
 });
+const documentStore = new PostgresDocumentStore(pool);
 const projects = new ProjectService({
   projects: new PostgresProjectStore(pool),
   execution: new PostgresProjectExecutionStore(pool),
+  closures: new PostgresProjectClosureStore(pool),
+  documents: documentStore,
   audit: new PostgresProjectAuditStore(pool),
   decisions: new PostgresEvaluationStore(pool),
   initiatives: new PostgresInitiativeStore(pool),
@@ -97,8 +103,8 @@ const projects = new ProjectService({
   clock: { now: () => new Date() },
 });
 const documents = new DocumentService({
-  store: new PostgresDocumentStore(pool),
-  audit: new PostgresDocumentStore(pool),
+  store: documentStore,
+  audit: documentStore,
   objects: new S3DocumentObjectStore({
     endpoint: config.s3Endpoint,
     bucket: config.s3Bucket,
@@ -112,6 +118,15 @@ const documents = new DocumentService({
   maxBytes: config.maxDocumentBytes,
   urlTtlSeconds: config.s3PresignTtlSeconds,
 });
+const evidence = new EvidenceService({
+  references: new PostgresEvidenceStore(pool),
+  subjects: new PostgresEvidenceStore(pool),
+  documents: documentStore,
+  documentAudit: documentStore,
+  tenancy: new PostgresTenantStore(pool),
+  ids: { next: randomUUID },
+  clock: { now: () => new Date() },
+});
 const auditHistory = new AuditHistoryService({
   store: new PostgresAuditHistoryStore(pool),
   tenancy: new PostgresTenantStore(pool),
@@ -124,6 +139,7 @@ const app = await buildServer({
   evaluations,
   projects,
   documents,
+  evidence,
   idempotency: new PostgresIdempotencyStore(pool),
   auditHistory,
   metrics,

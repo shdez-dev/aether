@@ -6,6 +6,8 @@ import {
   type Project,
   type ProjectMilestone,
   type ProjectNextAction,
+  type ProjectClosure,
+  type ProjectDeliverableAcceptance,
   type ProjectParticipant,
   type ProjectStatus,
 } from "@aether/domain";
@@ -17,6 +19,7 @@ import {
 } from "./tenancy.js";
 import type { InitiativeStore } from "./initiatives.js";
 import type { DurableDomainEvent } from "./outbox.js";
+import { DocumentNotFoundError, type DocumentStore } from "./documents.js";
 
 export type ProjectAuditEvent = Readonly<{
   id: string;
@@ -52,6 +55,11 @@ export interface ProjectExecutionStore {
   addMilestone(milestone: ProjectMilestone): Promise<void>;
   addNextAction(action: ProjectNextAction): Promise<void>;
 }
+export interface ProjectClosureStore {
+  createClosure(closure: ProjectClosure): Promise<void>;
+  findClosure(projectId: string): Promise<ProjectClosure | null>;
+  acceptDeliverable(acceptance: ProjectDeliverableAcceptance): Promise<void>;
+}
 export interface ProjectAuditStore {
   record(event: ProjectAuditEvent): Promise<void>;
   list(input: {
@@ -74,6 +82,8 @@ export class ProjectService {
     private readonly dependencies: {
       projects: ProjectStore;
       execution: ProjectExecutionStore;
+      closures: ProjectClosureStore;
+      documents: DocumentStore;
       audit: ProjectAuditStore;
       decisions: ProjectDecisionLookup;
       initiatives: InitiativeStore;
@@ -268,6 +278,98 @@ export class ProjectService {
     );
     return action;
   }
+  async acceptDeliverable(input: {
+    actorId: string;
+    organizationId: string;
+    projectId: string;
+    name: string;
+    documentId: string;
+    documentVersionId: string;
+    correlationId: string;
+  }): Promise<ProjectDeliverableAcceptance> {
+    const project = await this.requireProject(
+      input.projectId,
+      input.organizationId,
+    );
+    await this.assertExecutionAccess(input.actorId, project);
+    const document = await this.dependencies.documents.findVersion({
+      documentId: input.documentId,
+      versionId: input.documentVersionId,
+    });
+    if (
+      !document ||
+      document.document.organizationId !== project.organizationId ||
+      document.document.workspaceId !== project.workspaceId ||
+      document.version.status !== "published"
+    )
+      throw new DocumentNotFoundError();
+    const acceptance: ProjectDeliverableAcceptance = {
+      id: this.dependencies.ids.next(),
+      projectId: project.id,
+      organizationId: project.organizationId,
+      workspaceId: project.workspaceId,
+      name: input.name,
+      documentId: input.documentId,
+      documentVersionId: input.documentVersionId,
+      acceptedByActorId: input.actorId,
+      acceptedAt: this.dependencies.clock.now(),
+    };
+    await this.dependencies.closures.acceptDeliverable(acceptance);
+    await this.record(
+      project,
+      input.actorId,
+      input.correlationId,
+      "project.deliverable_accepted.v1",
+      {
+        deliverableAcceptanceId: acceptance.id,
+        documentId: acceptance.documentId,
+        documentVersionId: acceptance.documentVersionId,
+      },
+    );
+    return acceptance;
+  }
+  async close(input: {
+    actorId: string;
+    organizationId: string;
+    projectId: string;
+    outcomes: string;
+    lessonsLearned: string;
+    pendingItems: readonly string[];
+    correlationId: string;
+  }): Promise<ProjectClosure> {
+    const project = await this.requireProject(
+      input.projectId,
+      input.organizationId,
+    );
+    await this.assertExecutionAccess(input.actorId, project);
+    if (project.status !== "completed")
+      throw new ProjectDomainError("INVALID_PROJECT_TRANSITION");
+    if (await this.dependencies.closures.findClosure(project.id))
+      throw new ProjectAlreadyClosedError();
+    const closure: ProjectClosure = {
+      id: this.dependencies.ids.next(),
+      projectId: project.id,
+      organizationId: project.organizationId,
+      workspaceId: project.workspaceId,
+      outcomes: input.outcomes,
+      lessonsLearned: input.lessonsLearned,
+      pendingItems: [...input.pendingItems],
+      closedByActorId: input.actorId,
+      closedAt: this.dependencies.clock.now(),
+    };
+    await this.dependencies.closures.createClosure(closure);
+    await this.record(
+      project,
+      input.actorId,
+      input.correlationId,
+      "project.closed.v1",
+      {
+        closureId: closure.id,
+        pendingItems: closure.pendingItems.length,
+      },
+    );
+    return closure;
+  }
   async auditTrail(input: {
     actorId: string;
     organizationId: string;
@@ -395,6 +497,11 @@ export class ProjectVersionConflictError extends Error {
 export class ProjectAlreadyExistsError extends Error {
   constructor() {
     super("PROJECT_ALREADY_EXISTS");
+  }
+}
+export class ProjectAlreadyClosedError extends Error {
+  constructor() {
+    super("PROJECT_ALREADY_CLOSED");
   }
 }
 export { ProjectDomainError };

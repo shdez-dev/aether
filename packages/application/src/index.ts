@@ -8,6 +8,7 @@ export * from "./outbox.js";
 export * from "./auditing.js";
 export * from "./idempotency.js";
 export * from "./documents.js";
+export * from "./evidence.js";
 
 export interface RequestMetadata {
   readonly actorId: string;

@@ -100,6 +100,18 @@ export const AddProjectNextActionRequestSchema = z.object({
   ownerActorId: z.string().min(1).max(255),
   dueOn: z.string().date().nullable(),
 });
+export const AcceptProjectDeliverableRequestSchema = z.object({
+  organizationId: UuidSchema,
+  name: NonEmptyTextSchema.max(255),
+  documentId: UuidSchema,
+  documentVersionId: UuidSchema,
+});
+export const CloseProjectRequestSchema = z.object({
+  organizationId: UuidSchema,
+  outcomes: NonEmptyTextSchema.max(10_000),
+  lessonsLearned: NonEmptyTextSchema.max(10_000),
+  pendingItems: z.array(NonEmptyTextSchema.max(2_000)).max(100),
+});
 
 export const InitiativeActionSchema = z.enum([
   "edit",

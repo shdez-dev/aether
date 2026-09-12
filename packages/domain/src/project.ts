@@ -46,6 +46,28 @@ export type ProjectNextAction = Readonly<{
   createdByActorId: string;
   createdAt: Date;
 }>;
+export type ProjectClosure = Readonly<{
+  id: string;
+  projectId: string;
+  organizationId: string;
+  workspaceId: string;
+  outcomes: string;
+  lessonsLearned: string;
+  pendingItems: readonly string[];
+  closedByActorId: string;
+  closedAt: Date;
+}>;
+export type ProjectDeliverableAcceptance = Readonly<{
+  id: string;
+  projectId: string;
+  organizationId: string;
+  workspaceId: string;
+  name: string;
+  documentId: string;
+  documentVersionId: string;
+  acceptedByActorId: string;
+  acceptedAt: Date;
+}>;
 
 const transitions: Record<ProjectStatus, readonly ProjectStatus[]> = {
   planned: ["active", "cancelled"],

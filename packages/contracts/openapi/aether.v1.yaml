@@ -883,6 +883,100 @@ paths:
       responses:
         "200": { description: Bitácora de proyecto }
         default: { $ref: "#/components/responses/Problem" }
+  /v1/projects/{projectId}/deliverables:
+    post:
+      tags: [Projects, Documents]
+      operationId: acceptProjectDeliverable
+      summary: Aceptar una entrega mediante una versión documental publicada
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              { $ref: "#/components/schemas/AcceptProjectDeliverableRequest" }
+      responses:
+        "201": { description: Entrega aceptada y fijada a su versión }
+        default: { $ref: "#/components/responses/Problem" }
+  /v1/projects/{projectId}/closure:
+    post:
+      tags: [Projects]
+      operationId: closeProject
+      summary: Registrar el dossier de cierre de un proyecto completado
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CloseProjectRequest" }
+      responses:
+        "201": { description: Dossier de cierre registrado }
+        default: { $ref: "#/components/responses/Problem" }
+  /v1/evidence/{subjectType}/{subjectId}:
+    get:
+      tags: [Documents]
+      operationId: listEvidenceReferences
+      summary: Consultar evidencia versionada y su cumplimiento actual
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: subjectType
+          in: path
+          required: true
+          schema:
+            { type: string, enum: [evaluation, decision, project_closure] }
+        - name: subjectId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/OrganizationContextId"
+      responses:
+        "200":
+          description: Referencias inmutables y validez vigente.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/EvidenceReference" }
+        default: { $ref: "#/components/responses/Problem" }
+    post:
+      tags: [Documents]
+      operationId: attachEvidenceReference
+      summary: Vincular una versión publicada como evidencia
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: subjectType
+          in: path
+          required: true
+          schema:
+            { type: string, enum: [evaluation, decision, project_closure] }
+        - name: subjectId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AttachEvidenceRequest" }
+      responses:
+        "201": { description: Evidencia vinculada }
+        default: { $ref: "#/components/responses/Problem" }
   /v1/audit-events:
     get:
       tags: [Audit]
@@ -1537,6 +1631,64 @@ components:
         description: { type: string, minLength: 1, maxLength: 2000 }
         ownerActorId: { type: string }
         dueOn: { type: [string, "null"], format: date }
+    AcceptProjectDeliverableRequest:
+      type: object
+      additionalProperties: false
+      required: [organizationId, name, documentId, documentVersionId]
+      properties:
+        organizationId: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 255 }
+        documentId: { type: string, format: uuid }
+        documentVersionId: { type: string, format: uuid }
+    CloseProjectRequest:
+      type: object
+      additionalProperties: false
+      required: [organizationId, outcomes, lessonsLearned, pendingItems]
+      properties:
+        organizationId: { type: string, format: uuid }
+        outcomes: { type: string, minLength: 1, maxLength: 10000 }
+        lessonsLearned: { type: string, minLength: 1, maxLength: 10000 }
+        pendingItems:
+          {
+            type: array,
+            maxItems: 100,
+            items: { type: string, minLength: 1, maxLength: 2000 },
+          }
+    AttachEvidenceRequest:
+      type: object
+      additionalProperties: false
+      required: [organizationId, documentId, documentVersionId]
+      properties:
+        organizationId: { type: string, format: uuid }
+        documentId: { type: string, format: uuid }
+        documentVersionId: { type: string, format: uuid }
+    EvidenceReference:
+      type: object
+      required:
+        [
+          id,
+          organizationId,
+          workspaceId,
+          subjectType,
+          subjectId,
+          documentId,
+          documentVersionId,
+          linkedByActorId,
+          linkedAt,
+          compliance,
+        ]
+      properties:
+        id: { type: string, format: uuid }
+        organizationId: { type: string, format: uuid }
+        workspaceId: { type: string, format: uuid }
+        subjectType:
+          { type: string, enum: [evaluation, decision, project_closure] }
+        subjectId: { type: string, format: uuid }
+        documentId: { type: string, format: uuid }
+        documentVersionId: { type: string, format: uuid }
+        linkedByActorId: { type: string }
+        linkedAt: { type: string, format: date-time }
+        compliance: { type: string, enum: [valid, invalid] }
     Project:
       type: object
       required:

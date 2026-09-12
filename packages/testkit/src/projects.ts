@@ -2,6 +2,7 @@ import type {
   ProjectAuditEvent,
   ProjectAuditStore,
   ProjectExecutionStore,
+  ProjectClosureStore,
   ProjectStore,
   DurableDomainEvent,
 } from "@aether/application";
@@ -9,6 +10,8 @@ import type {
   Project,
   ProjectMilestone,
   ProjectNextAction,
+  ProjectClosure,
+  ProjectDeliverableAcceptance,
 } from "@aether/domain";
 
 export class InMemoryProjectStore implements ProjectStore {
@@ -71,6 +74,21 @@ export class InMemoryProjectExecutionStore implements ProjectExecutionStore {
   }
   async addNextAction(action: ProjectNextAction): Promise<void> {
     this.actions.push(action);
+  }
+}
+export class InMemoryProjectClosureStore implements ProjectClosureStore {
+  readonly closures = new Map<string, ProjectClosure>();
+  readonly deliverables: ProjectDeliverableAcceptance[] = [];
+  async createClosure(closure: ProjectClosure): Promise<void> {
+    this.closures.set(closure.projectId, closure);
+  }
+  async findClosure(projectId: string): Promise<ProjectClosure | null> {
+    return this.closures.get(projectId) ?? null;
+  }
+  async acceptDeliverable(
+    acceptance: ProjectDeliverableAcceptance,
+  ): Promise<void> {
+    this.deliverables.push(acceptance);
   }
 }
 export class InMemoryProjectAuditStore implements ProjectAuditStore {

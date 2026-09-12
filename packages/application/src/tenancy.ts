@@ -261,7 +261,10 @@ export class AccessDeniedError extends Error {
 export class ResourceNotFoundError extends Error {
   constructor(
     public readonly code:
-      "WORKSPACE_NOT_FOUND" | "INITIATIVE_NOT_FOUND" | "PROJECT_NOT_FOUND",
+      | "WORKSPACE_NOT_FOUND"
+      | "INITIATIVE_NOT_FOUND"
+      | "PROJECT_NOT_FOUND"
+      | "EVIDENCE_SUBJECT_NOT_FOUND",
   ) {
     super(code);
   }

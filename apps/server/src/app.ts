@@ -26,6 +26,7 @@ import {
   DocumentAccessDeniedError,
   DocumentNotFoundError,
   DocumentValidationError,
+  EvidenceService,
 } from "@aether/application";
 import {
   CreateInvitationRequestSchema,
@@ -47,6 +48,10 @@ import {
   DocumentListQuerySchema,
   BeginDocumentReplacementRequestSchema,
   WithdrawDocumentVersionRequestSchema,
+  AcceptProjectDeliverableRequestSchema,
+  AttachEvidenceRequestSchema,
+  CloseProjectRequestSchema,
+  EvidenceReferenceSubjectTypeSchema,
 } from "@aether/contracts";
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
@@ -78,6 +83,7 @@ export async function buildServer(input: {
   evaluations: EvaluationService;
   projects: ProjectService;
   documents?: DocumentService;
+  evidence?: EvidenceService;
   idempotency: IdempotencyStore;
   auditHistory?: AuditHistoryService;
   readinessCheck?: () => Promise<void>;
@@ -962,6 +968,140 @@ export async function buildServer(input: {
         };
       },
     });
+  });
+  app.post("/v1/projects/:projectId/deliverables", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    const { projectId } = z
+      .object({ projectId: z.string().uuid() })
+      .parse(request.params);
+    const body = AcceptProjectDeliverableRequestSchema.parse(request.body);
+    return respondIdempotently({
+      request,
+      reply,
+      store: input.idempotency,
+      actorId: session.actorId,
+      operation: `project.deliverable.accept:${projectId}:${body.documentVersionId}`,
+      requestPayload: body,
+      execute: async () => {
+        const acceptance = await input.projects.acceptDeliverable({
+          actorId: session.actorId,
+          correlationId: correlationId(reply),
+          projectId,
+          ...body,
+        });
+        return {
+          statusCode: 201,
+          body: {
+            ...acceptance,
+            acceptedAt: acceptance.acceptedAt.toISOString(),
+          },
+        };
+      },
+    });
+  });
+  app.post("/v1/projects/:projectId/closure", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    const { projectId } = z
+      .object({ projectId: z.string().uuid() })
+      .parse(request.params);
+    const body = CloseProjectRequestSchema.parse(request.body);
+    return respondIdempotently({
+      request,
+      reply,
+      store: input.idempotency,
+      actorId: session.actorId,
+      operation: `project.close:${projectId}`,
+      requestPayload: body,
+      execute: async () => {
+        const closure = await input.projects.close({
+          actorId: session.actorId,
+          correlationId: correlationId(reply),
+          projectId,
+          ...body,
+        });
+        return {
+          statusCode: 201,
+          body: { ...closure, closedAt: closure.closedAt.toISOString() },
+        };
+      },
+    });
+  });
+  app.post("/v1/evidence/:subjectType/:subjectId", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    if (!input.evidence) throw new Error("Evidence service is not configured");
+    const params = z
+      .object({
+        subjectType: EvidenceReferenceSubjectTypeSchema,
+        subjectId: z.string().uuid(),
+      })
+      .parse(request.params);
+    const body = AttachEvidenceRequestSchema.parse(request.body);
+    return respondIdempotently({
+      request,
+      reply,
+      store: input.idempotency,
+      actorId: session.actorId,
+      operation: `evidence.attach:${params.subjectType}:${params.subjectId}:${body.documentVersionId}`,
+      requestPayload: body,
+      execute: async () => {
+        const reference = await input.evidence!.attach({
+          actorId: session.actorId,
+          correlationId: correlationId(reply),
+          ...params,
+          ...body,
+        });
+        return {
+          statusCode: 201,
+          body: {
+            ...reference,
+            linkedAt: reference.linkedAt.toISOString(),
+            compliance: "valid",
+          },
+        };
+      },
+    });
+  });
+  app.get("/v1/evidence/:subjectType/:subjectId", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    if (!input.evidence) throw new Error("Evidence service is not configured");
+    const params = z
+      .object({
+        subjectType: EvidenceReferenceSubjectTypeSchema,
+        subjectId: z.string().uuid(),
+      })
+      .parse(request.params);
+    const query = z
+      .object({ organizationId: z.string().uuid() })
+      .parse(request.query);
+    const references = await input.evidence.list({
+      actorId: session.actorId,
+      ...params,
+      ...query,
+    });
+    return references.map((reference) => ({
+      ...reference,
+      linkedAt: reference.linkedAt.toISOString(),
+    }));
   });
   app.get("/v1/projects/:projectId/audit-events", async (request, reply) => {
     const session = await requireSession(
