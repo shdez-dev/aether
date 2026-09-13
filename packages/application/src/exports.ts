@@ -1,0 +1,1 @@
+export type ExportJob = Readonly<{ id:string; organizationId:string; requestedByActorId:string; scope:"organization_audit"; status:"requested"|"processing"|"completed"|"failed"|"expired"; objectKey:string|null; expiresAt:Date|null; requestedAt:Date; completedAt:Date|null; errorCode:string|null }>;

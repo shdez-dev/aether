@@ -1,0 +1,3 @@
+CREATE TABLE comments (
+ id UUID PRIMARY KEY, organization_id UUID NOT NULL REFERENCES organizations(id), workspace_id UUID NOT NULL REFERENCES workspaces(id), resource_type TEXT NOT NULL CHECK (resource_type IN ('initiative','evaluation','decision','project')), resource_id UUID NOT NULL, body TEXT NOT NULL CHECK (char_length(body) BETWEEN 1 AND 10000), mentioned_actor_ids JSONB NOT NULL DEFAULT '[]'::jsonb, author_actor_id TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL, edited_at TIMESTAMPTZ NULL, resolved_at TIMESTAMPTZ NULL, resolved_by_actor_id TEXT NULL, deleted_at TIMESTAMPTZ NULL);
+CREATE INDEX comments_resource_idx ON comments (organization_id, resource_type, resource_id, created_at ASC);

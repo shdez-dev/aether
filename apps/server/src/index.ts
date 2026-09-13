@@ -4,6 +4,8 @@ import {
   EvaluationService,
   DocumentService,
   EvidenceService,
+  NotificationService,
+  CommentService,
   AuditHistoryService,
   InitiativeService,
   ProjectService,
@@ -32,6 +34,8 @@ import {
   PostgresDocumentProjectAccess,
   PostgresEvidenceStore,
   PostgresProjectClosureStore,
+  PostgresNotificationStore,
+  PostgresCommentStore,
 } from "@aether/database";
 import {
   createOperationalMetrics,
@@ -129,6 +133,21 @@ const evidence = new EvidenceService({
   ids: { next: randomUUID },
   clock: { now: () => new Date() },
 });
+const notifications = new NotificationService({
+  store: new PostgresNotificationStore(pool),
+  tenancy: new PostgresTenantStore(pool),
+  ids: { next: randomUUID },
+  clock: { now: () => new Date() },
+});
+const comments = new CommentService({
+  store: new PostgresCommentStore(pool),
+  resources: documentStore,
+  tenancy: new PostgresTenantStore(pool),
+  projects: new PostgresDocumentProjectAccess(pool),
+  notifications,
+  ids: { next: randomUUID },
+  clock: { now: () => new Date() },
+});
 const auditHistory = new AuditHistoryService({
   store: new PostgresAuditHistoryStore(pool),
   tenancy: new PostgresTenantStore(pool),
@@ -142,6 +161,8 @@ const app = await buildServer({
   projects,
   documents,
   evidence,
+  notifications,
+  comments,
   idempotency: new PostgresIdempotencyStore(pool),
   auditHistory,
   metrics,

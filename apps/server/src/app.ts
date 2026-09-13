@@ -27,6 +27,8 @@ import {
   DocumentNotFoundError,
   DocumentValidationError,
   EvidenceService,
+  NotificationService,
+  CommentService,
 } from "@aether/application";
 import {
   CreateInvitationRequestSchema,
@@ -52,6 +54,9 @@ import {
   AttachEvidenceRequestSchema,
   CloseProjectRequestSchema,
   EvidenceReferenceSubjectTypeSchema,
+  NotificationInboxQuerySchema,
+  NotificationPreferenceRequestSchema,
+  CreateCommentRequestSchema,
 } from "@aether/contracts";
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
@@ -84,6 +89,8 @@ export async function buildServer(input: {
   projects: ProjectService;
   documents?: DocumentService;
   evidence?: EvidenceService;
+  notifications?: NotificationService;
+  comments?: CommentService;
   idempotency: IdempotencyStore;
   auditHistory?: AuditHistoryService;
   readinessCheck?: () => Promise<void>;
@@ -1097,6 +1104,131 @@ export async function buildServer(input: {
       actorId: session.actorId,
       ...params,
       ...query,
+    });
+    app.get("/v1/notifications", async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      if (!input.notifications)
+        throw new Error("Notification service is not configured");
+      const query = NotificationInboxQuerySchema.parse(request.query);
+      return (
+        await input.notifications.inbox({ actorId: session.actorId, ...query })
+      ).map((item) => ({
+        ...item,
+        createdAt: item.createdAt.toISOString(),
+        readAt: item.readAt?.toISOString() ?? null,
+      }));
+    });
+    app.patch(
+      "/v1/notifications/:notificationId/read",
+      async (request, reply) => {
+        const session = await requireSession(
+          request,
+          reply,
+          input.auth,
+          input.config,
+        );
+        if (!input.notifications)
+          throw new Error("Notification service is not configured");
+        const { notificationId } = z
+          .object({ notificationId: z.string().uuid() })
+          .parse(request.params);
+        const notification = await input.notifications.read({
+          actorId: session.actorId,
+          notificationId,
+        });
+        return {
+          ...notification,
+          createdAt: notification.createdAt.toISOString(),
+          readAt: notification.readAt?.toISOString() ?? null,
+        };
+      },
+    );
+    app.put("/v1/notification-preferences", async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      if (!input.notifications)
+        throw new Error("Notification service is not configured");
+      await input.notifications.setEmailPreference({
+        actorId: session.actorId,
+        ...NotificationPreferenceRequestSchema.parse(request.body),
+      });
+      return reply.code(204).send();
+    });
+    app.post("/v1/comments", async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      if (!input.comments) throw new Error("Comment service is not configured");
+      const body = CreateCommentRequestSchema.parse(request.body);
+      return respondIdempotently({
+        request,
+        reply,
+        store: input.idempotency,
+        actorId: session.actorId,
+        operation: `comment.create:${body.resourceType}:${body.resourceId}`,
+        requestPayload: body,
+        execute: async () => ({
+          statusCode: 201,
+          body: await input.comments!.create({
+            actorId: session.actorId,
+            correlationId: correlationId(reply),
+            ...body,
+          }),
+        }),
+      });
+    });
+    app.get("/v1/comments", async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      if (!input.comments) throw new Error("Comment service is not configured");
+      const query = z
+        .object({
+          resourceType: z.enum([
+            "initiative",
+            "evaluation",
+            "decision",
+            "project",
+          ]),
+          resourceId: z.string().uuid(),
+        })
+        .parse(request.query);
+      return input.comments.list({ actorId: session.actorId, ...query });
+    });
+    app.patch("/v1/comments/:commentId/resolution", async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      if (!input.comments) throw new Error("Comment service is not configured");
+      const { commentId } = z
+        .object({ commentId: z.string().uuid() })
+        .parse(request.params);
+      const { reopen } = z
+        .object({ reopen: z.boolean().optional() })
+        .parse(request.body);
+      return input.comments.resolve({
+        actorId: session.actorId,
+        commentId,
+        ...(reopen === undefined ? {} : { reopen }),
+      });
     });
     return references.map((reference) => ({
       ...reference,

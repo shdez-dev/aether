@@ -30,6 +30,11 @@ import type {
   DocumentVersionAccess,
   DocumentResource,
   DocumentProjectAccess,
+  NotificationStore,
+  Notification,
+  NotificationPreference,
+  CommentStore,
+  Comment,
   EvidenceReferenceStore,
   EvidenceSubjectLookup,
   ProjectClosureStore,
@@ -1052,6 +1057,141 @@ export class PostgresAuditHistoryStore implements AuditHistoryStore {
     return result.rows.map(toAuditEvent);
   }
 }
+export class PostgresNotificationStore implements NotificationStore {
+  constructor(private readonly pool: Pool) {}
+  async create(notification: Notification): Promise<Notification> {
+    const result = await this.pool.query<NotificationRow>(
+      `INSERT INTO notifications (id, organization_id, workspace_id, recipient_actor_id, event_key, resource_type, resource_id, title, created_at, read_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+       ON CONFLICT (recipient_actor_id, event_key) DO UPDATE SET event_key = EXCLUDED.event_key
+       RETURNING id, organization_id, workspace_id, recipient_actor_id, event_key, resource_type, resource_id, title, created_at, read_at`,
+      [
+        notification.id,
+        notification.organizationId,
+        notification.workspaceId,
+        notification.recipientActorId,
+        notification.eventKey,
+        notification.resourceType,
+        notification.resourceId,
+        notification.title,
+        notification.createdAt,
+        notification.readAt,
+      ],
+    );
+    return toNotification(result.rows[0]!);
+  }
+  async list(input: {
+    actorId: string;
+    organizationId: string;
+  }): Promise<readonly Notification[]> {
+    const result = await this.pool.query<NotificationRow>(
+      `SELECT id, organization_id, workspace_id, recipient_actor_id, event_key, resource_type, resource_id, title, created_at, read_at
+       FROM notifications WHERE recipient_actor_id = $1 AND organization_id = $2 ORDER BY created_at DESC, id DESC`,
+      [input.actorId, input.organizationId],
+    );
+    return result.rows.map(toNotification);
+  }
+  async find(input: {
+    id: string;
+    actorId: string;
+  }): Promise<Notification | null> {
+    const result = await this.pool.query<NotificationRow>(
+      `SELECT id, organization_id, workspace_id, recipient_actor_id, event_key, resource_type, resource_id, title, created_at, read_at
+       FROM notifications WHERE id = $1 AND recipient_actor_id = $2`,
+      [input.id, input.actorId],
+    );
+    return result.rows[0] ? toNotification(result.rows[0]) : null;
+  }
+  async markRead(input: {
+    id: string;
+    actorId: string;
+    readAt: Date;
+  }): Promise<Notification | null> {
+    const result = await this.pool.query<NotificationRow>(
+      `UPDATE notifications SET read_at = COALESCE(read_at, $3) WHERE id = $1 AND recipient_actor_id = $2
+       RETURNING id, organization_id, workspace_id, recipient_actor_id, event_key, resource_type, resource_id, title, created_at, read_at`,
+      [input.id, input.actorId, input.readAt],
+    );
+    return result.rows[0] ? toNotification(result.rows[0]) : null;
+  }
+  async setPreference(preference: NotificationPreference): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO notification_preferences (actor_id, organization_id, email_enabled, updated_at) VALUES ($1,$2,$3,$4)
+      ON CONFLICT (actor_id, organization_id) DO UPDATE SET email_enabled = EXCLUDED.email_enabled, updated_at = EXCLUDED.updated_at`,
+      [
+        preference.actorId,
+        preference.organizationId,
+        preference.emailEnabled,
+        preference.updatedAt,
+      ],
+    );
+  }
+  async getPreference(input: {
+    actorId: string;
+    organizationId: string;
+  }): Promise<NotificationPreference | null> {
+    const result = await this.pool.query<NotificationPreferenceRow>(
+      `SELECT actor_id, organization_id, email_enabled, updated_at FROM notification_preferences WHERE actor_id = $1 AND organization_id = $2`,
+      [input.actorId, input.organizationId],
+    );
+    return result.rows[0]
+      ? {
+          actorId: result.rows[0].actor_id,
+          organizationId: result.rows[0].organization_id,
+          emailEnabled: result.rows[0].email_enabled,
+          updatedAt: result.rows[0].updated_at,
+        }
+      : null;
+  }
+}
+export class PostgresCommentStore implements CommentStore {
+  constructor(private readonly pool: Pool) {}
+  async create(c: Comment): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO comments (id,organization_id,workspace_id,resource_type,resource_id,body,mentioned_actor_ids,author_actor_id,created_at,edited_at,resolved_at,resolved_by_actor_id,deleted_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+      [
+        c.id,
+        c.organizationId,
+        c.workspaceId,
+        c.resourceType,
+        c.resourceId,
+        c.body,
+        asJson(c.mentionedActorIds),
+        c.authorActorId,
+        c.createdAt,
+        c.editedAt,
+        c.resolvedAt,
+        c.resolvedByActorId,
+        c.deletedAt,
+      ],
+    );
+  }
+  async list(i: {
+    organizationId: string;
+    resourceType: DocumentResourceType;
+    resourceId: string;
+  }): Promise<readonly Comment[]> {
+    const r = await this.pool.query<CommentRow>(
+      `SELECT * FROM comments WHERE organization_id=$1 AND resource_type=$2 AND resource_id=$3 AND deleted_at IS NULL ORDER BY created_at ASC`,
+      [i.organizationId, i.resourceType, i.resourceId],
+    );
+    return r.rows.map(toComment);
+  }
+  async find(id: string): Promise<Comment | null> {
+    const r = await this.pool.query<CommentRow>(
+      `SELECT * FROM comments WHERE id=$1 AND deleted_at IS NULL`,
+      [id],
+    );
+    return r.rows[0] ? toComment(r.rows[0]) : null;
+  }
+  async update(c: Comment): Promise<boolean> {
+    const r = await this.pool.query(
+      `UPDATE comments SET resolved_at=$2,resolved_by_actor_id=$3 WHERE id=$1 AND deleted_at IS NULL`,
+      [c.id, c.resolvedAt, c.resolvedByActorId],
+    );
+    return r.rowCount === 1;
+  }
+}
 
 /** Metadatos de documentos y bitácora insertados atómicamente en PostgreSQL. */
 export class PostgresDocumentStore
@@ -1540,6 +1680,39 @@ type ProjectAuditRow = {
   occurred_at: Date;
   payload: Record<string, unknown>;
 };
+type NotificationRow = {
+  id: string;
+  organization_id: string;
+  workspace_id: string;
+  recipient_actor_id: string;
+  event_key: string;
+  resource_type: Notification["resourceType"];
+  resource_id: string;
+  title: string;
+  created_at: Date;
+  read_at: Date | null;
+};
+type NotificationPreferenceRow = {
+  actor_id: string;
+  organization_id: string;
+  email_enabled: boolean;
+  updated_at: Date;
+};
+type CommentRow = {
+  id: string;
+  organization_id: string;
+  workspace_id: string;
+  resource_type: DocumentResourceType;
+  resource_id: string;
+  body: string;
+  mentioned_actor_ids: string[];
+  author_actor_id: string;
+  created_at: Date;
+  edited_at: Date | null;
+  resolved_at: Date | null;
+  resolved_by_actor_id: string | null;
+  deleted_at: Date | null;
+};
 type ProjectClosureRow = {
   id: string;
   project_id: string;
@@ -1699,6 +1872,37 @@ function toProjectAuditEvent(row: ProjectAuditRow): ProjectAuditEvent {
     correlationId: row.correlation_id,
     occurredAt: row.occurred_at,
     payload: row.payload,
+  };
+}
+function toNotification(row: NotificationRow): Notification {
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    workspaceId: row.workspace_id,
+    recipientActorId: row.recipient_actor_id,
+    eventKey: row.event_key,
+    resourceType: row.resource_type,
+    resourceId: row.resource_id,
+    title: row.title,
+    createdAt: row.created_at,
+    readAt: row.read_at,
+  };
+}
+function toComment(r: CommentRow): Comment {
+  return {
+    id: r.id,
+    organizationId: r.organization_id,
+    workspaceId: r.workspace_id,
+    resourceType: r.resource_type,
+    resourceId: r.resource_id,
+    body: r.body,
+    mentionedActorIds: r.mentioned_actor_ids,
+    authorActorId: r.author_actor_id,
+    createdAt: r.created_at,
+    editedAt: r.edited_at,
+    resolvedAt: r.resolved_at,
+    resolvedByActorId: r.resolved_by_actor_id,
+    deletedAt: r.deleted_at,
   };
 }
 function toProjectClosure(row: ProjectClosureRow): ProjectClosure {
