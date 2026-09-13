@@ -21,6 +21,7 @@ import {
 import {
   PostgresAuthStore,
   PostgresAuditHistoryStore,
+  PostgresSecurityAuditStore,
   PostgresInitiativeAuditStore,
   PostgresInitiativeStore,
   PostgresIdempotencyStore,
@@ -165,6 +166,7 @@ const app = await buildServer({
   comments,
   idempotency: new PostgresIdempotencyStore(pool),
   auditHistory,
+  securityAudit: new PostgresSecurityAuditStore(pool),
   metrics,
   readinessCheck: async () => {
     await pool.query("SELECT 1");

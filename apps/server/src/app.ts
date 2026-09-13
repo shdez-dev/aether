@@ -10,6 +10,7 @@ import {
 import {
   AccessDeniedError,
   AuditHistoryService,
+  SecurityAuditStore,
   InitiativeDomainError,
   InitiativeService,
   InitiativeVersionConflictError,
@@ -93,6 +94,7 @@ export async function buildServer(input: {
   comments?: CommentService;
   idempotency: IdempotencyStore;
   auditHistory?: AuditHistoryService;
+  securityAudit?: SecurityAuditStore;
   readinessCheck?: () => Promise<void>;
   metrics?: OperationalMetrics;
 }): Promise<FastifyInstance> {
@@ -222,7 +224,7 @@ export async function buildServer(input: {
       assertCsrf(request, input.config);
     }
   });
-  app.setErrorHandler((error, request, reply) => {
+  app.setErrorHandler(async (error, request, reply) => {
     const errorStatusCode =
       error &&
       typeof error === "object" &&
@@ -264,6 +266,25 @@ export async function buildServer(input: {
                     error instanceof ProjectVersionConflictError
                   ? 409
                   : 400;
+    if (input.securityAudit && (status === 401 || status === 403)) {
+      const session = await input.auth.authenticate(
+        request.cookies[sessionCookie],
+      );
+      await input.securityAudit.record({
+        id: randomUUID(),
+        actorId: session?.actorId ?? null,
+        action:
+          status === 401
+            ? "security.authentication_denied.v1"
+            : "security.authorization_denied.v1",
+        method: request.method,
+        path: request.url.split("?")[0] ?? request.url,
+        statusCode: status,
+        correlationId: correlationId(reply),
+        occurredAt: new Date(),
+        metadata: {},
+      });
+    }
     reply
       .code(status)
       .type("application/problem+json")

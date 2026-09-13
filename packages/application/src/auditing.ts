@@ -31,6 +31,19 @@ export interface AuditHistoryStore {
     resourceId: string;
   }): Promise<readonly AuditEvent[]>;
 }
+export interface SecurityAuditStore {
+  record(input: {
+    id: string;
+    actorId: string | null;
+    action: string;
+    method: string;
+    path: string;
+    statusCode: number;
+    correlationId: string;
+    occurredAt: Date;
+    metadata: Readonly<Record<string, string>>;
+  }): Promise<void>;
+}
 
 export class AuditHistoryService {
   constructor(

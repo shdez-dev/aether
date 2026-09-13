@@ -24,6 +24,7 @@ import type {
   IdempotencyStore,
   AuditEvent,
   AuditHistoryStore,
+  SecurityAuditStore,
   DocumentAuditEvent,
   DocumentAuditStore,
   DocumentStore,
@@ -1055,6 +1056,25 @@ export class PostgresAuditHistoryStore implements AuditHistoryStore {
       [input.organizationId, input.resourceType, input.resourceId],
     );
     return result.rows.map(toAuditEvent);
+  }
+}
+export class PostgresSecurityAuditStore implements SecurityAuditStore {
+  constructor(private readonly pool: Pool) {}
+  async record(i: Parameters<SecurityAuditStore["record"]>[0]): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO security_audit_events (id,actor_id,action,method,path,status_code,correlation_id,occurred_at,metadata) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [
+        i.id,
+        i.actorId,
+        i.action,
+        i.method,
+        i.path,
+        i.statusCode,
+        i.correlationId,
+        i.occurredAt,
+        i.metadata,
+      ],
+    );
   }
 }
 export class PostgresNotificationStore implements NotificationStore {
