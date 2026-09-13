@@ -30,6 +30,7 @@ import {
   PostgresProjectClosureStore,
   PostgresProjectStore,
   PostgresDocumentStore,
+  PostgresProductMetricsStore,
   PostgresTenantStore,
   migratePool,
 } from "@aether/database";
@@ -63,6 +64,210 @@ if (containerRuntimeAvailable || requireContainerRuntime) {
 }
 
 describe("PostgreSQL integration", () => {
+  runPostgresIntegration(
+    "calculates exact product metrics without crossing organization boundaries",
+    async () => {
+      const organizationId = randomUUID();
+      const otherOrganizationId = randomUUID();
+      const workspaceId = randomUUID();
+      const otherWorkspaceId = randomUUID();
+      const initiativeOne = randomUUID();
+      const initiativeTwo = randomUUID();
+      const initiativePrevious = randomUUID();
+      const otherInitiative = randomUUID();
+      const standardId = randomUUID();
+      const otherStandardId = randomUUID();
+      const evaluationOne = randomUUID();
+      const evaluationTwo = randomUUID();
+      const evaluationPrevious = randomUUID();
+      const otherEvaluation = randomUUID();
+      const decisionOne = randomUUID();
+      const decisionTwo = randomUUID();
+      const decisionPrevious = randomUUID();
+      const otherDecision = randomUUID();
+      const activeProjectId = randomUUID();
+      const closedProjectId = randomUUID();
+      const documentId = randomUUID();
+      const documentVersionId = randomUUID();
+      const startsAt = new Date("2026-01-01T00:00:00.000Z");
+      const endsAt = new Date("2026-02-01T00:00:00.000Z");
+
+      await pool.query(
+        `INSERT INTO organizations (id, name, timezone, locale) VALUES
+         ($1, 'Metrics', 'UTC', 'es-CL'), ($2, 'Other metrics', 'UTC', 'es-CL')`,
+        [organizationId, otherOrganizationId],
+      );
+      await pool.query(
+        `INSERT INTO workspaces (id, organization_id, name, mode) VALUES
+         ($1, $2, 'Metrics workspace', 'institutional'),
+         ($3, $4, 'Other workspace', 'institutional')`,
+        [workspaceId, organizationId, otherWorkspaceId, otherOrganizationId],
+      );
+      await pool.query(
+        `INSERT INTO initiatives (id, organization_id, workspace_id, created_by_actor_id, title, problem_statement, expected_outcome, classification, status, created_at, updated_at) VALUES
+         ($1,$2,$3,'owner','One','Problem','Outcome','internal','approved','2026-01-01T00:00:00Z','2026-01-03T00:00:00Z'),
+         ($4,$2,$3,'owner','Two','Problem','Outcome','internal','rejected','2026-01-02T00:00:00Z','2026-01-04T00:00:00Z'),
+         ($5,$2,$3,'owner','Previous','Problem','Outcome','internal','approved','2025-12-01T00:00:00Z','2025-12-03T00:00:00Z'),
+         ($6,$7,$8,'other','Other','Problem','Outcome','internal','approved','2026-01-01T00:00:00Z','2026-01-02T00:00:00Z')`,
+        [
+          initiativeOne,
+          organizationId,
+          workspaceId,
+          initiativeTwo,
+          initiativePrevious,
+          otherInitiative,
+          otherOrganizationId,
+          otherWorkspaceId,
+        ],
+      );
+      await pool.query(
+        `INSERT INTO evaluation_standards (id, organization_id, name, version, criteria, is_active, published_at, published_by_actor_id) VALUES
+         ($1,$2,'Standard',1,'[]',false,'2025-12-01T00:00:00Z','owner'),
+         ($3,$4,'Other standard',1,'[]',false,'2025-12-01T00:00:00Z','other')`,
+        [standardId, organizationId, otherStandardId, otherOrganizationId],
+      );
+      await pool.query(
+        `INSERT INTO initiative_evaluations (id, organization_id, workspace_id, initiative_id, initiative_version, standard_id, standard_version, criteria, coverage, evaluated_by_actor_id, evaluated_at) VALUES
+         ($1,$2,$3,$4,0,$5,1,'[]','{}','owner','2026-01-03T00:00:00Z'),
+         ($6,$2,$3,$7,0,$5,1,'[]','{}','owner','2026-01-04T00:00:00Z'),
+         ($8,$2,$3,$9,0,$5,1,'[]','{}','owner','2025-12-03T00:00:00Z'),
+         ($10,$11,$12,$13,0,$14,1,'[]','{}','other','2026-01-02T00:00:00Z')`,
+        [
+          evaluationOne,
+          organizationId,
+          workspaceId,
+          initiativeOne,
+          standardId,
+          evaluationTwo,
+          initiativeTwo,
+          evaluationPrevious,
+          initiativePrevious,
+          otherEvaluation,
+          otherOrganizationId,
+          otherWorkspaceId,
+          otherInitiative,
+          otherStandardId,
+        ],
+      );
+      await pool.query(
+        `INSERT INTO initiative_decisions (id, organization_id, workspace_id, initiative_id, evaluation_id, outcome, rationale, evidence, standard_id, standard_version, coverage, decided_by_actor_id, decided_at) VALUES
+         ($1,$2,$3,$4,$5,'approved','Rationale','[]',$6,1,'{}','owner','2026-01-03T00:00:00Z'),
+         ($7,$2,$3,$8,$9,'rejected','Rationale','[]',$6,1,'{}','owner','2026-01-04T00:00:00Z'),
+         ($10,$2,$3,$11,$12,'approved','Rationale','[]',$6,1,'{}','owner','2025-12-03T00:00:00Z'),
+         ($13,$14,$15,$16,$17,'approved','Rationale','[]',$18,1,'{}','other','2026-01-02T00:00:00Z')`,
+        [
+          decisionOne,
+          organizationId,
+          workspaceId,
+          initiativeOne,
+          evaluationOne,
+          standardId,
+          decisionTwo,
+          initiativeTwo,
+          evaluationTwo,
+          decisionPrevious,
+          initiativePrevious,
+          evaluationPrevious,
+          otherDecision,
+          otherOrganizationId,
+          otherWorkspaceId,
+          otherInitiative,
+          otherEvaluation,
+          otherStandardId,
+        ],
+      );
+      await pool.query(
+        `INSERT INTO projects (id, organization_id, workspace_id, source_initiative_id, source_decision_id, name, sponsor_actor_id, lead_actor_id, participants, status, created_at, updated_at) VALUES
+         ($1,$2,$3,$4,$5,'Active','sponsor','lead','[]','active','2026-01-03T00:00:00Z','2025-12-20T00:00:00Z'),
+         ($6,$2,$3,$7,$8,'Closed','sponsor','lead','[]','completed','2025-12-03T00:00:00Z','2026-01-15T00:00:00Z')`,
+        [
+          activeProjectId,
+          organizationId,
+          workspaceId,
+          initiativeOne,
+          decisionOne,
+          closedProjectId,
+          initiativePrevious,
+          decisionPrevious,
+        ],
+      );
+      await pool.query(
+        `INSERT INTO project_milestones (id, project_id, title, due_on, completed_at, created_by_actor_id, created_at)
+         VALUES ($1,$2,'Upcoming','2026-02-15',NULL,'owner','2026-01-03T00:00:00Z')`,
+        [randomUUID(), activeProjectId],
+      );
+      await pool.query(
+        `INSERT INTO project_closures (id, project_id, organization_id, workspace_id, outcomes, lessons_learned, pending_items, closed_by_actor_id, closed_at)
+         VALUES ($1,$2,$3,$4,'Delivered','Reusable lesson','[]','owner','2026-01-20T00:00:00Z')`,
+        [randomUUID(), closedProjectId, organizationId, workspaceId],
+      );
+      await pool.query(
+        `INSERT INTO documents (id, organization_id, workspace_id, resource_type, resource_id, classification, created_by_actor_id, created_at)
+         VALUES ($1,$2,$3,'decision',$4,'internal','owner','2026-01-03T00:00:00Z')`,
+        [documentId, organizationId, workspaceId, decisionOne],
+      );
+      await pool.query(
+        `INSERT INTO document_versions (id, document_id, version_number, original_name, declared_content_type, detected_content_type, byte_length, sha256, status, created_at, published_at, evidence_status)
+         VALUES ($1,$2,1,'evidence.pdf','application/pdf','application/pdf',1,$3,'published','2026-01-03T00:00:00Z','2026-01-03T00:00:00Z','valid')`,
+        [documentVersionId, documentId, "a".repeat(64)],
+      );
+      await pool.query(
+        `INSERT INTO document_binaries (version_id, quarantine_key, object_key) VALUES ($1,$2,$3)`,
+        [
+          documentVersionId,
+          `quarantine/${documentVersionId}`,
+          `objects/${documentVersionId}`,
+        ],
+      );
+      await pool.query(
+        `INSERT INTO evidence_references (id, organization_id, workspace_id, subject_type, subject_id, document_id, document_version_id, linked_by_actor_id, linked_at)
+         VALUES ($1,$2,$3,'decision',$4,$5,$6,'owner','2026-01-03T00:00:00Z')`,
+        [
+          randomUUID(),
+          organizationId,
+          workspaceId,
+          decisionOne,
+          documentId,
+          documentVersionId,
+        ],
+      );
+
+      const snapshot = await new PostgresProductMetricsStore(pool).snapshot({
+        organizationId,
+        startsAt,
+        endsAt,
+        calculatedAt: endsAt,
+      });
+      expect(snapshot.initiativeDecision).toEqual({
+        decidedCount: 2,
+        averageHours: 48,
+        medianHours: 48,
+      });
+      expect(snapshot.decisionEvidence).toEqual({
+        decidedCount: 2,
+        decisionsWithVerifiedEvidence: 1,
+        coveragePercent: 50,
+      });
+      expect(snapshot.conversion).toEqual({
+        approvedDecisions: 1,
+        projectsCreatedFromApprovedDecisions: 1,
+        conversionPercent: 100,
+      });
+      expect(snapshot.activeProjects).toEqual({
+        activeOrBlockedCount: 1,
+        withAssignedLeadCount: 1,
+        withUpcomingMilestoneCount: 1,
+        staleForThirtyDaysCount: 1,
+      });
+      expect(snapshot.closures).toEqual({
+        closedCount: 1,
+        withLessonsLearnedCount: 1,
+        lessonsCoveragePercent: 100,
+      });
+    },
+    120_000,
+  );
+
   runPostgresIntegration(
     "renews, expires and revokes opaque sessions with append-only audit",
     async () => {

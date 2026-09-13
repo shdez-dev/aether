@@ -9,3 +9,4 @@ export * from "./documents.js";
 export * from "./evidence.js";
 export * from "./notifications.js";
 export * from "./comments.js";
+export * from "./metrics.js";

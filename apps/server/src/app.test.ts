@@ -13,6 +13,7 @@ import {
   AuditHistoryService,
   InitiativeService,
   ProjectService,
+  ProductMetricsService,
   TenantService,
 } from "@aether/application";
 import {
@@ -23,6 +24,7 @@ import {
   InMemoryInitiativeStore,
   InMemoryIdempotencyStore,
   InMemoryTenantStore,
+  InMemoryProductMetricsStore,
 } from "@aether/testkit";
 
 import { buildServer } from "./app.js";
@@ -324,6 +326,12 @@ describe("HTTP authentication boundary", () => {
       sessionTtlSeconds: 3600,
       sessionRenewalWindowSeconds: 600,
     });
+    const metricsStore = new InMemoryProductMetricsStore();
+    const productMetrics = new ProductMetricsService({
+      store: metricsStore,
+      tenancy: tenancyStore,
+      clock: { now: () => new Date("2026-04-01T00:00:00.000Z") },
+    });
     const app = await buildServer({
       config,
       auth,
@@ -333,6 +341,7 @@ describe("HTTP authentication boundary", () => {
       projects: {} as ProjectService,
       idempotency: new InMemoryIdempotencyStore(),
       auditHistory,
+      productMetrics,
     });
     const login = await app.inject({ method: "GET", url: "/auth/login" });
     const state = new URL(login.headers.location!).searchParams.get("state")!;
@@ -360,6 +369,54 @@ describe("HTTP authentication boundary", () => {
     });
     expect(organizationResponse.statusCode).toBe(201);
     const organization = organizationResponse.json() as { id: string };
+    metricsStore.setSnapshot(organization.id, {
+      calculationVersion: "2026-09-v1",
+      timezone: "UTC",
+      calculatedAt: new Date("2026-04-01T00:00:00.000Z"),
+      period: {
+        startsAt: new Date("2026-01-01T00:00:00.000Z"),
+        endsAt: new Date("2026-04-01T00:00:00.000Z"),
+      },
+      initiativeDecision: {
+        decidedCount: 2,
+        averageHours: 36,
+        medianHours: 36,
+      },
+      decisionEvidence: {
+        decidedCount: 2,
+        decisionsWithVerifiedEvidence: 1,
+        coveragePercent: 50,
+      },
+      conversion: {
+        approvedDecisions: 1,
+        projectsCreatedFromApprovedDecisions: 1,
+        conversionPercent: 100,
+      },
+      activeProjects: {
+        activeOrBlockedCount: 1,
+        withAssignedLeadCount: 1,
+        withUpcomingMilestoneCount: 1,
+        staleForThirtyDaysCount: 0,
+      },
+      closures: {
+        closedCount: 0,
+        withLessonsLearnedCount: 0,
+        lessonsCoveragePercent: null,
+      },
+    });
+    const productMetricsResponse = await app.inject({
+      method: "GET",
+      url: `/v1/admin/product-metrics?organizationId=${organization.id}`,
+      headers: { cookie: headers.cookie },
+    });
+    expect(productMetricsResponse.statusCode).toBe(200);
+    expect(productMetricsResponse.json()).toMatchObject({
+      calculationVersion: "2026-09-v1",
+      timezone: "UTC",
+      initiativeDecision: { medianHours: 36 },
+      decisionEvidence: { coveragePercent: 50 },
+      closures: { lessonsCoveragePercent: null },
+    });
     const organizationsResponse = await app.inject({
       method: "GET",
       url: "/v1/organizations",

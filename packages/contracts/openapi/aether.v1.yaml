@@ -28,6 +28,8 @@ tags:
     description: Compromisos ejecutables con trazabilidad de iniciativa y decisión.
   - name: Audit
     description: Línea temporal autorizada de acciones y eventos.
+  - name: Product metrics
+    description: Agregados institucionales versionados, disponibles solo para administradores.
   - name: Documents
     description: "Evidencia privada: carga en cuarentena y descarga con URL temporal autorizada."
 paths:
@@ -1016,6 +1018,40 @@ paths:
           $ref: "#/components/responses/Problem"
         default:
           $ref: "#/components/responses/Problem"
+  /v1/admin/product-metrics:
+    get:
+      tags: [Product metrics]
+      operationId: getProductMetrics
+      summary: Consultar métricas institucionales versionadas
+      description: >-
+        Disponible solo para owner y admin. Todas las series se calculan en UTC;
+        el período es semiabierto y los porcentajes sin denominador se devuelven como null.
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/OrganizationContextId"
+        - name: startsAt
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+          description: Inicio inclusivo; por defecto, 90 días antes de endsAt.
+        - name: endsAt
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+          description: Fin exclusivo; por defecto, el instante de cálculo.
+      responses:
+        "200":
+          description: Agregado aislado de la organización solicitada.
+          headers:
+            X-Correlation-ID:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProductMetrics" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
   /v1/documents/uploads:
     post:
       tags: [Documents]
@@ -1877,6 +1913,88 @@ components:
             type: string,
             enum: [initiative, evaluation, decision, project, document],
           }
+    ProductMetrics:
+      type: object
+      required:
+        [
+          calculationVersion,
+          timezone,
+          calculatedAt,
+          period,
+          initiativeDecision,
+          decisionEvidence,
+          conversion,
+          activeProjects,
+          closures,
+        ]
+      properties:
+        calculationVersion: { type: string, const: 2026-09-v1 }
+        timezone: { type: string, const: UTC }
+        calculatedAt: { type: string, format: date-time }
+        period:
+          type: object
+          required: [startsAt, endsAt]
+          properties:
+            startsAt: { type: string, format: date-time }
+            endsAt: { type: string, format: date-time }
+        initiativeDecision:
+          $ref: "#/components/schemas/InitiativeDecisionMetrics"
+        decisionEvidence:
+          $ref: "#/components/schemas/DecisionEvidenceMetrics"
+        conversion:
+          $ref: "#/components/schemas/ConversionMetrics"
+        activeProjects:
+          $ref: "#/components/schemas/ActiveProjectMetrics"
+        closures:
+          $ref: "#/components/schemas/ClosureMetrics"
+    InitiativeDecisionMetrics:
+      type: object
+      required: [decidedCount, averageHours, medianHours]
+      properties:
+        decidedCount: { type: integer, minimum: 0 }
+        averageHours: { type: [number, "null"], minimum: 0 }
+        medianHours: { type: [number, "null"], minimum: 0 }
+    DecisionEvidenceMetrics:
+      type: object
+      required: [decidedCount, decisionsWithVerifiedEvidence, coveragePercent]
+      properties:
+        decidedCount: { type: integer, minimum: 0 }
+        decisionsWithVerifiedEvidence: { type: integer, minimum: 0 }
+        coveragePercent: { type: [number, "null"], minimum: 0, maximum: 100 }
+    ConversionMetrics:
+      type: object
+      required:
+        [
+          approvedDecisions,
+          projectsCreatedFromApprovedDecisions,
+          conversionPercent,
+        ]
+      properties:
+        approvedDecisions: { type: integer, minimum: 0 }
+        projectsCreatedFromApprovedDecisions: { type: integer, minimum: 0 }
+        conversionPercent: { type: [number, "null"], minimum: 0, maximum: 100 }
+    ActiveProjectMetrics:
+      type: object
+      required:
+        [
+          activeOrBlockedCount,
+          withAssignedLeadCount,
+          withUpcomingMilestoneCount,
+          staleForThirtyDaysCount,
+        ]
+      properties:
+        activeOrBlockedCount: { type: integer, minimum: 0 }
+        withAssignedLeadCount: { type: integer, minimum: 0 }
+        withUpcomingMilestoneCount: { type: integer, minimum: 0 }
+        staleForThirtyDaysCount: { type: integer, minimum: 0 }
+    ClosureMetrics:
+      type: object
+      required: [closedCount, withLessonsLearnedCount, lessonsCoveragePercent]
+      properties:
+        closedCount: { type: integer, minimum: 0 }
+        withLessonsLearnedCount: { type: integer, minimum: 0 }
+        lessonsCoveragePercent:
+          { type: [number, "null"], minimum: 0, maximum: 100 }
     BeginDocumentUploadRequest:
       type: object
       additionalProperties: false

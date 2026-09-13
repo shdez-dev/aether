@@ -12,6 +12,7 @@ export * from "./evidence.js";
 export * from "./notifications.js";
 export * from "./comments.js";
 export * from "./exports.js";
+export * from "./metrics.js";
 
 export interface RequestMetadata {
   readonly actorId: string;

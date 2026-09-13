@@ -25,6 +25,8 @@ import type {
   AuditEvent,
   AuditHistoryStore,
   SecurityAuditStore,
+  ProductMetricsStore,
+  ProductMetricsSnapshot,
   DocumentAuditEvent,
   DocumentAuditStore,
   DocumentStore,
@@ -1077,6 +1079,118 @@ export class PostgresSecurityAuditStore implements SecurityAuditStore {
     );
   }
 }
+/** Read-only, organization-scoped aggregates for the institutional dashboard. */
+export class PostgresProductMetricsStore implements ProductMetricsStore {
+  constructor(private readonly pool: Pool) {}
+  async snapshot(input: {
+    organizationId: string;
+    startsAt: Date;
+    endsAt: Date;
+    calculatedAt: Date;
+  }): Promise<ProductMetricsSnapshot> {
+    const result = await this.pool.query<ProductMetricsRow>(
+      `WITH decisions AS (
+         SELECT decisions.id, decisions.outcome,
+           EXTRACT(EPOCH FROM (decisions.decided_at - initiatives.created_at)) / 3600 AS lead_hours
+         FROM initiative_decisions AS decisions
+         JOIN initiatives ON initiatives.id = decisions.initiative_id
+         WHERE decisions.organization_id = $1
+           AND decisions.decided_at >= $2 AND decisions.decided_at < $3
+       ), decision_summary AS (
+         SELECT COUNT(*)::int AS decided_count,
+           AVG(lead_hours)::float8 AS average_hours,
+           percentile_cont(0.5) WITHIN GROUP (ORDER BY lead_hours)::float8 AS median_hours,
+           COUNT(*) FILTER (WHERE EXISTS (
+             SELECT 1 FROM evidence_references AS evidence_links
+             JOIN document_versions AS versions ON versions.id = evidence_links.document_version_id
+             WHERE evidence_links.organization_id = $1
+               AND evidence_links.subject_type = 'decision'
+               AND evidence_links.subject_id = decisions.id
+               AND versions.status = 'published'
+               AND versions.evidence_status = 'valid'
+           ))::int AS decisions_with_verified_evidence,
+           COUNT(*) FILTER (WHERE outcome = 'approved')::int AS approved_decisions,
+           COUNT(*) FILTER (WHERE outcome = 'approved' AND EXISTS (
+             SELECT 1 FROM projects
+             WHERE projects.organization_id = $1
+               AND projects.source_decision_id = decisions.id
+           ))::int AS converted_decisions
+         FROM decisions
+       ), active_project_summary AS (
+         SELECT COUNT(*)::int AS active_or_blocked_count,
+           COUNT(*) FILTER (WHERE NULLIF(BTRIM(lead_actor_id), '') IS NOT NULL)::int AS with_assigned_lead_count,
+           COUNT(*) FILTER (WHERE EXISTS (
+             SELECT 1 FROM project_milestones AS milestones
+             WHERE milestones.project_id = projects.id
+               AND milestones.completed_at IS NULL
+               AND (milestones.due_on IS NULL OR milestones.due_on >= $3::date)
+           ))::int AS with_upcoming_milestone_count,
+           COUNT(*) FILTER (WHERE updated_at < ($3 - INTERVAL '30 days'))::int AS stale_for_thirty_days_count
+         FROM projects
+         WHERE organization_id = $1 AND status IN ('active', 'blocked')
+       ), closure_summary AS (
+         SELECT COUNT(*)::int AS closed_count,
+           COUNT(*) FILTER (WHERE NULLIF(BTRIM(lessons_learned), '') IS NOT NULL)::int AS with_lessons_learned_count
+         FROM project_closures
+         WHERE organization_id = $1 AND closed_at >= $2 AND closed_at < $3
+       )
+       SELECT decision_summary.*, active_project_summary.*, closure_summary.*
+       FROM decision_summary CROSS JOIN active_project_summary CROSS JOIN closure_summary`,
+      [input.organizationId, input.startsAt, input.endsAt],
+    );
+    const row = result.rows[0]!;
+    const decidedCount = numberValue(row.decided_count);
+    const approvedDecisions = numberValue(row.approved_decisions);
+    const closedCount = numberValue(row.closed_count);
+    return {
+      calculationVersion: "2026-09-v1",
+      timezone: "UTC",
+      calculatedAt: input.calculatedAt,
+      period: { startsAt: input.startsAt, endsAt: input.endsAt },
+      initiativeDecision: {
+        decidedCount,
+        averageHours: nullableNumber(row.average_hours),
+        medianHours: nullableNumber(row.median_hours),
+      },
+      decisionEvidence: {
+        decidedCount,
+        decisionsWithVerifiedEvidence: numberValue(
+          row.decisions_with_verified_evidence,
+        ),
+        coveragePercent: percent(
+          numberValue(row.decisions_with_verified_evidence),
+          decidedCount,
+        ),
+      },
+      conversion: {
+        approvedDecisions,
+        projectsCreatedFromApprovedDecisions: numberValue(
+          row.converted_decisions,
+        ),
+        conversionPercent: percent(
+          numberValue(row.converted_decisions),
+          approvedDecisions,
+        ),
+      },
+      activeProjects: {
+        activeOrBlockedCount: numberValue(row.active_or_blocked_count),
+        withAssignedLeadCount: numberValue(row.with_assigned_lead_count),
+        withUpcomingMilestoneCount: numberValue(
+          row.with_upcoming_milestone_count,
+        ),
+        staleForThirtyDaysCount: numberValue(row.stale_for_thirty_days_count),
+      },
+      closures: {
+        closedCount,
+        withLessonsLearnedCount: numberValue(row.with_lessons_learned_count),
+        lessonsCoveragePercent: percent(
+          numberValue(row.with_lessons_learned_count),
+          closedCount,
+        ),
+      },
+    };
+  }
+}
 export class PostgresNotificationStore implements NotificationStore {
   constructor(private readonly pool: Pool) {}
   async create(notification: Notification): Promise<Notification> {
@@ -1770,6 +1884,20 @@ type AuditRow = {
   async_event_id: string | null;
   payload: Record<string, unknown>;
 };
+type ProductMetricsRow = {
+  decided_count: number | string;
+  average_hours: number | string | null;
+  median_hours: number | string | null;
+  decisions_with_verified_evidence: number | string;
+  approved_decisions: number | string;
+  converted_decisions: number | string;
+  active_or_blocked_count: number | string;
+  with_assigned_lead_count: number | string;
+  with_upcoming_milestone_count: number | string;
+  stale_for_thirty_days_count: number | string;
+  closed_count: number | string;
+  with_lessons_learned_count: number | string;
+};
 type DocumentResourceRow = { organization_id: string; workspace_id: string };
 type DocumentVersionRow = {
   document_id: string;
@@ -2160,6 +2288,17 @@ async function insertOutboxEvent(
 
 function asJson(value: unknown): string {
   return JSON.stringify(value);
+}
+function numberValue(value: number | string): number {
+  return Number(value);
+}
+function nullableNumber(value: number | string | null): number | null {
+  return value === null ? null : Number(value);
+}
+function percent(numerator: number, denominator: number): number | null {
+  return denominator === 0
+    ? null
+    : Math.round((numerator / denominator) * 10_000) / 100;
 }
 
 function isProjectConversionConflict(error: unknown): boolean {

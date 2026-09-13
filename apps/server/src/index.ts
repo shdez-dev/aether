@@ -7,6 +7,7 @@ import {
   NotificationService,
   CommentService,
   AuditHistoryService,
+  ProductMetricsService,
   InitiativeService,
   ProjectService,
   TenantService,
@@ -22,6 +23,7 @@ import {
   PostgresAuthStore,
   PostgresAuditHistoryStore,
   PostgresSecurityAuditStore,
+  PostgresProductMetricsStore,
   PostgresInitiativeAuditStore,
   PostgresInitiativeStore,
   PostgresIdempotencyStore,
@@ -153,6 +155,11 @@ const auditHistory = new AuditHistoryService({
   store: new PostgresAuditHistoryStore(pool),
   tenancy: new PostgresTenantStore(pool),
 });
+const productMetrics = new ProductMetricsService({
+  store: new PostgresProductMetricsStore(pool),
+  tenancy: new PostgresTenantStore(pool),
+  clock: { now: () => new Date() },
+});
 const app = await buildServer({
   config,
   auth,
@@ -167,6 +174,7 @@ const app = await buildServer({
   idempotency: new PostgresIdempotencyStore(pool),
   auditHistory,
   securityAudit: new PostgresSecurityAuditStore(pool),
+  productMetrics,
   metrics,
   readinessCheck: async () => {
     await pool.query("SELECT 1");

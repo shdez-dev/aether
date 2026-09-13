@@ -30,6 +30,7 @@ import {
   EvidenceService,
   NotificationService,
   CommentService,
+  ProductMetricsService,
 } from "@aether/application";
 import {
   CreateInvitationRequestSchema,
@@ -58,6 +59,7 @@ import {
   NotificationInboxQuerySchema,
   NotificationPreferenceRequestSchema,
   CreateCommentRequestSchema,
+  ProductMetricsQuerySchema,
 } from "@aether/contracts";
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
@@ -95,6 +97,7 @@ export async function buildServer(input: {
   idempotency: IdempotencyStore;
   auditHistory?: AuditHistoryService;
   securityAudit?: SecurityAuditStore;
+  productMetrics?: ProductMetricsService;
   readinessCheck?: () => Promise<void>;
   metrics?: OperationalMetrics;
 }): Promise<FastifyInstance> {
@@ -1558,6 +1561,25 @@ export async function buildServer(input: {
       occurredAt: event.occurredAt.toISOString(),
     }));
   });
+  app.get("/v1/admin/product-metrics", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    if (!input.productMetrics)
+      throw new Error("Product metrics service is not configured");
+    const query = ProductMetricsQuerySchema.parse(request.query);
+    return toProductMetricsResponse(
+      await input.productMetrics.snapshot({
+        actorId: session.actorId,
+        organizationId: query.organizationId,
+        ...(query.startsAt ? { startsAt: new Date(query.startsAt) } : {}),
+        ...(query.endsAt ? { endsAt: new Date(query.endsAt) } : {}),
+      }),
+    );
+  });
   app.post("/v1/documents/uploads", async (request, reply) => {
     const session = await requireSession(
       request,
@@ -1677,6 +1699,19 @@ async function toInitiativeResponse(
     createdAt: initiative.createdAt.toISOString(),
     updatedAt: initiative.updatedAt.toISOString(),
     allowedActions,
+  };
+}
+
+function toProductMetricsResponse(
+  snapshot: Awaited<ReturnType<ProductMetricsService["snapshot"]>>,
+) {
+  return {
+    ...snapshot,
+    calculatedAt: snapshot.calculatedAt.toISOString(),
+    period: {
+      startsAt: snapshot.period.startsAt.toISOString(),
+      endsAt: snapshot.period.endsAt.toISOString(),
+    },
   };
 }
 function toEvaluationResponse(

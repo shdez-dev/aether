@@ -8,3 +8,4 @@ export * from "./projects.js";
 export * from "./tenancy.js";
 export * from "./documents.js";
 export * from "./evidence.js";
+export * from "./metrics.js";

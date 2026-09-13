@@ -1,0 +1,13 @@
+# Métricas institucionales de producto
+
+`GET /v1/admin/product-metrics` entrega agregados de una sola organización. Solo `owner` y `admin` pueden consultarlo. El cálculo se ejecuta en UTC, usa intervalos semiabiertos (`startsAt <= evento < endsAt`) y declara `calculationVersion: 2026-09-v1`; los consumidores deben conservar esa versión junto a cualquier serie exportada.
+
+| Métrica                      | Numerador / valor                                                           | Denominador          | Regla de inclusión                                                                                                                                                     |
+| ---------------------------- | --------------------------------------------------------------------------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tiempo iniciativa → decisión | Media y mediana de horas                                                    | Decisiones           | Desde `initiatives.created_at` hasta `initiative_decisions.decided_at` dentro del período.                                                                             |
+| Cobertura de evidencia       | Decisiones con una referencia a versión publicada y `evidence_status=valid` | Decisiones           | La evidencia textual no sustituye un binario verificado.                                                                                                               |
+| Conversión a proyecto        | Decisiones aprobadas con proyecto trazable                                  | Decisiones aprobadas | La decisión está dentro del período; el proyecto se puede haber creado posteriormente.                                                                                 |
+| Ejecución activa             | Proyectos `active` o `blocked`, con líder, próximo hito y/o estancados      | No aplica            | Foto al final del período. «Próximo hito» es un hito sin completar sin fecha o con fecha igual o posterior al fin del período; «estancado» no se actualiza en 30 días. |
+| Cierres con aprendizaje      | Cierres con `lessons_learned` no vacío                                      | Cierres              | `closed_at` dentro del período.                                                                                                                                        |
+
+Un denominador cero se representa como `null` en el porcentaje, nunca como 0 %. Los datos se filtran por `organization_id` en cada subconsulta; no hay consulta institucional global ni combinación implícita de workspaces.
