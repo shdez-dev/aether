@@ -124,6 +124,9 @@ importers:
       '@aether/application':
         specifier: workspace:*
         version: link:../../packages/application
+      '@aether/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@aether/database':
         specifier: workspace:*
         version: link:../../packages/database

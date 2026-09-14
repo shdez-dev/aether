@@ -31,6 +31,8 @@ import {
   NotificationService,
   CommentService,
   ProductMetricsService,
+  OutboxAdministrationService,
+  OutboxDeadLetterNotFoundError,
 } from "@aether/application";
 import {
   CreateInvitationRequestSchema,
@@ -60,6 +62,8 @@ import {
   NotificationPreferenceRequestSchema,
   CreateCommentRequestSchema,
   ProductMetricsQuerySchema,
+  OutboxDeadLetterQuerySchema,
+  ReplayOutboxDeadLetterRequestSchema,
 } from "@aether/contracts";
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
@@ -98,6 +102,7 @@ export async function buildServer(input: {
   auditHistory?: AuditHistoryService;
   securityAudit?: SecurityAuditStore;
   productMetrics?: ProductMetricsService;
+  outboxAdministration?: OutboxAdministrationService;
   readinessCheck?: () => Promise<void>;
   metrics?: OperationalMetrics;
 }): Promise<FastifyInstance> {
@@ -263,7 +268,8 @@ export async function buildServer(input: {
                 error instanceof IdentityEmailRequiredError
               ? 403
               : error instanceof ResourceNotFoundError ||
-                  error instanceof DocumentNotFoundError
+                  error instanceof DocumentNotFoundError ||
+                  error instanceof OutboxDeadLetterNotFoundError
                 ? 404
                 : error instanceof InitiativeVersionConflictError ||
                     error instanceof ProjectVersionConflictError
@@ -326,7 +332,8 @@ export async function buildServer(input: {
                         error instanceof IdentityEmailRequiredError
                       ? "FORBIDDEN"
                       : error instanceof ResourceNotFoundError ||
-                          error instanceof DocumentNotFoundError
+                          error instanceof DocumentNotFoundError ||
+                          error instanceof OutboxDeadLetterNotFoundError
                         ? "NOT_FOUND"
                         : error instanceof InitiativeVersionConflictError ||
                             error instanceof ProjectVersionConflictError
@@ -1580,6 +1587,56 @@ export async function buildServer(input: {
       }),
     );
   });
+  app.get("/v1/admin/outbox/dead-letters", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    if (!input.outboxAdministration)
+      throw new Error("Outbox administration service is not configured");
+    const query = OutboxDeadLetterQuerySchema.parse(request.query);
+    const letters = await input.outboxAdministration.listDeadLetters({
+      actorId: session.actorId,
+      ...query,
+    });
+    return letters.map(toOutboxDeadLetterResponse);
+  });
+  app.post(
+    "/v1/admin/outbox/dead-letters/:eventId/replay",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      if (!input.outboxAdministration)
+        throw new Error("Outbox administration service is not configured");
+      const params = z
+        .object({ eventId: z.string().uuid() })
+        .parse(request.params);
+      const body = ReplayOutboxDeadLetterRequestSchema.parse(request.body);
+      return respondIdempotently({
+        request,
+        reply,
+        store: input.idempotency,
+        actorId: session.actorId,
+        operation: `outbox.dead_letter.replay:${params.eventId}`,
+        requestPayload: { params, body },
+        execute: async () => {
+          await input.outboxAdministration!.replayDeadLetter({
+            actorId: session.actorId,
+            eventId: params.eventId,
+            correlationId: correlationId(reply),
+            ...body,
+          });
+          return { statusCode: 202, body: { eventId: params.eventId } };
+        },
+      });
+    },
+  );
   app.post("/v1/documents/uploads", async (request, reply) => {
     const session = await requireSession(
       request,
@@ -1713,6 +1770,13 @@ function toProductMetricsResponse(
       endsAt: snapshot.period.endsAt.toISOString(),
     },
   };
+}
+function toOutboxDeadLetterResponse(
+  deadLetter: Awaited<
+    ReturnType<OutboxAdministrationService["listDeadLetters"]>
+  >[number],
+) {
+  return { ...deadLetter, failedAt: deadLetter.failedAt.toISOString() };
 }
 function toEvaluationResponse(
   evaluation: { evaluatedAt: Date } & Record<string, unknown>,

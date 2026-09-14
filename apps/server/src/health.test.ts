@@ -88,7 +88,14 @@ describe("health endpoints", () => {
     expect(metrics.statusCode).toBe(200);
     expect(metrics.json()).toMatchObject({
       http: expect.objectContaining({ requests: expect.any(Number) }),
-      outbox: { processed: 0, retried: 0, deadLettered: 0 },
+      outbox: {
+        processed: 0,
+        retried: 0,
+        deadLettered: 0,
+        pending: 0,
+        processing: 0,
+        oldestPendingAgeSeconds: null,
+      },
     });
     await app.close();
   });

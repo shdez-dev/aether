@@ -14,6 +14,7 @@ import {
   InitiativeService,
   ProjectService,
   ProductMetricsService,
+  OutboxAdministrationService,
   TenantService,
 } from "@aether/application";
 import {
@@ -332,6 +333,39 @@ describe("HTTP authentication boundary", () => {
       tenancy: tenancyStore,
       clock: { now: () => new Date("2026-04-01T00:00:00.000Z") },
     });
+    const deadLetters = new Map<
+      string,
+      {
+        eventId: string;
+        eventType: string;
+        organizationId: string;
+        aggregateId: string;
+        aggregateType: string;
+        aggregateVersion: number;
+        correlationId: string;
+        attempts: number;
+        failedAt: Date;
+        lastError: string;
+      }
+    >();
+    const outboxAdministration = new OutboxAdministrationService({
+      store: {
+        async listDeadLetters({ organizationId }) {
+          return [...deadLetters.values()].filter(
+            (letter) => letter.organizationId === organizationId,
+          );
+        },
+        async replayDeadLetter({ eventId, organizationId }) {
+          const letter = deadLetters.get(eventId);
+          if (!letter || letter.organizationId !== organizationId) return false;
+          deadLetters.delete(eventId);
+          return true;
+        },
+      },
+      tenancy: tenancyStore,
+      clock: { now: () => new Date("2026-04-01T00:00:00.000Z") },
+      ids: { next: () => crypto.randomUUID() },
+    });
     const app = await buildServer({
       config,
       auth,
@@ -342,6 +376,7 @@ describe("HTTP authentication boundary", () => {
       idempotency: new InMemoryIdempotencyStore(),
       auditHistory,
       productMetrics,
+      outboxAdministration,
     });
     const login = await app.inject({ method: "GET", url: "/auth/login" });
     const state = new URL(login.headers.location!).searchParams.get("state")!;
@@ -417,6 +452,39 @@ describe("HTTP authentication boundary", () => {
       decisionEvidence: { coveragePercent: 50 },
       closures: { lessonsCoveragePercent: null },
     });
+    const deadLetterId = crypto.randomUUID();
+    deadLetters.set(deadLetterId, {
+      eventId: deadLetterId,
+      eventType: "project.created.v1",
+      organizationId: organization.id,
+      aggregateId: crypto.randomUUID(),
+      aggregateType: "project",
+      aggregateVersion: 1,
+      correlationId: crypto.randomUUID(),
+      attempts: 5,
+      failedAt: new Date("2026-04-01T00:00:00.000Z"),
+      lastError: "Dependency unavailable",
+    });
+    const deadLettersResponse = await app.inject({
+      method: "GET",
+      url: `/v1/admin/outbox/dead-letters?organizationId=${organization.id}`,
+      headers: { cookie: headers.cookie },
+    });
+    expect(deadLettersResponse.statusCode).toBe(200);
+    expect(deadLettersResponse.json()).toEqual([
+      expect.objectContaining({ eventId: deadLetterId, attempts: 5 }),
+    ]);
+    const replayResponse = await app.inject({
+      method: "POST",
+      url: `/v1/admin/outbox/dead-letters/${deadLetterId}/replay`,
+      headers: { ...headers, "idempotency-key": crypto.randomUUID() },
+      payload: {
+        organizationId: organization.id,
+        reason: "La dependencia ya se recuperó.",
+      },
+    });
+    expect(replayResponse.statusCode).toBe(202);
+    expect(deadLetters.has(deadLetterId)).toBe(false);
     const organizationsResponse = await app.inject({
       method: "GET",
       url: "/v1/organizations",

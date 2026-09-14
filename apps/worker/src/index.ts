@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { Pool } from "pg";
 import { DocumentScanService } from "@aether/application";
-import { PostgresDocumentStore } from "@aether/database";
+import { PostgresDocumentStore, PostgresOutboxStore } from "@aether/database";
 import { S3DocumentObjectStore } from "@aether/storage";
 import {
   createOperationalMetrics,
@@ -33,6 +33,7 @@ if (!s3Endpoint || !s3Bucket || !s3AccessKeyId || !s3SecretAccessKey)
   );
 const ids = { next: randomUUID };
 const documentStore = new PostgresDocumentStore(pool);
+const outboxStore = new PostgresOutboxStore(pool);
 const documentScans = new DocumentScanService({
   store: documentStore,
   audit: documentStore,
@@ -54,6 +55,7 @@ const documentScans = new DocumentScanService({
 });
 const worker = createOutboxWorker({
   pool,
+  store: outboxStore,
   workerId: process.env.WORKER_ID ?? `worker-${randomUUID()}`,
   handler: {
     async handle(event) {
@@ -80,6 +82,7 @@ try {
       run: () => worker.processOnce(),
     });
     metrics.recordOutboxCycle(result);
+    metrics.recordOutboxQueue(await outboxStore.queueStats(new Date()));
     await documentScans.purgeExpired();
     await new Promise<void>((resolve) => setTimeout(resolve, intervalMs));
   }

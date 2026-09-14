@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@aether/application": "workspace:*",
+    "@aether/contracts": "workspace:*",
     "@aether/database": "workspace:*",
     "@aether/observability": "workspace:*",
     "@aether/storage": "workspace:*",

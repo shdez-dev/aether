@@ -70,26 +70,22 @@ export async function withinSpan<T>(input: {
   const options = input.attributes
     ? { attributes: input.attributes as Attributes }
     : {};
-  return tracer.startActiveSpan(
-    input.name,
-    options,
-    async (span) => {
-      try {
-        const value = await input.run();
-        span.setStatus({ code: SpanStatusCode.OK });
-        return value;
-      } catch (error) {
-        span.setStatus({
-          code: SpanStatusCode.ERROR,
-          message: error instanceof Error ? error.message : "Unknown error",
-        });
-        if (error instanceof Error) span.recordException(error);
-        throw error;
-      } finally {
-        span.end();
-      }
-    },
-  ) as Promise<T>;
+  return tracer.startActiveSpan(input.name, options, async (span) => {
+    try {
+      const value = await input.run();
+      span.setStatus({ code: SpanStatusCode.OK });
+      return value;
+    } catch (error) {
+      span.setStatus({
+        code: SpanStatusCode.ERROR,
+        message: error instanceof Error ? error.message : "Unknown error",
+      });
+      if (error instanceof Error) span.recordException(error);
+      throw error;
+    } finally {
+      span.end();
+    }
+  }) as Promise<T>;
 }
 
 export type OperationalMetrics = Readonly<{
@@ -104,6 +100,12 @@ export type OperationalMetrics = Readonly<{
     retried: number;
     deadLettered: number;
   }): void;
+  recordOutboxQueue(input: {
+    pending: number;
+    processing: number;
+    deadLettered: number;
+    oldestPendingAgeSeconds: number | null;
+  }): void;
   snapshot(): Readonly<{
     startedAt: string;
     http: Readonly<{
@@ -115,6 +117,9 @@ export type OperationalMetrics = Readonly<{
       processed: number;
       retried: number;
       deadLettered: number;
+      pending: number;
+      processing: number;
+      oldestPendingAgeSeconds: number | null;
     }>;
   }>;
 }>;
@@ -134,6 +139,14 @@ export function createOperationalMetrics(
   const outboxCounter = meter.createCounter("aether.outbox.events", {
     description: "Eventos outbox por resultado",
   });
+  const outboxQueueDepth = meter.createObservableGauge(
+    "aether.outbox.queue_depth",
+    { description: "Profundidad actual de la cola outbox" },
+  );
+  const outboxOldestPendingAge = meter.createObservableGauge(
+    "aether.outbox.oldest_pending_age",
+    { description: "Antigüedad del evento pendiente más antiguo", unit: "s" },
+  );
   const startedAt = new Date();
   let requests = 0;
   let failures = 0;
@@ -141,6 +154,19 @@ export function createOperationalMetrics(
   let processed = 0;
   let retried = 0;
   let deadLettered = 0;
+  let pending = 0;
+  let processing = 0;
+  let queuedDeadLettered = 0;
+  let oldestPendingAgeSeconds: number | null = null;
+  outboxQueueDepth.addCallback((result) => {
+    result.observe(pending, { status: "pending" });
+    result.observe(processing, { status: "processing" });
+    result.observe(queuedDeadLettered, { status: "dead_letter" });
+  });
+  outboxOldestPendingAge.addCallback((result) => {
+    if (oldestPendingAgeSeconds !== null)
+      result.observe(oldestPendingAgeSeconds);
+  });
   return {
     recordHttpRequest(input) {
       const outcome = input.statusCode >= 500 ? "error" : "success";
@@ -168,11 +194,24 @@ export function createOperationalMetrics(
       retried += input.retried;
       deadLettered += input.deadLettered;
     },
+    recordOutboxQueue(input) {
+      pending = input.pending;
+      processing = input.processing;
+      queuedDeadLettered = input.deadLettered;
+      oldestPendingAgeSeconds = input.oldestPendingAgeSeconds;
+    },
     snapshot() {
       return {
         startedAt: startedAt.toISOString(),
         http: { requests, failures, durationMsTotal },
-        outbox: { processed, retried, deadLettered },
+        outbox: {
+          processed,
+          retried,
+          deadLettered,
+          pending,
+          processing,
+          oldestPendingAgeSeconds,
+        },
       };
     },
   };

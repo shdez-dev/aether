@@ -22,6 +22,12 @@ export type OutboxMessage = DurableDomainEvent &
     lockedBy: string | null;
     lastError: string | null;
   }>;
+export type OutboxQueueStats = Readonly<{
+  pending: number;
+  processing: number;
+  deadLettered: number;
+  oldestPendingAgeSeconds: number | null;
+}>;
 export interface OutboxStore {
   claim(input: {
     workerId: string;
@@ -55,6 +61,9 @@ export interface OutboxStore {
     eventId: string;
     processedAt: Date;
   }): Promise<boolean>;
+}
+export interface OutboxQueueStore {
+  queueStats(now: Date): Promise<OutboxQueueStats>;
 }
 export interface DurableEventHandler {
   handle(event: DurableDomainEvent): Promise<void>;

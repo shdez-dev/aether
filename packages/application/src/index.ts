@@ -5,6 +5,7 @@ export * from "./initiatives.js";
 export * from "./evaluations.js";
 export * from "./projects.js";
 export * from "./outbox.js";
+export * from "./outbox-administration.js";
 export * from "./auditing.js";
 export * from "./idempotency.js";
 export * from "./documents.js";

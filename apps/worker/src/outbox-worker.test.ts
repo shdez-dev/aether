@@ -7,6 +7,8 @@ import type {
 } from "@aether/application";
 import { OutboxWorker } from "@aether/application";
 
+import { assertValidDurableEvent } from "./outbox-worker.js";
+
 const event: DurableDomainEvent = {
   eventId: "00000000-0000-4000-8000-000000000001",
   eventType: "project.created.v1",
@@ -120,6 +122,11 @@ class InMemoryOutboxStore implements OutboxStore {
 }
 
 describe("outbox worker", () => {
+  it("rejects an event outside the versioned durable-event catalog", async () => {
+    expect(() =>
+      assertValidDurableEvent({ ...event, eventType: "unknown.event.v1" }),
+    ).toThrow("Invalid durable event");
+  });
   it("reintenta después de una caída del handler y procesa al recuperarse", async () => {
     const store = new InMemoryOutboxStore();
     let now = event.occurredAt;

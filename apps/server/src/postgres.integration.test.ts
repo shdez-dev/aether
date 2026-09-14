@@ -25,6 +25,7 @@ import {
   PostgresInitiativeStore,
   PostgresIdempotencyStore,
   PostgresOutboxStore,
+  PostgresOutboxAdministrationStore,
   PostgresProjectAuditStore,
   PostgresProjectExecutionStore,
   PostgresProjectClosureStore,
@@ -64,6 +65,123 @@ if (containerRuntimeAvailable || requireContainerRuntime) {
 }
 
 describe("PostgreSQL integration", () => {
+  runPostgresIntegration(
+    "lists and replays only an organization's dead letters with a recovery audit",
+    async () => {
+      const organizationId = randomUUID();
+      const otherOrganizationId = randomUUID();
+      const eventId = randomUUID();
+      const replayId = randomUUID();
+      const replayedAt = new Date("2026-09-13T12:00:00.000Z");
+      await pool.query(
+        `INSERT INTO organizations (id, name, timezone, locale) VALUES
+         ($1, 'Recovery', 'UTC', 'es-CL'), ($2, 'Other recovery', 'UTC', 'es-CL')`,
+        [organizationId, otherOrganizationId],
+      );
+      await pool.query(
+        `INSERT INTO outbox_events (event_id, event_type, occurred_at, aggregate_id, aggregate_type, aggregate_version, organization_id, correlation_id, causation_id, schema_version, payload, status, attempts, last_error)
+         VALUES ($1, 'project.created.v1', $2, $3, 'project', 1, $4, $5, NULL, 1, '{}', 'dead_letter', 5, 'Dependency unavailable')`,
+        [eventId, replayedAt, randomUUID(), organizationId, randomUUID()],
+      );
+      await pool.query(
+        `INSERT INTO outbox_dead_letters (event_id, event_type, organization_id, attempts, failed_at, last_error, payload)
+         VALUES ($1, 'project.created.v1', $2, 5, $3, 'Dependency unavailable', '{}')`,
+        [eventId, organizationId, replayedAt],
+      );
+      await expect(
+        pool.query(
+          `INSERT INTO outbox_events (event_id, event_type, occurred_at, aggregate_id, aggregate_type, aggregate_version, organization_id, correlation_id, causation_id, schema_version, payload)
+           VALUES ($1, 'unknown.event.v1', $2, $3, 'project', 1, $4, $5, NULL, 1, '{}')`,
+          [
+            randomUUID(),
+            replayedAt,
+            randomUUID(),
+            organizationId,
+            randomUUID(),
+          ],
+        ),
+      ).rejects.toThrow("outbox_events_known_event_type_check");
+      const store = new PostgresOutboxAdministrationStore(pool);
+      await expect(
+        store.listDeadLetters({ organizationId, limit: 25 }),
+      ).resolves.toEqual([
+        expect.objectContaining({
+          eventId,
+          organizationId,
+          attempts: 5,
+          lastError: "Dependency unavailable",
+        }),
+      ]);
+      await expect(
+        store.listDeadLetters({
+          organizationId: otherOrganizationId,
+          limit: 25,
+        }),
+      ).resolves.toEqual([]);
+      await expect(
+        store.replayDeadLetter({
+          replayId,
+          eventId,
+          organizationId,
+          replayedByActorId: "owner",
+          correlationId: randomUUID(),
+          reason: "La dependencia volvió a estar disponible.",
+          replayedAt,
+        }),
+      ).resolves.toBe(true);
+      const replayed = await pool.query<{
+        status: string;
+        attempts: number;
+        last_error: string | null;
+      }>(
+        "SELECT status, attempts, last_error FROM outbox_events WHERE event_id = $1",
+        [eventId],
+      );
+      expect(replayed.rows).toEqual([
+        { status: "pending", attempts: 0, last_error: null },
+      ]);
+      const audit = await pool.query<{
+        id: string;
+        replayed_by_actor_id: string;
+        reason: string;
+      }>(
+        "SELECT id, replayed_by_actor_id, reason FROM outbox_replays WHERE event_id = $1",
+        [eventId],
+      );
+      expect(audit.rows).toEqual([
+        {
+          id: replayId,
+          replayed_by_actor_id: "owner",
+          reason: "La dependencia volvió a estar disponible.",
+        },
+      ]);
+      await expect(
+        pool.query("DELETE FROM outbox_replays WHERE id = $1", [replayId]),
+      ).rejects.toThrow("append-only");
+      await expect(
+        store.listDeadLetters({ organizationId, limit: 25 }),
+      ).resolves.toEqual([]);
+      await expect(
+        store.replayDeadLetter({
+          replayId: randomUUID(),
+          eventId,
+          organizationId: otherOrganizationId,
+          replayedByActorId: "other-owner",
+          correlationId: randomUUID(),
+          reason: "No debe cruzar la organización.",
+          replayedAt,
+        }),
+      ).resolves.toBe(false);
+      // Esta fixture comparte base efímera con los demás casos: no debe dejar
+      // trabajo pendiente que otro worker pueda reclamar.
+      await pool.query(
+        "UPDATE outbox_events SET status = 'processed' WHERE event_id = $1",
+        [eventId],
+      );
+    },
+    120_000,
+  );
+
   runPostgresIntegration(
     "calculates exact product metrics without crossing organization boundaries",
     async () => {

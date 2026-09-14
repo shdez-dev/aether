@@ -8,6 +8,7 @@ import {
   CommentService,
   AuditHistoryService,
   ProductMetricsService,
+  OutboxAdministrationService,
   InitiativeService,
   ProjectService,
   TenantService,
@@ -24,6 +25,7 @@ import {
   PostgresAuditHistoryStore,
   PostgresSecurityAuditStore,
   PostgresProductMetricsStore,
+  PostgresOutboxAdministrationStore,
   PostgresInitiativeAuditStore,
   PostgresInitiativeStore,
   PostgresIdempotencyStore,
@@ -160,6 +162,12 @@ const productMetrics = new ProductMetricsService({
   tenancy: new PostgresTenantStore(pool),
   clock: { now: () => new Date() },
 });
+const outboxAdministration = new OutboxAdministrationService({
+  store: new PostgresOutboxAdministrationStore(pool),
+  tenancy: new PostgresTenantStore(pool),
+  clock: { now: () => new Date() },
+  ids: { next: randomUUID },
+});
 const app = await buildServer({
   config,
   auth,
@@ -175,6 +183,7 @@ const app = await buildServer({
   auditHistory,
   securityAudit: new PostgresSecurityAuditStore(pool),
   productMetrics,
+  outboxAdministration,
   metrics,
   readinessCheck: async () => {
     await pool.query("SELECT 1");

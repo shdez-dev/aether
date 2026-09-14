@@ -17,6 +17,10 @@ import type {
   ProjectExecutionStore,
   ProjectStore,
   OutboxStore,
+  OutboxQueueStore,
+  OutboxQueueStats,
+  OutboxAdministrationStore,
+  OutboxDeadLetter,
   OutboxMessage,
   DurableDomainEvent,
   IdempotencyReservation,
@@ -1590,7 +1594,7 @@ export class PostgresDocumentProjectAccess implements DocumentProjectAccess {
   }
 }
 
-export class PostgresOutboxStore implements OutboxStore {
+export class PostgresOutboxStore implements OutboxStore, OutboxQueueStore {
   constructor(private readonly pool: Pool) {}
   async claim(input: {
     workerId: string;
@@ -1649,7 +1653,15 @@ export class PostgresOutboxStore implements OutboxStore {
       const event = result.rows[0];
       if (event)
         await client.query(
-          `INSERT INTO outbox_dead_letters (event_id, event_type, organization_id, attempts, failed_at, last_error, payload) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (event_id) DO NOTHING`,
+          `INSERT INTO outbox_dead_letters (event_id, event_type, organization_id, attempts, failed_at, last_error, payload)
+           VALUES ($1,$2,$3,$4,$5,$6,$7)
+           ON CONFLICT (event_id) DO UPDATE SET
+             event_type = EXCLUDED.event_type,
+             organization_id = EXCLUDED.organization_id,
+             attempts = EXCLUDED.attempts,
+             failed_at = EXCLUDED.failed_at,
+             last_error = EXCLUDED.last_error,
+             payload = EXCLUDED.payload`,
           [
             event.event_id,
             event.event_type,
@@ -1688,6 +1700,93 @@ export class PostgresOutboxStore implements OutboxStore {
       [input.consumer, input.eventId, input.processedAt],
     );
     return (result.rowCount ?? 0) === 1;
+  }
+  async queueStats(now: Date): Promise<OutboxQueueStats> {
+    const result = await this.pool.query<OutboxQueueStatsRow>(
+      `SELECT
+         COUNT(*) FILTER (WHERE status = 'pending')::int AS pending,
+         COUNT(*) FILTER (WHERE status = 'processing')::int AS processing,
+         COUNT(*) FILTER (WHERE status = 'dead_letter')::int AS dead_lettered,
+         EXTRACT(EPOCH FROM ($1 - MIN(occurred_at) FILTER (WHERE status = 'pending')))::float8 AS oldest_pending_age_seconds
+       FROM outbox_events`,
+      [now],
+    );
+    const row = result.rows[0]!;
+    return {
+      pending: Number(row.pending),
+      processing: Number(row.processing),
+      deadLettered: Number(row.dead_lettered),
+      oldestPendingAgeSeconds:
+        row.oldest_pending_age_seconds === null
+          ? null
+          : Number(row.oldest_pending_age_seconds),
+    };
+  }
+}
+
+/** PostgreSQL recovery adapter; replay keeps an immutable record of who retried it. */
+export class PostgresOutboxAdministrationStore implements OutboxAdministrationStore {
+  constructor(private readonly pool: Pool) {}
+  async listDeadLetters(input: {
+    organizationId: string;
+    limit: number;
+  }): Promise<readonly OutboxDeadLetter[]> {
+    const result = await this.pool.query<OutboxDeadLetterRow>(
+      `SELECT events.event_id, events.event_type, events.organization_id,
+              events.aggregate_id, events.aggregate_type, events.aggregate_version,
+              events.correlation_id, events.attempts, letters.failed_at, letters.last_error
+       FROM outbox_dead_letters AS letters
+       JOIN outbox_events AS events ON events.event_id = letters.event_id
+       WHERE letters.organization_id = $1
+         AND events.status = 'dead_letter'
+       ORDER BY letters.failed_at DESC, letters.event_id ASC
+       LIMIT $2`,
+      [input.organizationId, input.limit],
+    );
+    return result.rows.map(toOutboxDeadLetter);
+  }
+  async replayDeadLetter(input: {
+    replayId: string;
+    eventId: string;
+    organizationId: string;
+    replayedByActorId: string;
+    correlationId: string;
+    reason: string;
+    replayedAt: Date;
+  }): Promise<boolean> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const replayed = await client.query(
+        `UPDATE outbox_events
+         SET status = 'pending', attempts = 0, available_at = $3,
+             locked_at = NULL, locked_by = NULL, last_error = NULL, processed_at = NULL
+         WHERE event_id = $1 AND organization_id = $2 AND status = 'dead_letter'
+         RETURNING event_id`,
+        [input.eventId, input.organizationId, input.replayedAt],
+      );
+      if ((replayed.rowCount ?? 0) === 1)
+        await client.query(
+          `INSERT INTO outbox_replays (id, event_id, organization_id, replayed_by_actor_id, correlation_id, reason, replayed_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [
+            input.replayId,
+            input.eventId,
+            input.organizationId,
+            input.replayedByActorId,
+            input.correlationId,
+            input.reason,
+            input.replayedAt,
+          ],
+        );
+      await client.query("COMMIT");
+      return (replayed.rowCount ?? 0) === 1;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 }
 
@@ -1946,6 +2045,24 @@ type OutboxRow = {
   locked_by: string | null;
   last_error: string | null;
 };
+type OutboxDeadLetterRow = {
+  event_id: string;
+  event_type: string;
+  organization_id: string;
+  aggregate_id: string;
+  aggregate_type: string;
+  aggregate_version: number;
+  correlation_id: string;
+  attempts: number;
+  failed_at: Date;
+  last_error: string;
+};
+type OutboxQueueStatsRow = {
+  pending: number | string;
+  processing: number | string;
+  dead_lettered: number | string;
+  oldest_pending_age_seconds: number | string | null;
+};
 function toEvaluationStandard(row: EvaluationStandardRow): EvaluationStandard {
   return {
     id: row.id,
@@ -2154,6 +2271,20 @@ function toOutboxMessage(row: OutboxRow): OutboxMessage {
     availableAt: row.available_at,
     lockedAt: row.locked_at,
     lockedBy: row.locked_by,
+    lastError: row.last_error,
+  };
+}
+function toOutboxDeadLetter(row: OutboxDeadLetterRow): OutboxDeadLetter {
+  return {
+    eventId: row.event_id,
+    eventType: row.event_type,
+    organizationId: row.organization_id,
+    aggregateId: row.aggregate_id,
+    aggregateType: row.aggregate_type,
+    aggregateVersion: row.aggregate_version,
+    correlationId: row.correlation_id,
+    attempts: row.attempts,
+    failedAt: row.failed_at,
     lastError: row.last_error,
   };
 }
