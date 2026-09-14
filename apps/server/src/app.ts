@@ -22,6 +22,7 @@ import {
   ProjectVersionConflictError,
   InvitationError,
   OwnershipTransferError,
+  MembershipStatusError,
   ResourceNotFoundError,
   TenantService,
   DocumentService,
@@ -38,6 +39,8 @@ import {
 import {
   CreateInvitationRequestSchema,
   TransferOrganizationOwnershipRequestSchema,
+  ChangeMembershipStatusRequestSchema,
+  ReassignMemberResponsibilitiesRequestSchema,
   CreateInitiativeDraftRequestSchema,
   CreateOrganizationRequestSchema,
   CreateWorkspaceRequestSchema,
@@ -269,7 +272,9 @@ export async function buildServer(input: {
                 error instanceof DocumentAccessDeniedError ||
                 error instanceof IdentityEmailRequiredError ||
                 (error instanceof OwnershipTransferError &&
-                  error.code === "ACTOR_MUST_BE_OWNER")
+                  error.code === "ACTOR_MUST_BE_OWNER") ||
+                (error instanceof MembershipStatusError &&
+                  error.code === "actor_not_manager")
               ? 403
               : error instanceof ResourceNotFoundError ||
                   error instanceof DocumentNotFoundError ||
@@ -335,7 +340,9 @@ export async function buildServer(input: {
                         error instanceof DocumentAccessDeniedError ||
                         error instanceof IdentityEmailRequiredError ||
                         (error instanceof OwnershipTransferError &&
-                          error.code === "ACTOR_MUST_BE_OWNER")
+                          error.code === "ACTOR_MUST_BE_OWNER") ||
+                        (error instanceof MembershipStatusError &&
+                          error.code === "actor_not_manager")
                       ? "FORBIDDEN"
                       : error instanceof ResourceNotFoundError ||
                           error instanceof DocumentNotFoundError ||
@@ -352,7 +359,9 @@ export async function buildServer(input: {
                               ? "INVITATION_INVALID_OR_EXPIRED"
                               : error instanceof OwnershipTransferError
                                 ? error.code
-                                : "VALIDATION_ERROR",
+                                : error instanceof MembershipStatusError
+                                  ? error.code.toUpperCase()
+                                  : "VALIDATION_ERROR",
         correlationId: reply.getHeader("X-Correlation-ID"),
         instance: request.url,
       });
@@ -643,6 +652,60 @@ export async function buildServer(input: {
       return reply.code(204).send();
     },
   );
+  app.patch(
+    "/v1/organizations/:organizationId/members/:actorId/status",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      const { organizationId, actorId } = z
+        .object({
+          organizationId: z.string().uuid(),
+          actorId: z.string().min(1).max(255),
+        })
+        .parse(request.params);
+      const body = ChangeMembershipStatusRequestSchema.parse(request.body);
+      await input.tenants.changeMembershipStatus({
+        actorId: session.actorId,
+        organizationId,
+        targetActorId: actorId,
+        status: body.status,
+        correlationId: correlationId(reply),
+      });
+      return reply.code(204).send();
+    },
+  );
+  app.post(
+    "/v1/organizations/:organizationId/members/:actorId/reassignments",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      const { organizationId, actorId } = z
+        .object({
+          organizationId: z.string().uuid(),
+          actorId: z.string().min(1).max(255),
+        })
+        .parse(request.params);
+      const body = ReassignMemberResponsibilitiesRequestSchema.parse(
+        request.body,
+      );
+      await input.tenants.reassignMemberResponsibilities({
+        actorId: session.actorId,
+        organizationId,
+        targetActorId: actorId,
+        replacementActorId: body.replacementActorId,
+        correlationId: correlationId(reply),
+      });
+      return reply.code(204).send();
+    },
+  );
   app.post("/v1/documents/:documentId/replacements", async (request, reply) => {
     const session = await requireSession(
       request,
@@ -769,6 +832,7 @@ export async function buildServer(input: {
       token: body.token,
       actorId: session.actorId,
       actorEmail: requireActorEmail(session.actorEmail),
+      correlationId: correlationId(reply),
     });
     return reply
       .code(200)

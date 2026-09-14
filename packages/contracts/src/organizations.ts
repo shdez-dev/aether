@@ -45,6 +45,13 @@ export const TransferOrganizationOwnershipRequestSchema = z.object({
   targetActorId: z.string().trim().min(1).max(255),
 });
 
+export const ChangeMembershipStatusRequestSchema = z.object({
+  status: z.enum(["suspended", "revoked"]),
+});
+export const ReassignMemberResponsibilitiesRequestSchema = z.object({
+  replacementActorId: z.string().trim().min(1).max(255),
+});
+
 export const InvitationResponseSchema = z.object({
   id: UuidSchema,
   organizationId: UuidSchema,
@@ -78,6 +85,12 @@ export type CreateInvitationRequest = z.infer<
 export type InvitationResponse = z.infer<typeof InvitationResponseSchema>;
 export type TransferOrganizationOwnershipRequest = z.infer<
   typeof TransferOrganizationOwnershipRequestSchema
+>;
+export type ChangeMembershipStatusRequest = z.infer<
+  typeof ChangeMembershipStatusRequestSchema
+>;
+export type ReassignMemberResponsibilitiesRequest = z.infer<
+  typeof ReassignMemberResponsibilitiesRequestSchema
 >;
 export type AccessCapabilitiesResponse = z.infer<
   typeof AccessCapabilitiesResponseSchema

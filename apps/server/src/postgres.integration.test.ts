@@ -146,7 +146,8 @@ describe("PostgreSQL integration", () => {
       ).resolves.toBe("admin");
       const audit = await pool.query(
         `SELECT actor_id, target_actor_id, event_type
-         FROM organization_membership_audit_events WHERE organization_id = $1`,
+         FROM organization_membership_audit_events
+         WHERE organization_id = $1 AND event_type = 'organization.ownership_transferred.v1'`,
         [organization.id],
       );
       expect(audit.rows).toEqual([

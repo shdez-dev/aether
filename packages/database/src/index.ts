@@ -408,7 +408,7 @@ export class PostgresTenantStore implements TenantStore {
   }
   async listOrganizations(actorId: string): Promise<readonly Organization[]> {
     const result = await this.pool.query<Organization>(
-      `SELECT organizations.id, organizations.name, organizations.timezone, organizations.locale, organizations.version FROM organizations JOIN organization_memberships ON organization_memberships.organization_id = organizations.id WHERE organization_memberships.actor_id = $1 ORDER BY organizations.name`,
+      `SELECT organizations.id, organizations.name, organizations.timezone, organizations.locale, organizations.version FROM organizations JOIN organization_memberships ON organization_memberships.organization_id = organizations.id WHERE organization_memberships.actor_id = $1 AND organization_memberships.status = 'active' ORDER BY organizations.name`,
       [actorId],
     );
     return result.rows;
@@ -418,7 +418,7 @@ export class PostgresTenantStore implements TenantStore {
     organizationId: string;
   }): Promise<readonly Workspace[]> {
     const result = await this.pool.query<WorkspaceRow>(
-      `SELECT workspaces.id, workspaces.organization_id, workspaces.name, workspaces.mode, workspaces.version FROM workspaces LEFT JOIN workspace_memberships ON workspace_memberships.workspace_id = workspaces.id WHERE workspaces.organization_id = $1 AND (EXISTS (SELECT 1 FROM organization_memberships WHERE organization_id = $1 AND actor_id = $2 AND role IN ('owner','admin')) OR workspace_memberships.actor_id = $2) ORDER BY workspaces.name`,
+      `SELECT workspaces.id, workspaces.organization_id, workspaces.name, workspaces.mode, workspaces.version FROM workspaces LEFT JOIN workspace_memberships ON workspace_memberships.workspace_id = workspaces.id WHERE workspaces.organization_id = $1 AND EXISTS (SELECT 1 FROM organization_memberships WHERE organization_id = $1 AND actor_id = $2 AND status = 'active') AND (EXISTS (SELECT 1 FROM organization_memberships WHERE organization_id = $1 AND actor_id = $2 AND status = 'active' AND role IN ('owner','admin')) OR workspace_memberships.actor_id = $2) ORDER BY workspaces.name`,
       [input.organizationId, input.actorId],
     );
     return result.rows.map(toWorkspace);
@@ -429,7 +429,7 @@ export class PostgresTenantStore implements TenantStore {
     organizationId: string;
   }): Promise<OrganizationRole | null> {
     const result = await this.pool.query<{ role: OrganizationRole }>(
-      "SELECT role FROM organization_memberships WHERE actor_id = $1 AND organization_id = $2",
+      "SELECT role FROM organization_memberships WHERE actor_id = $1 AND organization_id = $2 AND status = 'active'",
       [input.actorId, input.organizationId],
     );
     return result.rows[0]?.role ?? null;
@@ -440,7 +440,10 @@ export class PostgresTenantStore implements TenantStore {
     workspaceId: string;
   }): Promise<WorkspaceRole | null> {
     const result = await this.pool.query<{ role: WorkspaceRole }>(
-      "SELECT role FROM workspace_memberships WHERE actor_id = $1 AND workspace_id = $2",
+      `SELECT workspace_memberships.role FROM workspace_memberships
+       JOIN workspaces ON workspaces.id = workspace_memberships.workspace_id
+       JOIN organization_memberships ON organization_memberships.organization_id = workspaces.organization_id AND organization_memberships.actor_id = workspace_memberships.actor_id
+       WHERE workspace_memberships.actor_id = $1 AND workspace_memberships.workspace_id = $2 AND organization_memberships.status = 'active'`,
       [input.actorId, input.workspaceId],
     );
     return result.rows[0]?.role ?? null;
@@ -470,6 +473,8 @@ export class PostgresTenantStore implements TenantStore {
     actorId: string;
     actorEmail: string;
     now: Date;
+    auditEventId: string;
+    correlationId: string;
   }): Promise<Invitation | null> {
     const client = await this.pool.connect();
     try {
@@ -487,12 +492,26 @@ export class PostgresTenantStore implements TenantStore {
       const invitation = toInvitation(row);
       await client.query(
         `INSERT INTO organization_memberships (organization_id, actor_id, actor_email, role) VALUES ($1, $2, $3, $4)
-         ON CONFLICT (organization_id, actor_id) DO UPDATE SET role = EXCLUDED.role, actor_email = EXCLUDED.actor_email`,
+         ON CONFLICT (organization_id, actor_id) DO UPDATE SET role = EXCLUDED.role, actor_email = EXCLUDED.actor_email, status = 'active', status_changed_at = $5`,
         [
           invitation.organizationId,
           input.actorId,
           input.actorEmail.toLowerCase(),
           invitation.organizationRole,
+          input.now,
+        ],
+      );
+      await client.query(
+        `INSERT INTO organization_membership_audit_events
+         (id, organization_id, actor_id, target_actor_id, event_type, correlation_id, occurred_at, payload)
+         VALUES ($1, $2, $3, $3, 'organization.membership_activated.v1', $4, $5, $6)`,
+        [
+          input.auditEventId,
+          invitation.organizationId,
+          input.actorId,
+          input.correlationId,
+          input.now,
+          { invitationId: invitation.id },
         ],
       );
       for (const workspaceId of invitation.workspaceIds) {
@@ -530,13 +549,16 @@ export class PostgresTenantStore implements TenantStore {
       const memberships = await client.query<{
         actor_id: string;
         role: OrganizationRole;
+        status: "active" | "suspended" | "revoked";
       }>(
-        `SELECT actor_id, role FROM organization_memberships
+        `SELECT actor_id, role, status FROM organization_memberships
          WHERE organization_id = $1 AND actor_id = ANY($2::text[])
          ORDER BY actor_id FOR UPDATE`,
         [input.organizationId, [input.actorId, input.targetActorId]],
       );
-      const actor = memberships.rows.find((row) => row.actor_id === input.actorId);
+      const actor = memberships.rows.find(
+        (row) => row.actor_id === input.actorId,
+      );
       const target = memberships.rows.find(
         (row) => row.actor_id === input.targetActorId,
       );
@@ -544,7 +566,7 @@ export class PostgresTenantStore implements TenantStore {
         await client.query("ROLLBACK");
         return "actor_not_owner";
       }
-      if (!target) {
+      if (!target || target.status !== "active") {
         await client.query("ROLLBACK");
         return "target_not_member";
       }
@@ -572,6 +594,197 @@ export class PostgresTenantStore implements TenantStore {
       );
       await client.query("COMMIT");
       return "transferred";
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async changeMembershipStatus(input: {
+    organizationId: string;
+    actorId: string;
+    targetActorId: string;
+    status: "suspended" | "revoked";
+    auditEventId: string;
+    correlationId: string;
+    occurredAt: Date;
+  }): Promise<
+    | "changed"
+    | "actor_not_manager"
+    | "target_not_member"
+    | "target_is_owner"
+    | "target_has_open_responsibilities"
+  > {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const memberships = await client.query<{
+        actor_id: string;
+        role: OrganizationRole;
+        status: "active" | "suspended" | "revoked";
+      }>(
+        `SELECT actor_id, role, status FROM organization_memberships
+         WHERE organization_id = $1 AND actor_id = ANY($2::text[])
+         ORDER BY actor_id FOR UPDATE`,
+        [input.organizationId, [input.actorId, input.targetActorId]],
+      );
+      const actor = memberships.rows.find(
+        (row) => row.actor_id === input.actorId,
+      );
+      const target = memberships.rows.find(
+        (row) => row.actor_id === input.targetActorId,
+      );
+      if (
+        !actor ||
+        actor.status !== "active" ||
+        (actor.role !== "owner" && actor.role !== "admin")
+      ) {
+        await client.query("ROLLBACK");
+        return "actor_not_manager";
+      }
+      if (!target) {
+        await client.query("ROLLBACK");
+        return "target_not_member";
+      }
+      if (target.role === "owner") {
+        await client.query("ROLLBACK");
+        return "target_is_owner";
+      }
+      const responsibilities = await client.query<{ exists: boolean }>(
+        `SELECT EXISTS (
+          SELECT 1 FROM projects WHERE organization_id = $1 AND status IN ('planned', 'active', 'blocked') AND (lead_actor_id = $2 OR sponsor_actor_id = $2)
+          UNION ALL
+          SELECT 1 FROM project_next_actions JOIN projects ON projects.id = project_next_actions.project_id WHERE projects.organization_id = $1 AND projects.status IN ('planned', 'active', 'blocked') AND project_next_actions.owner_actor_id = $2 AND project_next_actions.completed_at IS NULL
+        ) AS exists`,
+        [input.organizationId, input.targetActorId],
+      );
+      if (responsibilities.rows[0]?.exists) {
+        await client.query("ROLLBACK");
+        return "target_has_open_responsibilities";
+      }
+      await client.query(
+        "UPDATE organization_memberships SET status = $3, status_changed_at = $4 WHERE organization_id = $1 AND actor_id = $2",
+        [
+          input.organizationId,
+          input.targetActorId,
+          input.status,
+          input.occurredAt,
+        ],
+      );
+      await client.query(
+        `INSERT INTO organization_membership_audit_events
+         (id, organization_id, actor_id, target_actor_id, event_type, correlation_id, occurred_at, payload)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [
+          input.auditEventId,
+          input.organizationId,
+          input.actorId,
+          input.targetActorId,
+          `organization.membership_${input.status}.v1`,
+          input.correlationId,
+          input.occurredAt,
+          { status: input.status },
+        ],
+      );
+      await client.query("COMMIT");
+      return "changed";
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async reassignMemberResponsibilities(input: {
+    organizationId: string;
+    actorId: string;
+    targetActorId: string;
+    replacementActorId: string;
+    auditEventId: string;
+    correlationId: string;
+    occurredAt: Date;
+  }): Promise<
+    | "reassigned"
+    | "actor_not_manager"
+    | "target_not_member"
+    | "replacement_not_active"
+    | "replacement_conflicts_with_project_role"
+  > {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const members = await client.query<{
+        actor_id: string;
+        role: OrganizationRole;
+        status: string;
+      }>(
+        `SELECT actor_id, role, status FROM organization_memberships WHERE organization_id = $1 AND actor_id = ANY($2::text[]) ORDER BY actor_id FOR UPDATE`,
+        [
+          input.organizationId,
+          [input.actorId, input.targetActorId, input.replacementActorId],
+        ],
+      );
+      const actor = members.rows.find((row) => row.actor_id === input.actorId);
+      const target = members.rows.find(
+        (row) => row.actor_id === input.targetActorId,
+      );
+      const replacement = members.rows.find(
+        (row) => row.actor_id === input.replacementActorId,
+      );
+      if (
+        !actor ||
+        actor.status !== "active" ||
+        (actor.role !== "owner" && actor.role !== "admin")
+      ) {
+        await client.query("ROLLBACK");
+        return "actor_not_manager";
+      }
+      if (!target) {
+        await client.query("ROLLBACK");
+        return "target_not_member";
+      }
+      if (!replacement || replacement.status !== "active") {
+        await client.query("ROLLBACK");
+        return "replacement_not_active";
+      }
+      const conflict = await client.query<{ exists: boolean }>(
+        `SELECT EXISTS (SELECT 1 FROM projects WHERE organization_id = $1 AND status IN ('planned','active','blocked') AND ((lead_actor_id = $2 AND sponsor_actor_id = $3) OR (sponsor_actor_id = $2 AND lead_actor_id = $3) OR (participants @> jsonb_build_array(jsonb_build_object('actorId',$2)) AND participants @> jsonb_build_array(jsonb_build_object('actorId',$3))))) AS exists`,
+        [input.organizationId, input.targetActorId, input.replacementActorId],
+      );
+      if (conflict.rows[0]?.exists) {
+        await client.query("ROLLBACK");
+        return "replacement_conflicts_with_project_role";
+      }
+      await client.query(
+        `UPDATE projects SET sponsor_actor_id = CASE WHEN sponsor_actor_id = $2 THEN $3 ELSE sponsor_actor_id END, lead_actor_id = CASE WHEN lead_actor_id = $2 THEN $3 ELSE lead_actor_id END, participants = (SELECT jsonb_agg(CASE WHEN item->>'actorId' = $2 THEN jsonb_set(item, '{actorId}', to_jsonb($3::text)) ELSE item END) FROM jsonb_array_elements(participants) AS item), version = version + 1, updated_at = $4 WHERE organization_id = $1 AND status IN ('planned','active','blocked') AND (sponsor_actor_id = $2 OR lead_actor_id = $2 OR participants @> jsonb_build_array(jsonb_build_object('actorId',$2)))`,
+        [
+          input.organizationId,
+          input.targetActorId,
+          input.replacementActorId,
+          input.occurredAt,
+        ],
+      );
+      await client.query(
+        `UPDATE project_next_actions SET owner_actor_id = $3 FROM projects WHERE projects.id = project_next_actions.project_id AND projects.organization_id = $1 AND projects.status IN ('planned','active','blocked') AND project_next_actions.owner_actor_id = $2 AND project_next_actions.completed_at IS NULL`,
+        [input.organizationId, input.targetActorId, input.replacementActorId],
+      );
+      await client.query(
+        `INSERT INTO organization_membership_audit_events (id, organization_id, actor_id, target_actor_id, event_type, correlation_id, occurred_at, payload) VALUES ($1,$2,$3,$4,'organization.member_responsibilities_reassigned.v1',$5,$6,$7)`,
+        [
+          input.auditEventId,
+          input.organizationId,
+          input.actorId,
+          input.targetActorId,
+          input.correlationId,
+          input.occurredAt,
+          { replacementActorId: input.replacementActorId },
+        ],
+      );
+      await client.query("COMMIT");
+      return "reassigned";
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;

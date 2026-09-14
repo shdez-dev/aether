@@ -395,6 +395,52 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "400": { $ref: "#/components/responses/Problem" }
+  /v1/organizations/{organizationId}/members/{actorId}/status:
+    patch:
+      tags: [Organizations]
+      operationId: changeMembershipStatus
+      summary: Suspender o revocar una membresía sin borrar su autoría histórica
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationId"
+        - name: actorId
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 255 }
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChangeMembershipStatusRequest" }
+      responses:
+        "204": { description: Membresía actualizada y auditada. }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/Problem" }
+  /v1/organizations/{organizationId}/members/{actorId}/reassignments:
+    post:
+      tags: [Organizations]
+      operationId: reassignMemberResponsibilities
+      summary: Reasignar responsabilidades abiertas antes de retirar una membresía
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationId"
+        - name: actorId
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReassignMemberResponsibilitiesRequest" }
+      responses:
+        "204": { description: Responsabilidades reasignadas y auditadas. }
+        default: { $ref: "#/components/responses/Problem" }
   /v1/invitations/accept:
     post:
       tags: [Organizations]
@@ -1431,6 +1477,18 @@ components:
           type: string
           minLength: 1
           maxLength: 255
+    ChangeMembershipStatusRequest:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: { type: string, enum: [suspended, revoked] }
+    ReassignMemberResponsibilitiesRequest:
+      type: object
+      additionalProperties: false
+      required: [replacementActorId]
+      properties:
+        replacementActorId: { type: string, minLength: 1, maxLength: 255 }
     AcceptInvitationRequest:
       type: object
       additionalProperties: false

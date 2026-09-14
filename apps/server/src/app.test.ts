@@ -303,6 +303,37 @@ describe("HTTP authentication boundary", () => {
       payload: { targetActorId: "next-owner" },
     });
     expect(repeatTransfer.statusCode).toBe(403);
+    const memberInvitation = await tenants.invite({
+      actorId: "actor-123",
+      organizationId: organization.json().id,
+      email: "suspended@example.test",
+      organizationRole: "member",
+      workspaceIds: [],
+      workspaceRole: "member",
+      expiresInDays: 7,
+    });
+    await tenants.acceptInvitation({
+      token: memberInvitation.deliveryToken,
+      actorId: "suspended-member",
+      actorEmail: "suspended@example.test",
+    });
+    const suspension = await app.inject({
+      method: "PATCH",
+      url: `/v1/organizations/${organization.json().id}/members/suspended-member/status`,
+      headers: {
+        origin: config.webOrigin,
+        "x-csrf-token": csrf,
+        cookie: `aether_session=${session}; aether_csrf=${csrf}`,
+      },
+      payload: { status: "suspended" },
+    });
+    expect(suspension.statusCode).toBe(204);
+    await expect(
+      tenants.capabilities({
+        actorId: "suspended-member",
+        organizationId: organization.json().id,
+      }),
+    ).resolves.toMatchObject({ canReadOrganization: false });
     const rejected = await app.inject({
       method: "POST",
       url: "/auth/logout",

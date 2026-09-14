@@ -58,6 +58,8 @@ export interface TenantStore {
     actorId: string;
     actorEmail: string;
     now: Date;
+    auditEventId: string;
+    correlationId: string;
   }): Promise<Invitation | null>;
   transferOwnership(input: {
     organizationId: string;
@@ -67,6 +69,36 @@ export interface TenantStore {
     correlationId: string;
     occurredAt: Date;
   }): Promise<"transferred" | "actor_not_owner" | "target_not_member">;
+  changeMembershipStatus(input: {
+    organizationId: string;
+    actorId: string;
+    targetActorId: string;
+    status: "suspended" | "revoked";
+    auditEventId: string;
+    correlationId: string;
+    occurredAt: Date;
+  }): Promise<
+    | "changed"
+    | "actor_not_manager"
+    | "target_not_member"
+    | "target_is_owner"
+    | "target_has_open_responsibilities"
+  >;
+  reassignMemberResponsibilities(input: {
+    organizationId: string;
+    actorId: string;
+    targetActorId: string;
+    replacementActorId: string;
+    auditEventId: string;
+    correlationId: string;
+    occurredAt: Date;
+  }): Promise<
+    | "reassigned"
+    | "actor_not_manager"
+    | "target_not_member"
+    | "replacement_not_active"
+    | "replacement_conflicts_with_project_role"
+  >;
 }
 
 export interface TenantIdGenerator {
@@ -210,12 +242,15 @@ export class TenantService {
     token: string;
     actorId: string;
     actorEmail: string;
+    correlationId?: string;
   }): Promise<Invitation> {
     const invitation = await this.dependencies.store.acceptInvitation({
       tokenHash: this.dependencies.tokens.hash(input.token),
       actorId: input.actorId,
       actorEmail: input.actorEmail.toLowerCase(),
       now: this.dependencies.clock.now(),
+      auditEventId: this.dependencies.ids.next(),
+      correlationId: input.correlationId ?? this.dependencies.ids.next(),
     });
     if (!invitation) throw new InvitationError("INVITATION_INVALID_OR_EXPIRED");
     return invitation;
@@ -236,8 +271,44 @@ export class TenantService {
     });
     if (result !== "transferred")
       throw new OwnershipTransferError(
-        result === "actor_not_owner" ? "ACTOR_MUST_BE_OWNER" : "TARGET_MUST_BE_MEMBER",
+        result === "actor_not_owner"
+          ? "ACTOR_MUST_BE_OWNER"
+          : "TARGET_MUST_BE_MEMBER",
       );
+  }
+
+  async changeMembershipStatus(input: {
+    actorId: string;
+    organizationId: string;
+    targetActorId: string;
+    status: "suspended" | "revoked";
+    correlationId: string;
+  }): Promise<void> {
+    const result = await this.dependencies.store.changeMembershipStatus({
+      ...input,
+      auditEventId: this.dependencies.ids.next(),
+      occurredAt: this.dependencies.clock.now(),
+    });
+    if (result !== "changed") throw new MembershipStatusError(result);
+  }
+
+  async reassignMemberResponsibilities(input: {
+    actorId: string;
+    organizationId: string;
+    targetActorId: string;
+    replacementActorId: string;
+    correlationId: string;
+  }): Promise<void> {
+    if (input.targetActorId === input.replacementActorId)
+      throw new MembershipStatusError("replacement_not_active");
+    const result = await this.dependencies.store.reassignMemberResponsibilities(
+      {
+        ...input,
+        auditEventId: this.dependencies.ids.next(),
+        occurredAt: this.dependencies.clock.now(),
+      },
+    );
+    if (result !== "reassigned") throw new MembershipStatusError(result);
   }
 
   async capabilities(input: {
@@ -307,6 +378,19 @@ export class OwnershipTransferError extends Error {
       | "ACTOR_MUST_BE_OWNER"
       | "TARGET_MUST_BE_MEMBER"
       | "TARGET_MUST_BE_DIFFERENT",
+  ) {
+    super(code);
+  }
+}
+export class MembershipStatusError extends Error {
+  constructor(
+    public readonly code:
+      | "actor_not_manager"
+      | "target_not_member"
+      | "target_is_owner"
+      | "target_has_open_responsibilities"
+      | "replacement_not_active"
+      | "replacement_conflicts_with_project_role",
   ) {
     super(code);
   }

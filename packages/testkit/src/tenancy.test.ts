@@ -139,7 +139,10 @@ describe("TenantService", () => {
     });
 
     await expect(
-      service.capabilities({ actorId: "next-owner", organizationId: organization.id }),
+      service.capabilities({
+        actorId: "next-owner",
+        organizationId: organization.id,
+      }),
     ).resolves.toMatchObject({ canManageOrganization: true });
     await expect(
       service.transferOwnership({
@@ -158,5 +161,51 @@ describe("TenantService", () => {
         targetActorId: "next-owner",
       }),
     ]);
+  });
+
+  it("suspende y revoca una membresía sin borrar su autoría ni mantener acceso", async () => {
+    const { service } = createTenantService();
+    const organization = await service.createOrganization({
+      actorId: "owner",
+      actorEmail: "owner@example.test",
+      name: "A",
+      timezone: "UTC",
+      locale: "es-CL",
+    });
+    const invitation = await service.invite({
+      actorId: "owner",
+      organizationId: organization.id,
+      email: "member@example.test",
+      organizationRole: "member",
+      workspaceIds: [],
+      workspaceRole: "member",
+      expiresInDays: 7,
+    });
+    await service.acceptInvitation({
+      token: invitation.deliveryToken,
+      actorId: "member",
+      actorEmail: "member@example.test",
+    });
+    await service.changeMembershipStatus({
+      actorId: "owner",
+      organizationId: organization.id,
+      targetActorId: "member",
+      status: "suspended",
+      correlationId: "00000000-0000-4000-8000-000000000101",
+    });
+    await expect(
+      service.capabilities({
+        actorId: "member",
+        organizationId: organization.id,
+      }),
+    ).resolves.toMatchObject({ canReadOrganization: false });
+    await expect(service.listOrganizations("member")).resolves.toEqual([]);
+    await service.changeMembershipStatus({
+      actorId: "owner",
+      organizationId: organization.id,
+      targetActorId: "member",
+      status: "revoked",
+      correlationId: "00000000-0000-4000-8000-000000000102",
+    });
   });
 });
