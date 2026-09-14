@@ -6,7 +6,7 @@
   "description": "Aether institutional initiative and project governance platform",
   "packageManager": "pnpm@11.24.0",
   "engines": {
-    "node": ">=24.0.0",
+    "node": ">=24.18.0 <25",
     "pnpm": ">=11.24.0"
   },
   "scripts": {
@@ -16,10 +16,11 @@
     "typecheck": "turbo run typecheck && tsc --noEmit --project tsconfig.json",
     "test": "turbo run test",
     "test:e2e": "turbo run test:e2e",
+    "architecture:check": "node scripts/check-architecture.mjs",
     "openapi:validate": "node scripts/validate-openapi.mjs",
     "secrets:scan": "node scripts/scan-secrets.mjs",
     "prepare": "node scripts/install-git-hooks.mjs",
-    "verify": "pnpm lint && pnpm typecheck && pnpm openapi:validate && pnpm test && pnpm build",
+    "verify": "pnpm lint && pnpm typecheck && pnpm architecture:check && pnpm openapi:validate && pnpm test && pnpm build",
     "db:migrate": "pnpm --filter @aether/database migrate",
     "local:up": "docker compose -f infra/compose.yaml up -d",
     "local:down": "docker compose -f infra/compose.yaml down"

@@ -1,21 +1,25 @@
 # Estado y alcance del repositorio
 
-- Fecha de revisión: 2026-09-07
-- Estado local: esqueleto greenfield inicial, aún sin inicialización Git
+- Fecha de revisión: 2026-09-14
+- Estado local: reconstrucción greenfield en curso, versionada en `main`
 - Remoto declarado: `https://github.com/shdez-dev/aether.git`
-- Verificación remota: pendiente; el remoto no fue accesible desde el entorno de revisión
+- Verificación remota: `origin/main` sincronizado y CI configurada
 
 ## Conclusión local
 
-El contenido local corresponde al alcance aprobado de arquitectura inicial:
+El contenido local corresponde al alcance aprobado de reconstrucción:
 
 - monorepo pnpm con aplicaciones `web`, `server` y `worker`;
 - paquetes con límites explícitos para dominio, aplicación, contratos, datos, acceso, observabilidad, UI y pruebas;
 - PostgreSQL y Redis únicamente para desarrollo local;
 - ADR iniciales y documentación de operación local;
-- sin código legado, migraciones de negocio, endpoints ni interfaces de producto todavía.
+- casos de uso, migraciones, API, auditoría, métricas y outbox para el flujo
+  institucional principal;
+- evidencia documental parcialmente suspendida (F5), pendiente de cierre
+  operativo antes de declararla lista para producción.
 
-No corresponde afirmar todavía que el repositorio remoto tenga el mismo contenido. Antes de integrar o publicar se debe comparar `main` con este baseline mediante una revisión de ramas, archivos versionados, configuración CI y protección de rama.
+El remoto se sincroniza desde `main`. Antes de publicar un release se revisan
+historial, archivos versionados, CI y protección de rama contra este baseline.
 
 ## Criterio de aceptación de la sincronización
 

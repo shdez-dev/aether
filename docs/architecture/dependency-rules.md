@@ -27,4 +27,8 @@ flowchart LR
 | `ui`                                              | React y tokens de diseño                       | aplicación, autorización o entidades persistentes                       |
 | `testkit`                                         | dominio, aplicación y contratos                | datos reales, secretos o infraestructura compartida                     |
 
-Los imports se validarán en CI con reglas de límites arquitectónicos cuando se incorpore ESLint. La primera implementación no puede introducir una excepción silenciosa: una nueva dirección de dependencia requiere ADR.
+`pnpm architecture:check` valida los imports entre paquetes de workspace y
+forma parte de `pnpm verify`, por lo que también se ejecuta en CI. La primera
+implementación no puede introducir una excepción silenciosa: una nueva
+dirección de dependencia requiere ADR y debe figurar explícitamente en el
+validador. La excepción actual está documentada en ADR 0007.

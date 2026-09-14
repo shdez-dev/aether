@@ -7,7 +7,8 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "migrate": "tsx src/migrate.ts"
+    "migrate": "tsx src/migrate.ts",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@aether/application": "workspace:*",

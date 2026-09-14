@@ -6,6 +6,9 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
   "dependencies": {
     "react": "^19.0.0"
   },
