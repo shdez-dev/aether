@@ -11,6 +11,12 @@ export class InMemoryTenantStore implements TenantStore {
   readonly organizations = new Map<string, Organization>();
   readonly workspaces = new Map<string, Workspace>();
   readonly invitations = new Map<string, Invitation & { tokenHash: string }>();
+  readonly ownershipTransfers: Array<{
+    organizationId: string;
+    actorId: string;
+    targetActorId: string;
+    correlationId: string;
+  }> = [];
   private readonly organizationRoles = new Map<string, OrganizationRole>();
   private readonly workspaceRoles = new Map<string, WorkspaceRole>();
 
@@ -101,6 +107,31 @@ export class InMemoryTenantStore implements TenantStore {
         invitation.workspaceRole,
       );
     return invitation;
+  }
+  async transferOwnership(input: {
+    organizationId: string;
+    actorId: string;
+    targetActorId: string;
+    auditEventId: string;
+    correlationId: string;
+    occurredAt: Date;
+  }): Promise<"transferred" | "actor_not_owner" | "target_not_member"> {
+    const actorKey = this.organizationKey(input.actorId, input.organizationId);
+    const targetKey = this.organizationKey(
+      input.targetActorId,
+      input.organizationId,
+    );
+    if (this.organizationRoles.get(actorKey) !== "owner") return "actor_not_owner";
+    if (!this.organizationRoles.has(targetKey)) return "target_not_member";
+    this.organizationRoles.set(targetKey, "owner");
+    this.organizationRoles.set(actorKey, "admin");
+    this.ownershipTransfers.push({
+      organizationId: input.organizationId,
+      actorId: input.actorId,
+      targetActorId: input.targetActorId,
+      correlationId: input.correlationId,
+    });
+    return "transferred";
   }
 
   private organizationKey(actorId: string, organizationId: string): string {

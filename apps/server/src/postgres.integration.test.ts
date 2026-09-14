@@ -90,6 +90,83 @@ describe("PostgreSQL integration", () => {
   );
 
   runPostgresIntegration(
+    "transfers ownership atomically, audits it, and rejects removal of the final owner",
+    async () => {
+      const ids = { next: randomUUID };
+      const clock = { now: () => new Date("2026-09-14T13:30:00.000Z") };
+      const tenants = new TenantService({
+        store: new PostgresTenantStore(pool),
+        ids,
+        tokens: {
+          generate: () => "token",
+          hash: (value) => `ownership-transfer:${value}`,
+        },
+        clock,
+      });
+      const organization = await tenants.createOrganization({
+        actorId: "initial-owner",
+        actorEmail: "initial-owner@example.test",
+        name: "Ownership",
+        timezone: "UTC",
+        locale: "es-CL",
+      });
+      const invitation = await tenants.invite({
+        actorId: "initial-owner",
+        organizationId: organization.id,
+        email: "next-owner@example.test",
+        organizationRole: "member",
+        workspaceIds: [],
+        workspaceRole: "member",
+        expiresInDays: 7,
+      });
+      await tenants.acceptInvitation({
+        token: invitation.deliveryToken,
+        actorId: "next-owner",
+        actorEmail: "next-owner@example.test",
+      });
+
+      await tenants.transferOwnership({
+        actorId: "initial-owner",
+        organizationId: organization.id,
+        targetActorId: "next-owner",
+        correlationId: randomUUID(),
+      });
+
+      await expect(
+        new PostgresTenantStore(pool).findOrganizationRole({
+          actorId: "next-owner",
+          organizationId: organization.id,
+        }),
+      ).resolves.toBe("owner");
+      await expect(
+        new PostgresTenantStore(pool).findOrganizationRole({
+          actorId: "initial-owner",
+          organizationId: organization.id,
+        }),
+      ).resolves.toBe("admin");
+      const audit = await pool.query(
+        `SELECT actor_id, target_actor_id, event_type
+         FROM organization_membership_audit_events WHERE organization_id = $1`,
+        [organization.id],
+      );
+      expect(audit.rows).toEqual([
+        {
+          actor_id: "initial-owner",
+          target_actor_id: "next-owner",
+          event_type: "organization.ownership_transferred.v1",
+        },
+      ]);
+      await expect(
+        pool.query(
+          "DELETE FROM organization_memberships WHERE organization_id = $1 AND actor_id = 'next-owner'",
+          [organization.id],
+        ),
+      ).rejects.toThrow("An organization must retain at least one owner");
+    },
+    120_000,
+  );
+
+  runPostgresIntegration(
     "lists and replays only an organization's dead letters with a recovery audit",
     async () => {
       const organizationId = randomUUID();

@@ -261,6 +261,48 @@ describe("HTTP authentication boundary", () => {
       payload: { name: "Aether Test", timezone: "UTC", locale: "es-CL" },
     });
     expect(organization.statusCode).toBe(201);
+    const invitation = await tenants.invite({
+      actorId: "actor-123",
+      organizationId: organization.json().id,
+      email: "next-owner@example.test",
+      organizationRole: "member",
+      workspaceIds: [],
+      workspaceRole: "member",
+      expiresInDays: 7,
+    });
+    await tenants.acceptInvitation({
+      token: invitation.deliveryToken,
+      actorId: "next-owner",
+      actorEmail: "next-owner@example.test",
+    });
+    const ownershipTransfer = await app.inject({
+      method: "POST",
+      url: `/v1/organizations/${organization.json().id}/ownership-transfers`,
+      headers: {
+        origin: config.webOrigin,
+        "x-csrf-token": csrf,
+        cookie: `aether_session=${session}; aether_csrf=${csrf}`,
+      },
+      payload: { targetActorId: "next-owner" },
+    });
+    expect(ownershipTransfer.statusCode).toBe(204);
+    await expect(
+      tenants.capabilities({
+        actorId: "next-owner",
+        organizationId: organization.json().id,
+      }),
+    ).resolves.toMatchObject({ canManageOrganization: true });
+    const repeatTransfer = await app.inject({
+      method: "POST",
+      url: `/v1/organizations/${organization.json().id}/ownership-transfers`,
+      headers: {
+        origin: config.webOrigin,
+        "x-csrf-token": csrf,
+        cookie: `aether_session=${session}; aether_csrf=${csrf}`,
+      },
+      payload: { targetActorId: "next-owner" },
+    });
+    expect(repeatTransfer.statusCode).toBe(403);
     const rejected = await app.inject({
       method: "POST",
       url: "/auth/logout",

@@ -21,6 +21,7 @@ import {
   ProjectDomainError,
   ProjectVersionConflictError,
   InvitationError,
+  OwnershipTransferError,
   ResourceNotFoundError,
   TenantService,
   DocumentService,
@@ -36,6 +37,7 @@ import {
 } from "@aether/application";
 import {
   CreateInvitationRequestSchema,
+  TransferOrganizationOwnershipRequestSchema,
   CreateInitiativeDraftRequestSchema,
   CreateOrganizationRequestSchema,
   CreateWorkspaceRequestSchema,
@@ -265,7 +267,9 @@ export async function buildServer(input: {
             : error instanceof CsrfError ||
                 error instanceof AccessDeniedError ||
                 error instanceof DocumentAccessDeniedError ||
-                error instanceof IdentityEmailRequiredError
+                error instanceof IdentityEmailRequiredError ||
+                (error instanceof OwnershipTransferError &&
+                  error.code === "ACTOR_MUST_BE_OWNER")
               ? 403
               : error instanceof ResourceNotFoundError ||
                   error instanceof DocumentNotFoundError ||
@@ -329,7 +333,9 @@ export async function buildServer(input: {
                     : error instanceof CsrfError ||
                         error instanceof AccessDeniedError ||
                         error instanceof DocumentAccessDeniedError ||
-                        error instanceof IdentityEmailRequiredError
+                        error instanceof IdentityEmailRequiredError ||
+                        (error instanceof OwnershipTransferError &&
+                          error.code === "ACTOR_MUST_BE_OWNER")
                       ? "FORBIDDEN"
                       : error instanceof ResourceNotFoundError ||
                           error instanceof DocumentNotFoundError ||
@@ -344,7 +350,9 @@ export async function buildServer(input: {
                             ? "PRECONDITION_FAILED"
                             : error instanceof InvitationError
                               ? "INVITATION_INVALID_OR_EXPIRED"
-                              : "VALIDATION_ERROR",
+                              : error instanceof OwnershipTransferError
+                                ? error.code
+                                : "VALIDATION_ERROR",
         correlationId: reply.getHeader("X-Correlation-ID"),
         instance: request.url,
       });
@@ -609,6 +617,30 @@ export async function buildServer(input: {
         ...result.invitation,
         expiresAt: result.invitation.expiresAt.toISOString(),
       });
+    },
+  );
+  app.post(
+    "/v1/organizations/:organizationId/ownership-transfers",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      const { organizationId } = z
+        .object({ organizationId: z.string().uuid() })
+        .parse(request.params);
+      const body = TransferOrganizationOwnershipRequestSchema.parse(
+        request.body,
+      );
+      await input.tenants.transferOwnership({
+        actorId: session.actorId,
+        organizationId,
+        targetActorId: body.targetActorId,
+        correlationId: correlationId(reply),
+      });
+      return reply.code(204).send();
     },
   );
   app.post("/v1/documents/:documentId/replacements", async (request, reply) => {

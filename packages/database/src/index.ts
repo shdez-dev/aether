@@ -515,6 +515,70 @@ export class PostgresTenantStore implements TenantStore {
       client.release();
     }
   }
+
+  async transferOwnership(input: {
+    organizationId: string;
+    actorId: string;
+    targetActorId: string;
+    auditEventId: string;
+    correlationId: string;
+    occurredAt: Date;
+  }): Promise<"transferred" | "actor_not_owner" | "target_not_member"> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const memberships = await client.query<{
+        actor_id: string;
+        role: OrganizationRole;
+      }>(
+        `SELECT actor_id, role FROM organization_memberships
+         WHERE organization_id = $1 AND actor_id = ANY($2::text[])
+         ORDER BY actor_id FOR UPDATE`,
+        [input.organizationId, [input.actorId, input.targetActorId]],
+      );
+      const actor = memberships.rows.find((row) => row.actor_id === input.actorId);
+      const target = memberships.rows.find(
+        (row) => row.actor_id === input.targetActorId,
+      );
+      if (actor?.role !== "owner") {
+        await client.query("ROLLBACK");
+        return "actor_not_owner";
+      }
+      if (!target) {
+        await client.query("ROLLBACK");
+        return "target_not_member";
+      }
+      await client.query(
+        "UPDATE organization_memberships SET role = 'owner' WHERE organization_id = $1 AND actor_id = $2",
+        [input.organizationId, input.targetActorId],
+      );
+      await client.query(
+        "UPDATE organization_memberships SET role = 'admin' WHERE organization_id = $1 AND actor_id = $2",
+        [input.organizationId, input.actorId],
+      );
+      await client.query(
+        `INSERT INTO organization_membership_audit_events
+         (id, organization_id, actor_id, target_actor_id, event_type, correlation_id, occurred_at, payload)
+         VALUES ($1, $2, $3, $4, 'organization.ownership_transferred.v1', $5, $6, $7)`,
+        [
+          input.auditEventId,
+          input.organizationId,
+          input.actorId,
+          input.targetActorId,
+          input.correlationId,
+          input.occurredAt,
+          { formerRole: "owner", newRole: "owner" },
+        ],
+      );
+      await client.query("COMMIT");
+      return "transferred";
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
 }
 
 type WorkspaceRow = {

@@ -59,6 +59,14 @@ export interface TenantStore {
     actorEmail: string;
     now: Date;
   }): Promise<Invitation | null>;
+  transferOwnership(input: {
+    organizationId: string;
+    actorId: string;
+    targetActorId: string;
+    auditEventId: string;
+    correlationId: string;
+    occurredAt: Date;
+  }): Promise<"transferred" | "actor_not_owner" | "target_not_member">;
 }
 
 export interface TenantIdGenerator {
@@ -213,6 +221,25 @@ export class TenantService {
     return invitation;
   }
 
+  async transferOwnership(input: {
+    actorId: string;
+    organizationId: string;
+    targetActorId: string;
+    correlationId: string;
+  }): Promise<void> {
+    if (input.actorId === input.targetActorId)
+      throw new OwnershipTransferError("TARGET_MUST_BE_DIFFERENT");
+    const result = await this.dependencies.store.transferOwnership({
+      ...input,
+      auditEventId: this.dependencies.ids.next(),
+      occurredAt: this.dependencies.clock.now(),
+    });
+    if (result !== "transferred")
+      throw new OwnershipTransferError(
+        result === "actor_not_owner" ? "ACTOR_MUST_BE_OWNER" : "TARGET_MUST_BE_MEMBER",
+      );
+  }
+
   async capabilities(input: {
     actorId: string;
     organizationId: string;
@@ -271,6 +298,16 @@ export class ResourceNotFoundError extends Error {
 }
 export class InvitationError extends Error {
   constructor(public readonly code: "INVITATION_INVALID_OR_EXPIRED") {
+    super(code);
+  }
+}
+export class OwnershipTransferError extends Error {
+  constructor(
+    public readonly code:
+      | "ACTOR_MUST_BE_OWNER"
+      | "TARGET_MUST_BE_MEMBER"
+      | "TARGET_MUST_BE_DIFFERENT",
+  ) {
     super(code);
   }
 }

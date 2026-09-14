@@ -374,6 +374,27 @@ paths:
           $ref: "#/components/responses/Problem"
         "404":
           $ref: "#/components/responses/Problem"
+  /v1/organizations/{organizationId}/ownership-transfers:
+    post:
+      tags: [Organizations]
+      operationId: transferOrganizationOwnership
+      summary: Transferir la propiedad a una membresía existente
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationId"
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TransferOrganizationOwnershipRequest"
+      responses:
+        "204": { description: Propiedad transferida y auditada. }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/Problem" }
   /v1/invitations/accept:
     post:
       tags: [Organizations]
@@ -1401,6 +1422,15 @@ components:
         workspaceRole:
           { type: string, enum: [admin, member, viewer], default: member }
         expiresInDays: { type: integer, minimum: 1, maximum: 30, default: 7 }
+    TransferOrganizationOwnershipRequest:
+      type: object
+      additionalProperties: false
+      required: [targetActorId]
+      properties:
+        targetActorId:
+          type: string
+          minLength: 1
+          maxLength: 255
     AcceptInvitationRequest:
       type: object
       additionalProperties: false

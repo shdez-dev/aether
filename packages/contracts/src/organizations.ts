@@ -41,6 +41,10 @@ export const CreateInvitationRequestSchema = z.object({
   expiresInDays: z.number().int().min(1).max(30).default(7),
 });
 
+export const TransferOrganizationOwnershipRequestSchema = z.object({
+  targetActorId: z.string().trim().min(1).max(255),
+});
+
 export const InvitationResponseSchema = z.object({
   id: UuidSchema,
   organizationId: UuidSchema,
@@ -72,6 +76,9 @@ export type CreateInvitationRequest = z.infer<
   typeof CreateInvitationRequestSchema
 >;
 export type InvitationResponse = z.infer<typeof InvitationResponseSchema>;
+export type TransferOrganizationOwnershipRequest = z.infer<
+  typeof TransferOrganizationOwnershipRequestSchema
+>;
 export type AccessCapabilitiesResponse = z.infer<
   typeof AccessCapabilitiesResponseSchema
 >;

@@ -106,4 +106,57 @@ describe("TenantService", () => {
       }),
     ).rejects.toBeInstanceOf(AccessDeniedError);
   });
+
+  it("transfiere propiedad de forma explícita, conserva un responsable y deja auditoría", async () => {
+    const { service, store } = createTenantService();
+    const organization = await service.createOrganization({
+      actorId: "owner",
+      actorEmail: "owner@example.test",
+      name: "A",
+      timezone: "UTC",
+      locale: "es-CL",
+    });
+    const invitation = await service.invite({
+      actorId: "owner",
+      organizationId: organization.id,
+      email: "next-owner@example.test",
+      organizationRole: "member",
+      workspaceIds: [],
+      workspaceRole: "member",
+      expiresInDays: 7,
+    });
+    await service.acceptInvitation({
+      token: invitation.deliveryToken,
+      actorId: "next-owner",
+      actorEmail: "next-owner@example.test",
+    });
+
+    await service.transferOwnership({
+      actorId: "owner",
+      organizationId: organization.id,
+      targetActorId: "next-owner",
+      correlationId: "00000000-0000-4000-8000-000000000099",
+    });
+
+    await expect(
+      service.capabilities({ actorId: "next-owner", organizationId: organization.id }),
+    ).resolves.toMatchObject({ canManageOrganization: true });
+    await expect(
+      service.transferOwnership({
+        actorId: "owner",
+        organizationId: organization.id,
+        targetActorId: "next-owner",
+        correlationId: "00000000-0000-4000-8000-000000000100",
+      }),
+    ).rejects.toMatchObject({
+      code: "ACTOR_MUST_BE_OWNER",
+    });
+    expect(store.ownershipTransfers).toEqual([
+      expect.objectContaining({
+        organizationId: organization.id,
+        actorId: "owner",
+        targetActorId: "next-owner",
+      }),
+    ]);
+  });
 });

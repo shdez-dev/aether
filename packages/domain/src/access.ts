@@ -23,23 +23,78 @@ export type AccessCapabilities = Readonly<{
   canInviteMembers: boolean;
 }>;
 
+type PermissionRule = Readonly<{
+  capability: keyof AccessCapabilities;
+  organizationRoles?: readonly OrganizationRole[];
+  workspaceRoles?: readonly WorkspaceRole[];
+}>;
+
+/**
+ * Matriz ejecutable para acciones de tenencia. La aplicación debe preguntar a
+ * esta política y no reconstruir permisos a partir de los roles en cada caso
+ * de uso. Las acciones propias de un agregado (iniciativa, proyecto, etc.)
+ * agregan además sus invariantes de estado y propiedad.
+ */
+export const AuthorizationMatrix: Readonly<
+  Record<AuthorizationAction, PermissionRule>
+> = {
+  "organization:read": {
+    capability: "canReadOrganization",
+    organizationRoles: OrganizationRoles,
+  },
+  "organization:manage": {
+    capability: "canManageOrganization",
+    organizationRoles: ["owner", "admin"],
+  },
+  "workspace:create": {
+    capability: "canCreateWorkspace",
+    organizationRoles: ["owner", "admin"],
+  },
+  "workspace:read": {
+    capability: "canReadWorkspace",
+    organizationRoles: ["owner", "admin"],
+    workspaceRoles: WorkspaceRoles,
+  },
+  "workspace:manage": {
+    capability: "canManageWorkspace",
+    organizationRoles: ["owner", "admin"],
+    workspaceRoles: ["admin"],
+  },
+  "member:invite": {
+    capability: "canInviteMembers",
+    organizationRoles: ["owner", "admin"],
+  },
+};
+
+function roleIsAllowed<T extends string>(
+  role: T | null,
+  permitted: readonly T[] | undefined,
+): boolean {
+  return role !== null && permitted?.includes(role) === true;
+}
+
+function allows(
+  action: AuthorizationAction,
+  input: { organizationRole: OrganizationRole | null; workspaceRole: WorkspaceRole | null },
+): boolean {
+  const rule = AuthorizationMatrix[action];
+  return (
+    roleIsAllowed(input.organizationRole, rule.organizationRoles) ||
+    roleIsAllowed(input.workspaceRole, rule.workspaceRoles)
+  );
+}
+
 export function calculateCapabilities(input: {
   organizationRole: OrganizationRole | null;
   workspaceRole: WorkspaceRole | null;
 }): AccessCapabilities {
-  const isOrganizationManager =
-    input.organizationRole === "owner" || input.organizationRole === "admin";
-  const canReadOrganization = input.organizationRole !== null;
-  const canReadWorkspace =
-    isOrganizationManager || input.workspaceRole !== null;
   return {
-    canReadOrganization,
-    canManageOrganization: isOrganizationManager,
-    canCreateWorkspace: isOrganizationManager,
-    canReadWorkspace,
-    canManageWorkspace:
-      isOrganizationManager || input.workspaceRole === "admin",
-    canInviteMembers: isOrganizationManager,
+    canReadOrganization: allows("organization:read", input),
+    canManageOrganization: allows("organization:manage", input),
+    canCreateWorkspace: allows("workspace:create", input),
+    canReadWorkspace: allows("workspace:read", input),
+    canManageWorkspace: allows("workspace:manage", input),
+    canInviteMembers: allows("member:invite", input),
   };
 }
 
@@ -47,20 +102,7 @@ export function isActionAllowed(
   action: AuthorizationAction,
   capabilities: AccessCapabilities,
 ): boolean {
-  switch (action) {
-    case "organization:read":
-      return capabilities.canReadOrganization;
-    case "organization:manage":
-      return capabilities.canManageOrganization;
-    case "workspace:create":
-      return capabilities.canCreateWorkspace;
-    case "workspace:read":
-      return capabilities.canReadWorkspace;
-    case "workspace:manage":
-      return capabilities.canManageWorkspace;
-    case "member:invite":
-      return capabilities.canInviteMembers;
-  }
+  return capabilities[AuthorizationMatrix[action].capability];
 }
 
 export function canCreateInitiative(input: {
