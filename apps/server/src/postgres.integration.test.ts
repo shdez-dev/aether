@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
+import { readdir } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
 import {
@@ -65,6 +67,28 @@ if (containerRuntimeAvailable || requireContainerRuntime) {
 }
 
 describe("PostgreSQL integration", () => {
+  runPostgresIntegration(
+    "applies every migration to a clean database and reapplying is idempotent",
+    async () => {
+      const migrationDirectory = fileURLToPath(
+        new URL("../../../packages/database/migrations/", import.meta.url),
+      );
+      const expected = (await readdir(migrationDirectory))
+        .filter((name) => name.endsWith(".sql"))
+        .sort();
+      const applied = await pool.query<{ name: string }>(
+        "SELECT name FROM schema_migrations ORDER BY name",
+      );
+      expect(applied.rows.map((row) => row.name)).toEqual(expected);
+      await expect(migratePool(pool)).resolves.toBeUndefined();
+      const reapplied = await pool.query<{ name: string }>(
+        "SELECT name FROM schema_migrations ORDER BY name",
+      );
+      expect(reapplied.rows.map((row) => row.name)).toEqual(expected);
+    },
+    120_000,
+  );
+
   runPostgresIntegration(
     "lists and replays only an organization's dead letters with a recovery audit",
     async () => {

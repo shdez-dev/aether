@@ -16,9 +16,10 @@
     "typecheck": "turbo run typecheck && tsc --noEmit --project tsconfig.json",
     "test": "turbo run test",
     "test:e2e": "turbo run test:e2e",
+    "openapi:validate": "node scripts/validate-openapi.mjs",
     "secrets:scan": "node scripts/scan-secrets.mjs",
     "prepare": "node scripts/install-git-hooks.mjs",
-    "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "verify": "pnpm lint && pnpm typecheck && pnpm openapi:validate && pnpm test && pnpm build",
     "db:migrate": "pnpm --filter @aether/database migrate",
     "local:up": "docker compose -f infra/compose.yaml up -d",
     "local:down": "docker compose -f infra/compose.yaml down"
@@ -30,6 +31,7 @@
     "tsx": "^4.0.0",
     "turbo": "^2.0.0",
     "typescript": "^5.0.0",
-    "vitest": "^4.0.0"
+    "vitest": "^4.0.0",
+    "yaml": "2.9.0"
   }
 }

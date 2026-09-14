@@ -485,6 +485,19 @@ describe("HTTP authentication boundary", () => {
     });
     expect(replayResponse.statusCode).toBe(202);
     expect(deadLetters.has(deadLetterId)).toBe(false);
+    const foreignOrganizationId = crypto.randomUUID();
+    const foreignMetrics = await app.inject({
+      method: "GET",
+      url: `/v1/admin/product-metrics?organizationId=${foreignOrganizationId}`,
+      headers: { cookie: headers.cookie },
+    });
+    expect(foreignMetrics.statusCode).toBe(403);
+    const foreignDeadLetters = await app.inject({
+      method: "GET",
+      url: `/v1/admin/outbox/dead-letters?organizationId=${foreignOrganizationId}`,
+      headers: { cookie: headers.cookie },
+    });
+    expect(foreignDeadLetters.statusCode).toBe(403);
     const organizationsResponse = await app.inject({
       method: "GET",
       url: "/v1/organizations",
