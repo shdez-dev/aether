@@ -17,6 +17,7 @@ import {
   InitiativeService,
   ProjectService,
   ProductMetricsService,
+  type SecurityAuditStore,
   OutboxAdministrationService,
   TenantService,
 } from "@aether/application";
@@ -229,6 +230,9 @@ describe("HTTP authentication boundary", () => {
 
   it("aplica autorización contextual y aislamiento de organizaciones en los endpoints de tenencia", async () => {
     const authStore = new InMemoryAuthStore();
+    const securityAuditEvents: Array<
+      Parameters<SecurityAuditStore["record"]>[0]
+    > = [];
     const tenants = new TenantService({
       store: new InMemoryTenantStore(),
       ids: { next: () => crypto.randomUUID() },
@@ -254,6 +258,11 @@ describe("HTTP authentication boundary", () => {
       evaluations: {} as EvaluationService,
       projects: {} as ProjectService,
       idempotency: new InMemoryIdempotencyStore(),
+      securityAudit: {
+        async record(event) {
+          securityAuditEvents.push(event);
+        },
+      },
     });
     const organization = await tenants.createOrganization({
       actorId: "owner",
@@ -413,6 +422,27 @@ describe("HTTP authentication boundary", () => {
       headers: { cookie: viewerCookie },
     });
     expect(forbiddenOrganization.statusCode).toBe(403);
+    expect(securityAuditEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actorId: "viewer",
+          action: "security.authorization_denied.v1",
+          method: "POST",
+          path: "/v1/workspaces",
+          statusCode: 403,
+          metadata: {},
+        }),
+        expect.objectContaining({
+          actorId: "viewer",
+          action: "security.authorization_denied.v1",
+          method: "GET",
+          path: `/v1/workspaces/${otherWorkspace.id}`,
+          statusCode: 403,
+          correlationId: forbiddenOrganization.headers["x-correlation-id"],
+          metadata: {},
+        }),
+      ]),
+    );
     await app.close();
   });
 
