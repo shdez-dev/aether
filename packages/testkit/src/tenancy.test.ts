@@ -29,6 +29,131 @@ function createTenantService(now = new Date("2026-09-08T12:00:00.000Z")) {
 }
 
 describe("TenantService", () => {
+  it("aplica la matriz de permisos a operaciones de tenencia permitidas y denegadas", async () => {
+    const { service } = createTenantService();
+    const organization = await service.createOrganization({
+      actorId: "owner",
+      actorEmail: "owner@example.test",
+      name: "A",
+      timezone: "UTC",
+      locale: "es-CL",
+    });
+    const workspace = await service.createWorkspace({
+      actorId: "owner",
+      organizationId: organization.id,
+      name: "Operaciones",
+      mode: "team",
+    });
+    const roles = [
+      {
+        actorId: "organization-admin",
+        organizationRole: "admin" as const,
+        workspaceRole: "viewer" as const,
+      },
+      {
+        actorId: "workspace-admin",
+        organizationRole: "member" as const,
+        workspaceRole: "admin" as const,
+      },
+      {
+        actorId: "workspace-member",
+        organizationRole: "member" as const,
+        workspaceRole: "member" as const,
+      },
+      {
+        actorId: "workspace-viewer",
+        organizationRole: "member" as const,
+        workspaceRole: "viewer" as const,
+      },
+    ];
+    for (const role of roles) {
+      const invitation = await service.invite({
+        actorId: "owner",
+        organizationId: organization.id,
+        email: `${role.actorId}@example.test`,
+        organizationRole: role.organizationRole,
+        workspaceIds: [workspace.id],
+        workspaceRole: role.workspaceRole,
+        expiresInDays: 7,
+      });
+      await service.acceptInvitation({
+        token: invitation.deliveryToken,
+        actorId: role.actorId,
+        actorEmail: `${role.actorId}@example.test`,
+      });
+    }
+
+    await expect(
+      service.createWorkspace({
+        actorId: "organization-admin",
+        organizationId: organization.id,
+        name: "Permitido",
+        mode: "team",
+      }),
+    ).resolves.toMatchObject({ organizationId: organization.id });
+    await expect(
+      service.invite({
+        actorId: "organization-admin",
+        organizationId: organization.id,
+        email: "new-member@example.test",
+        organizationRole: "member",
+        workspaceIds: [],
+        workspaceRole: "viewer",
+        expiresInDays: 7,
+      }),
+    ).resolves.toBeDefined();
+    await expect(
+      service.getWorkspace({
+        actorId: "workspace-viewer",
+        organizationId: organization.id,
+        workspaceId: workspace.id,
+      }),
+    ).resolves.toMatchObject({ id: workspace.id });
+
+    for (const actorId of [
+      "workspace-admin",
+      "workspace-member",
+      "workspace-viewer",
+    ]) {
+      await expect(
+        service.createWorkspace({
+          actorId,
+          organizationId: organization.id,
+          name: "Denegado",
+          mode: "team",
+        }),
+      ).rejects.toBeInstanceOf(AccessDeniedError);
+      await expect(
+        service.invite({
+          actorId,
+          organizationId: organization.id,
+          email: `${actorId}-invite@example.test`,
+          organizationRole: "member",
+          workspaceIds: [],
+          workspaceRole: "viewer",
+          expiresInDays: 7,
+        }),
+      ).rejects.toBeInstanceOf(AccessDeniedError);
+    }
+
+    await expect(
+      service.archiveWorkspace({
+        actorId: "workspace-member",
+        organizationId: organization.id,
+        workspaceId: workspace.id,
+        correlationId: "00000000-0000-4000-8000-000000000097",
+      }),
+    ).rejects.toBeInstanceOf(AccessDeniedError);
+    await expect(
+      service.archiveWorkspace({
+        actorId: "workspace-admin",
+        organizationId: organization.id,
+        workspaceId: workspace.id,
+        correlationId: "00000000-0000-4000-8000-000000000098",
+      }),
+    ).resolves.toBeUndefined();
+  });
+
   it("archiva un workspace con autorización, conserva lectura y bloquea nuevas escrituras", async () => {
     const { service, store } = createTenantService();
     const organization = await service.createOrganization({

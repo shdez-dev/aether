@@ -17,6 +17,80 @@ describe("AuthorizationMatrix", () => {
   }>([
     {
       organizationRole: "owner",
+      workspaceRole: "viewer",
+      expected: {
+        canReadOrganization: true,
+        canManageOrganization: true,
+        canCreateWorkspace: true,
+        canReadWorkspace: true,
+        canManageWorkspace: true,
+        canInviteMembers: true,
+      },
+    },
+    {
+      organizationRole: "admin",
+      workspaceRole: null,
+      expected: {
+        canReadOrganization: true,
+        canManageOrganization: true,
+        canCreateWorkspace: true,
+        canReadWorkspace: true,
+        canManageWorkspace: true,
+        canInviteMembers: true,
+      },
+    },
+    {
+      organizationRole: "member",
+      workspaceRole: "admin",
+      expected: {
+        canReadOrganization: true,
+        canManageOrganization: false,
+        canCreateWorkspace: false,
+        canReadWorkspace: true,
+        canManageWorkspace: true,
+        canInviteMembers: false,
+      },
+    },
+    {
+      organizationRole: "member",
+      workspaceRole: "member",
+      expected: {
+        canReadOrganization: true,
+        canManageOrganization: false,
+        canCreateWorkspace: false,
+        canReadWorkspace: true,
+        canManageWorkspace: false,
+        canInviteMembers: false,
+      },
+    },
+    {
+      organizationRole: "member",
+      workspaceRole: "viewer",
+      expected: {
+        canReadOrganization: true,
+        canManageOrganization: false,
+        canCreateWorkspace: false,
+        canReadWorkspace: true,
+        canManageWorkspace: false,
+        canInviteMembers: false,
+      },
+    },
+  ])(
+    "combines organization and workspace roles without escalating grants",
+    ({ organizationRole, workspaceRole, expected }) => {
+      expect(
+        calculateCapabilities({ organizationRole, workspaceRole }),
+      ).toEqual(expected);
+    },
+  );
+
+  it.each<{
+    organizationRole: OrganizationRole | null;
+    workspaceRole: WorkspaceRole | null;
+    expected: AccessCapabilities;
+  }>([
+    {
+      organizationRole: "owner",
       workspaceRole: null,
       expected: {
         canReadOrganization: true,
@@ -75,16 +149,22 @@ describe("AuthorizationMatrix", () => {
         canInviteMembers: false,
       },
     },
-  ])("resolves roles without implicit grants", ({ organizationRole, workspaceRole, expected }) => {
-    const capabilities = calculateCapabilities({ organizationRole, workspaceRole });
+  ])(
+    "resolves roles without implicit grants",
+    ({ organizationRole, workspaceRole, expected }) => {
+      const capabilities = calculateCapabilities({
+        organizationRole,
+        workspaceRole,
+      });
 
-    expect(capabilities).toEqual(expected);
-    for (const action of Object.keys(AuthorizationMatrix) as Array<
-      keyof typeof AuthorizationMatrix
-    >) {
-      expect(isActionAllowed(action, capabilities)).toBe(
-        expected[AuthorizationMatrix[action].capability],
-      );
-    }
-  });
+      expect(capabilities).toEqual(expected);
+      for (const action of Object.keys(AuthorizationMatrix) as Array<
+        keyof typeof AuthorizationMatrix
+      >) {
+        expect(isActionAllowed(action, capabilities)).toBe(
+          expected[AuthorizationMatrix[action].capability],
+        );
+      }
+    },
+  );
 });
