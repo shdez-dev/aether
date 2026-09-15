@@ -571,6 +571,27 @@ describe("HTTP authentication boundary", () => {
       headers: { cookie: headers.cookie },
     });
     expect(foreignDeadLetters.statusCode).toBe(403);
+    const foreignWorkspaceId = crypto.randomUUID();
+    const foreignRequests = await Promise.all([
+      app.inject({
+        method: "GET",
+        url: `/v1/organizations/${foreignOrganizationId}/workspaces`,
+        headers: { cookie: headers.cookie },
+      }),
+      app.inject({
+        method: "GET",
+        url: `/v1/initiatives?organizationId=${foreignOrganizationId}&workspaceId=${foreignWorkspaceId}`,
+        headers: { cookie: headers.cookie },
+      }),
+      app.inject({
+        method: "GET",
+        url: `/v1/audit-events?organizationId=${foreignOrganizationId}&resourceType=initiative&resourceId=${crypto.randomUUID()}`,
+        headers: { cookie: headers.cookie },
+      }),
+    ]);
+    expect(foreignRequests.map((response) => response.statusCode)).toEqual([
+      403, 404, 403,
+    ]);
     const organizationsResponse = await app.inject({
       method: "GET",
       url: "/v1/organizations",

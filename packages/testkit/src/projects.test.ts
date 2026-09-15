@@ -144,6 +144,13 @@ describe("project conversion and execution", () => {
     expect(project.sourceInitiativeId).toBe(approved.id);
     expect(project.sourceDecisionId).toBe(decisionId);
     await expect(
+      projects.list({
+        actorId: "outsider",
+        organizationId: organization.id,
+        workspaceId: workspace.id,
+      }),
+    ).rejects.toBeInstanceOf(AccessDeniedError);
+    await expect(
       projects.addMilestone({
         actorId: "observer",
         organizationId: organization.id,
