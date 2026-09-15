@@ -10,6 +10,7 @@ import {
   type LoginTransaction,
   type OidcProvider,
 } from "@aether/auth";
+import { ApiProblemSchema } from "@aether/contracts";
 import {
   EvaluationService,
   AuditHistoryService,
@@ -156,6 +157,24 @@ const oidc: OidcProvider = {
   },
 };
 
+async function createAuthenticatedSession(
+  store: InMemoryAuthStore,
+  input: { token: string; actorId: string; actorEmail: string },
+): Promise<void> {
+  const now = new Date();
+  await store.createSession({
+    id: crypto.randomUUID(),
+    tokenHash: hashOpaqueToken(input.token),
+    actorId: input.actorId,
+    actorEmail: input.actorEmail,
+    issuer: config.oidcIssuerUrl,
+    createdAt: now,
+    lastSeenAt: now,
+    expiresAt: new Date(now.getTime() + config.sessionTtlSeconds * 1_000),
+    revokedAt: null,
+  });
+}
+
 function cookieValue(setCookies: string[], name: string): string {
   const found = setCookies.find((value) => value.startsWith(`${name}=`));
   if (!found) throw new Error(`Cookie ${name} not found`);
@@ -205,6 +224,195 @@ describe("HTTP authentication boundary", () => {
       code: "OIDC_PROVIDER_UNAVAILABLE",
     });
     expect(responseCookies(response)).toEqual([]);
+    await app.close();
+  });
+
+  it("aplica autorización contextual y aislamiento de organizaciones en los endpoints de tenencia", async () => {
+    const authStore = new InMemoryAuthStore();
+    const tenants = new TenantService({
+      store: new InMemoryTenantStore(),
+      ids: { next: () => crypto.randomUUID() },
+      tokens: {
+        generate: () => "x".repeat(43),
+        hash: (value) => `hash:${value}`,
+      },
+      clock: { now: () => new Date() },
+    });
+    const auth = new AuthService({
+      store: authStore,
+      cipher: createAesGcmCipher(config.sessionEncryptionKey),
+      oidc,
+      issuer: config.oidcIssuerUrl,
+      sessionTtlSeconds: config.sessionTtlSeconds,
+      sessionRenewalWindowSeconds: config.sessionRenewalWindowSeconds,
+    });
+    const app = await buildServer({
+      config,
+      auth,
+      tenants,
+      initiatives: {} as InitiativeService,
+      evaluations: {} as EvaluationService,
+      projects: {} as ProjectService,
+      idempotency: new InMemoryIdempotencyStore(),
+    });
+    const organization = await tenants.createOrganization({
+      actorId: "owner",
+      actorEmail: "owner@example.test",
+      name: "Organización A",
+      timezone: "UTC",
+      locale: "es-CL",
+    });
+    const workspace = await tenants.createWorkspace({
+      actorId: "owner",
+      organizationId: organization.id,
+      name: "Workspace A",
+      mode: "team",
+    });
+    const invitation = await tenants.invite({
+      actorId: "owner",
+      organizationId: organization.id,
+      email: "viewer@example.test",
+      organizationRole: "member",
+      workspaceIds: [workspace.id],
+      workspaceRole: "viewer",
+      expiresInDays: 7,
+    });
+    await tenants.acceptInvitation({
+      token: invitation.deliveryToken,
+      actorId: "viewer",
+      actorEmail: "viewer@example.test",
+    });
+    const otherOrganization = await tenants.createOrganization({
+      actorId: "other-owner",
+      actorEmail: "other-owner@example.test",
+      name: "Organización B",
+      timezone: "UTC",
+      locale: "es-CL",
+    });
+    const otherWorkspace = await tenants.createWorkspace({
+      actorId: "other-owner",
+      organizationId: otherOrganization.id,
+      name: "Workspace B",
+      mode: "team",
+    });
+    const viewerToken = "viewer-session-token";
+    const viewerCsrf = "viewer-csrf-token";
+    await createAuthenticatedSession(authStore, {
+      token: viewerToken,
+      actorId: "viewer",
+      actorEmail: "viewer@example.test",
+    });
+    const viewerCookie = `aether_session=${viewerToken}; aether_csrf=${viewerCsrf}`;
+    const mutationHeaders = {
+      origin: config.webOrigin,
+      "x-csrf-token": viewerCsrf,
+      cookie: viewerCookie,
+    };
+
+    const capabilities = await app.inject({
+      method: "GET",
+      url: `/v1/organizations/${organization.id}/capabilities?workspaceId=${workspace.id}`,
+      headers: { cookie: viewerCookie },
+    });
+    expect(capabilities.statusCode).toBe(200);
+    expect(capabilities.json()).toEqual({
+      canReadOrganization: true,
+      canManageOrganization: false,
+      canCreateWorkspace: false,
+      canReadWorkspace: true,
+      canManageWorkspace: false,
+      canInviteMembers: false,
+    });
+    const visibleWorkspaces = await app.inject({
+      method: "GET",
+      url: `/v1/organizations/${organization.id}/workspaces`,
+      headers: { cookie: viewerCookie },
+    });
+    expect(visibleWorkspaces.statusCode).toBe(200);
+    expect(visibleWorkspaces.json()).toEqual([
+      expect.objectContaining({ id: workspace.id }),
+    ]);
+    const readableWorkspace = await app.inject({
+      method: "GET",
+      url: `/v1/workspaces/${workspace.id}?organizationId=${organization.id}`,
+      headers: { cookie: viewerCookie },
+    });
+    expect(readableWorkspace.statusCode).toBe(200);
+
+    const deniedWorkspaceCreation = await app.inject({
+      method: "POST",
+      url: "/v1/workspaces",
+      headers: mutationHeaders,
+      payload: {
+        organizationId: organization.id,
+        name: "No permitido",
+        mode: "team",
+      },
+    });
+    expect(deniedWorkspaceCreation.statusCode).toBe(403);
+    const deniedWorkspaceProblem = ApiProblemSchema.parse(
+      deniedWorkspaceCreation.json(),
+    );
+    expect(deniedWorkspaceProblem).toMatchObject({
+      code: "FORBIDDEN",
+      detail: "No tiene autorización para realizar esta operación.",
+    });
+    expect(deniedWorkspaceProblem.correlationId).toBe(
+      deniedWorkspaceCreation.headers["x-correlation-id"],
+    );
+    const invalidWorkspaceCreation = await app.inject({
+      method: "POST",
+      url: "/v1/workspaces",
+      headers: mutationHeaders,
+      payload: {
+        organizationId: organization.id,
+        name: "",
+        mode: "team",
+      },
+    });
+    expect(invalidWorkspaceCreation.statusCode).toBe(400);
+    expect(
+      ApiProblemSchema.parse(invalidWorkspaceCreation.json()),
+    ).toMatchObject({
+      code: "VALIDATION_ERROR",
+      errors: [
+        {
+          field: "name",
+          message: "El valor no cumple el formato requerido.",
+        },
+      ],
+    });
+    const deniedInvitation = await app.inject({
+      method: "POST",
+      url: `/v1/organizations/${organization.id}/invitations`,
+      headers: mutationHeaders,
+      payload: {
+        email: "blocked@example.test",
+        organizationRole: "member",
+        workspaceIds: [],
+        workspaceRole: "viewer",
+        expiresInDays: 7,
+      },
+    });
+    expect(deniedInvitation.statusCode).toBe(403);
+    const deniedArchive = await app.inject({
+      method: "POST",
+      url: `/v1/organizations/${organization.id}/workspaces/${workspace.id}/archive`,
+      headers: mutationHeaders,
+    });
+    expect(deniedArchive.statusCode).toBe(403);
+    const hiddenWorkspace = await app.inject({
+      method: "GET",
+      url: `/v1/workspaces/${otherWorkspace.id}?organizationId=${organization.id}`,
+      headers: { cookie: viewerCookie },
+    });
+    expect(hiddenWorkspace.statusCode).toBe(404);
+    const forbiddenOrganization = await app.inject({
+      method: "GET",
+      url: `/v1/workspaces/${otherWorkspace.id}?organizationId=${otherOrganization.id}`,
+      headers: { cookie: viewerCookie },
+    });
+    expect(forbiddenOrganization.statusCode).toBe(403);
     await app.close();
   });
 

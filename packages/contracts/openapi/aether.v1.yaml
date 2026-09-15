@@ -2380,7 +2380,7 @@ components:
     ApiProblem:
       type: object
       additionalProperties: false
-      required: [type, title, status, code, correlationId]
+      required: [type, title, status, code, detail, correlationId]
       properties:
         type: { type: string }
         title: { type: string }
@@ -2401,6 +2401,16 @@ components:
               PAYLOAD_TOO_LARGE,
               DEPENDENCY_UNAVAILABLE,
               INVITATION_INVALID_OR_EXPIRED,
+              OIDC_PROVIDER_UNAVAILABLE,
+              RECENT_AUTH_REQUIRED,
+              WORKSPACE_ARCHIVED,
+              TARGET_MUST_BE_DIFFERENT,
+              TARGET_MUST_BE_MEMBER,
+              TARGET_NOT_MEMBER,
+              TARGET_IS_OWNER,
+              TARGET_HAS_OPEN_RESPONSIBILITIES,
+              REPLACEMENT_NOT_ACTIVE,
+              REPLACEMENT_CONFLICTS_WITH_PROJECT_ROLE,
               INTERNAL_ERROR,
             ]
         detail: { type: string }

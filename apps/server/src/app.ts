@@ -339,6 +339,10 @@ export async function buildServer(input: {
                           ? "Conflicto de versión"
                           : "Solicitud inválida",
         status,
+        detail: safeProblemDetail(status),
+        ...(error instanceof z.ZodError
+          ? { errors: validationFieldViolations(error) }
+          : {}),
         code: payloadTooLarge
           ? "PAYLOAD_TOO_LARGE"
           : rateLimited
@@ -2050,6 +2054,31 @@ function safeEqual(left: string, right: string): boolean {
     leftBuffer.length === rightBuffer.length &&
     timingSafeEqual(leftBuffer, rightBuffer)
   );
+}
+function safeProblemDetail(status: number): string {
+  if (status === 401) return "Inicie sesión e intente nuevamente.";
+  if (status === 403)
+    return "No tiene autorización para realizar esta operación.";
+  if (status === 404) return "El recurso solicitado no está disponible.";
+  if (status === 409)
+    return "La operación entra en conflicto con el estado actual.";
+  if (status === 413) return "La carga excede el tamaño permitido.";
+  if (status === 429)
+    return "Se excedió el límite de solicitudes. Intente más tarde.";
+  if (status === 503)
+    return "El servicio requerido no está disponible. Intente más tarde.";
+  return "La solicitud no cumple los requisitos necesarios.";
+}
+function validationFieldViolations(error: z.ZodError): Array<{
+  field: string;
+  code: string;
+  message: string;
+}> {
+  return error.issues.map((issue) => ({
+    field: issue.path.length > 0 ? issue.path.join(".") : "request",
+    code: issue.code,
+    message: "El valor no cumple el formato requerido.",
+  }));
 }
 function hashOpaqueValue(value: string): string {
   return createHash("sha256").update(value).digest("base64url");
