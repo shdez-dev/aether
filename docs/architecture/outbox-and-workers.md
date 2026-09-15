@@ -12,4 +12,4 @@ El único handler de producto activo mientras F5 permanece suspendido es `docume
 
 Un evento que supera el máximo de intentos pasa a `dead_letter` y conserva el error seguro y el payload. Solo `owner` y `admin` de la misma organización pueden listar `GET /v1/admin/outbox/dead-letters` o solicitar `POST /v1/admin/outbox/dead-letters/{eventId}/replay`.
 
-El replay exige motivo, usa idempotencia HTTP, restablece el evento a `pending` y registra de manera inmutable actor, correlación, fecha y motivo en `outbox_replays`. No permite cruzar organizaciones ni reactivar un evento que no esté en dead-letter.
+El replay exige motivo y autenticación reciente, usa idempotencia HTTP, restablece el evento a `pending` y registra de manera inmutable actor, correlación, fecha y motivo en `outbox_replays`. No permite cruzar organizaciones ni reactivar un evento que no esté en dead-letter.

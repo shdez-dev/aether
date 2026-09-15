@@ -4,6 +4,7 @@ import {
   AuthService,
   createAesGcmCipher,
   hashOpaqueToken,
+  OidcProviderUnavailableError,
   type AuthSession,
   type AuthStore,
   type LoginTransaction,
@@ -133,6 +134,7 @@ const config: ServerConfig = {
   sessionEncryptionKey: testSessionEncryptionKey,
   sessionTtlSeconds: 3600,
   sessionRenewalWindowSeconds: 600,
+  recentAuthMaxAgeSeconds: 900,
   maxRequestBodyBytes: 1_048_576,
   rateLimitMax: 120,
   rateLimitWindowSeconds: 60,
@@ -171,6 +173,41 @@ function responseCookies(response: {
 }
 
 describe("HTTP authentication boundary", () => {
+  it("expone indisponibilidad de OIDC sin iniciar una transacción ni una sesión", async () => {
+    const auth = new AuthService({
+      store: new InMemoryAuthStore(),
+      cipher: createAesGcmCipher(config.sessionEncryptionKey),
+      oidc: {
+        async buildAuthorizationUrl() {
+          throw new OidcProviderUnavailableError();
+        },
+        async exchangeAuthorizationCode() {
+          throw new OidcProviderUnavailableError();
+        },
+      },
+      issuer: config.oidcIssuerUrl,
+      sessionTtlSeconds: config.sessionTtlSeconds,
+      sessionRenewalWindowSeconds: config.sessionRenewalWindowSeconds,
+    });
+    const app = await buildServer({
+      config,
+      auth,
+      tenants: {} as TenantService,
+      initiatives: {} as InitiativeService,
+      evaluations: {} as EvaluationService,
+      projects: {} as ProjectService,
+      idempotency: new InMemoryIdempotencyStore(),
+    });
+    const response = await app.inject({ method: "GET", url: "/auth/login" });
+    expect(response.statusCode).toBe(503);
+    expect(response.headers["retry-after"]).toBe("60");
+    expect(response.json()).toMatchObject({
+      code: "OIDC_PROVIDER_UNAVAILABLE",
+    });
+    expect(responseCookies(response)).toEqual([]);
+    await app.close();
+  });
+
   it("uses HttpOnly opaque cookies and requires Origin plus double-submit CSRF on logout", async () => {
     const authStore = new InMemoryAuthStore();
     const auth = new AuthService({
@@ -277,6 +314,35 @@ describe("HTTP authentication boundary", () => {
       actorId: "next-owner",
       actorEmail: "next-owner@example.test",
     });
+    const staleSession = "stale-administrator-session";
+    const staleSessionCreatedAt = new Date(
+      Date.now() - (config.recentAuthMaxAgeSeconds + 1) * 1_000,
+    );
+    await authStore.createSession({
+      id: crypto.randomUUID(),
+      tokenHash: hashOpaqueToken(staleSession),
+      actorId: "actor-123",
+      actorEmail: "actor@example.test",
+      issuer: config.oidcIssuerUrl,
+      createdAt: staleSessionCreatedAt,
+      lastSeenAt: staleSessionCreatedAt,
+      expiresAt: new Date(Date.now() + config.sessionTtlSeconds * 1_000),
+      revokedAt: null,
+    });
+    const staleOwnershipTransfer = await app.inject({
+      method: "POST",
+      url: `/v1/organizations/${organization.json().id}/ownership-transfers`,
+      headers: {
+        origin: config.webOrigin,
+        "x-csrf-token": csrf,
+        cookie: `aether_session=${staleSession}; aether_csrf=${csrf}`,
+      },
+      payload: { targetActorId: "next-owner" },
+    });
+    expect(staleOwnershipTransfer.statusCode).toBe(403);
+    expect(staleOwnershipTransfer.json()).toMatchObject({
+      code: "RECENT_AUTH_REQUIRED",
+    });
     const ownershipTransfer = await app.inject({
       method: "POST",
       url: `/v1/organizations/${organization.json().id}/ownership-transfers`,
@@ -318,6 +384,34 @@ describe("HTTP authentication boundary", () => {
       token: memberInvitation.deliveryToken,
       actorId: "suspended-member",
       actorEmail: "suspended@example.test",
+    });
+    const staleReassignment = await app.inject({
+      method: "POST",
+      url: `/v1/organizations/${organization.json().id}/members/suspended-member/reassignments`,
+      headers: {
+        origin: config.webOrigin,
+        "x-csrf-token": csrf,
+        cookie: `aether_session=${staleSession}; aether_csrf=${csrf}`,
+      },
+      payload: { replacementActorId: "next-owner" },
+    });
+    expect(staleReassignment.statusCode).toBe(403);
+    expect(staleReassignment.json()).toMatchObject({
+      code: "RECENT_AUTH_REQUIRED",
+    });
+    const staleSuspension = await app.inject({
+      method: "PATCH",
+      url: `/v1/organizations/${organization.json().id}/members/suspended-member/status`,
+      headers: {
+        origin: config.webOrigin,
+        "x-csrf-token": csrf,
+        cookie: `aether_session=${staleSession}; aether_csrf=${csrf}`,
+      },
+      payload: { status: "suspended" },
+    });
+    expect(staleSuspension.statusCode).toBe(403);
+    expect(staleSuspension.json()).toMatchObject({
+      code: "RECENT_AUTH_REQUIRED",
     });
     const suspension = await app.inject({
       method: "PATCH",
@@ -601,6 +695,39 @@ describe("HTTP authentication boundary", () => {
     expect(deadLettersResponse.json()).toEqual([
       expect.objectContaining({ eventId: deadLetterId, attempts: 5 }),
     ]);
+    const staleReplaySession = "stale-outbox-administrator-session";
+    const staleReplayCreatedAt = new Date(
+      Date.now() - (config.recentAuthMaxAgeSeconds + 1) * 1_000,
+    );
+    await authStore.createSession({
+      id: crypto.randomUUID(),
+      tokenHash: hashOpaqueToken(staleReplaySession),
+      actorId: "actor-123",
+      actorEmail: "actor@example.test",
+      issuer: config.oidcIssuerUrl,
+      createdAt: staleReplayCreatedAt,
+      lastSeenAt: staleReplayCreatedAt,
+      expiresAt: new Date(Date.now() + config.sessionTtlSeconds * 1_000),
+      revokedAt: null,
+    });
+    const staleReplayResponse = await app.inject({
+      method: "POST",
+      url: `/v1/admin/outbox/dead-letters/${deadLetterId}/replay`,
+      headers: {
+        ...headers,
+        cookie: `aether_session=${staleReplaySession}; aether_csrf=${csrf}`,
+        "idempotency-key": crypto.randomUUID(),
+      },
+      payload: {
+        organizationId: organization.id,
+        reason: "La sesión requiere autenticación reciente.",
+      },
+    });
+    expect(staleReplayResponse.statusCode).toBe(403);
+    expect(staleReplayResponse.json()).toMatchObject({
+      code: "RECENT_AUTH_REQUIRED",
+    });
+    expect(deadLetters.has(deadLetterId)).toBe(true);
     const replayResponse = await app.inject({
       method: "POST",
       url: `/v1/admin/outbox/dead-letters/${deadLetterId}/replay`,

@@ -6,14 +6,16 @@ La fuente legible del contrato inicial está en `packages/contracts/openapi/aeth
 
 Todo error de API usa `application/problem+json` con los campos `type`, `title`, `status`, `code`, `detail` seguro, `instance`, `correlationId` y, para validaciones, `errors`. Nunca incluye stack traces, SQL, secretos ni nombres de recursos inaccesibles.
 
-| Código                   | HTTP      | Uso                                                             |
-| ------------------------ | --------- | --------------------------------------------------------------- |
-| `VALIDATION_ERROR`       | 400       | Formato o dato de entrada inválido                              |
-| `UNAUTHENTICATED`        | 401       | Sesión ausente o vencida                                        |
-| `FORBIDDEN`              | 403 o 404 | Acción no permitida; 404 cuando revelar existencia sea sensible |
-| `CONFLICT`               | 409       | Versión, idempotencia o transición incompatible                 |
-| `PRECONDITION_FAILED`    | 412       | Guarda de negocio no satisfecha                                 |
-| `DEPENDENCY_UNAVAILABLE` | 503       | Servicio externo recuperable                                    |
+| Código                      | HTTP      | Uso                                                                          |
+| --------------------------- | --------- | ---------------------------------------------------------------------------- |
+| `VALIDATION_ERROR`          | 400       | Formato o dato de entrada inválido                                           |
+| `UNAUTHENTICATED`           | 401       | Sesión ausente o vencida                                                     |
+| `RECENT_AUTH_REQUIRED`      | 403       | La autenticación inicial de una operación crítica ya no es reciente          |
+| `OIDC_PROVIDER_UNAVAILABLE` | 503       | Keycloak no puede atender inicio o canje OIDC; reintentar tras `Retry-After` |
+| `FORBIDDEN`                 | 403 o 404 | Acción no permitida; 404 cuando revelar existencia sea sensible              |
+| `CONFLICT`                  | 409       | Versión, idempotencia o transición incompatible                              |
+| `PRECONDITION_FAILED`       | 412       | Guarda de negocio no satisfecha                                              |
+| `DEPENDENCY_UNAVAILABLE`    | 503       | Servicio externo recuperable                                                 |
 
 ## Correlación
 

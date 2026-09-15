@@ -25,6 +25,28 @@ Un callback duplicado, un `state` incorrecto o una transacción vencida no puede
 
 La duración por defecto es ocho horas. Si faltan treinta minutos o menos, una solicitud autenticada renueva la expiración en el servidor y reemite la cookie. Cerrar sesión revoca la sesión de inmediato; la limpieza de filas vencidas es responsabilidad del worker operativo.
 
+## Autenticación reciente para acciones críticas
+
+La renovación deslizante no reemplaza la hora de autenticación inicial de la
+sesión. Transferir propiedad de una organización, cambiar o reasignar
+membresías y reintentar un dead-letter exige que esa autenticación tenga como
+máximo `RECENT_AUTH_MAX_AGE_SECONDS` (900 segundos por defecto). Si se supera,
+la API responde `403 RECENT_AUTH_REQUIRED`; el cliente debe iniciar de nuevo el
+flujo OIDC antes de repetir la operación.
+
+## Indisponibilidad de OIDC
+
+Si Keycloak no puede ser alcanzado durante el inicio o el canje de código, no
+se crea sesión ni se ofrece un modo local alternativo. La API responde `503
+OIDC_PROVIDER_UNAVAILABLE` con `Retry-After: 60`; el navegador conserva sólo
+las sesiones opacas ya existentes y puede volver a intentar el inicio más
+tarde. Los rechazos de credenciales, `state`, nonce o claims siguen siendo
+errores de autenticación, no una indisponibilidad del proveedor.
+
+`GET /ready` comprueba PostgreSQL y el descubrimiento OIDC. Si cualquiera no
+está disponible, responde `503`; `GET /health` sigue siendo un indicador de
+vida del proceso y no consulta dependencias.
+
 ## CSRF, replay y almacenamiento del navegador
 
 Las mutaciones autenticadas deben exigir un `Origin` igual a `WEB_ORIGIN` y el header `X-CSRF-Token` igual a la cookie `aether_csrf`, comparado en tiempo constante. El callback OIDC no usa este mecanismo porque está protegido por la transacción de un solo uso (`state` + handle + PKCE + nonce).

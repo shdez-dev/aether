@@ -27,29 +27,30 @@ No se copian secretos ni datos productivos a entornos inferiores. Cada entorno u
 Los responsables son roles operativos; el valor de los archivos `.example` es
 ficticio y sirve únicamente para desarrollo local.
 
-| Variable | Tipo y valor seguro | Secreto | Propietario |
-| --- | --- | --- | --- |
-| `NODE_ENV` | `development`, `test` o `production`; `development` | No | Plataforma |
-| `PORT` | entero 1–65535; `4000` | No | Plataforma |
-| `DATABASE_URL` | URL PostgreSQL del entorno | Sí | Datos |
-| `SERVER_PUBLIC_URL`, `WEB_ORIGIN` | URLs HTTPS públicas en producción | No | Plataforma |
-| `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID` | URL y ID registrados por entorno | No | Seguridad |
-| `OIDC_CLIENT_SECRET` | credencial del cliente OIDC | Sí | Seguridad |
-| `OIDC_REDIRECT_URI` | URL bajo `SERVER_PUBLIC_URL` | No | Seguridad |
-| `SESSION_ENCRYPTION_KEY` | clave aleatoria base64 de 32 bytes | Sí | Seguridad |
-| `SESSION_TTL_SECONDS` | entero 300–86400; `28800` | No | Seguridad |
-| `SESSION_RENEWAL_WINDOW_SECONDS` | entero 60–43200; `1800` | No | Seguridad |
-| `MAX_REQUEST_BODY_BYTES` | entero 1024–10485760; `1048576` | No | Backend |
-| `RATE_LIMIT_MAX`, `RATE_LIMIT_WINDOW_SECONDS` | enteros positivos; `120` y `60` | No | Seguridad |
-| `LOG_LEVEL` | `fatal` a `debug`; `info` | No | Plataforma |
-| `METRICS_TOKEN` | token aleatorio de al menos 32 caracteres | Sí | Observabilidad |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | URL del colector; vacío desactiva exportación local | No | Observabilidad |
-| `S3_ENDPOINT`, `S3_BUCKET` | URL privada y bucket por entorno | No | Plataforma |
-| `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | credenciales de mínimo privilegio | Sí | Plataforma |
-| `S3_PRESIGN_TTL_SECONDS` | entero 60–900; `300` | No | Seguridad |
-| `MAX_DOCUMENT_BYTES` | entero 1024–26214400; `10485760` | No | Backend |
-| `WORKER_ID`, `OUTBOX_POLL_INTERVAL_MS` | identificador y entero ms; `1000` | No | Plataforma |
-| `CLAMAV_HOST`, `CLAMAV_PORT`, `CLAMAV_TIMEOUT_MS` | host, puerto y ms; `127.0.0.1`, `3310`, `30000` | No | Plataforma |
+| Variable                                          | Tipo y valor seguro                                                | Secreto | Propietario    |
+| ------------------------------------------------- | ------------------------------------------------------------------ | ------- | -------------- |
+| `NODE_ENV`                                        | `development`, `test` o `production`; `development`                | No      | Plataforma     |
+| `PORT`                                            | entero 1–65535; `4000`                                             | No      | Plataforma     |
+| `DATABASE_URL`                                    | URL PostgreSQL del entorno                                         | Sí      | Datos          |
+| `SERVER_PUBLIC_URL`, `WEB_ORIGIN`                 | URLs HTTPS públicas en producción                                  | No      | Plataforma     |
+| `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`               | URL y ID registrados por entorno                                   | No      | Seguridad      |
+| `OIDC_CLIENT_SECRET`                              | credencial del cliente OIDC                                        | Sí      | Seguridad      |
+| `OIDC_REDIRECT_URI`                               | URL bajo `SERVER_PUBLIC_URL`                                       | No      | Seguridad      |
+| `SESSION_ENCRYPTION_KEY`                          | clave aleatoria base64 de 32 bytes                                 | Sí      | Seguridad      |
+| `SESSION_TTL_SECONDS`                             | entero 300–86400; `28800`                                          | No      | Seguridad      |
+| `SESSION_RENEWAL_WINDOW_SECONDS`                  | entero 60–43200; `1800`                                            | No      | Seguridad      |
+| `RECENT_AUTH_MAX_AGE_SECONDS`                     | entero 60–3600; `900`; antigüedad máxima para operaciones críticas | No      | Seguridad      |
+| `MAX_REQUEST_BODY_BYTES`                          | entero 1024–10485760; `1048576`                                    | No      | Backend        |
+| `RATE_LIMIT_MAX`, `RATE_LIMIT_WINDOW_SECONDS`     | enteros positivos; `120` y `60`                                    | No      | Seguridad      |
+| `LOG_LEVEL`                                       | `fatal` a `debug`; `info`                                          | No      | Plataforma     |
+| `METRICS_TOKEN`                                   | token aleatorio de al menos 32 caracteres                          | Sí      | Observabilidad |
+| `OTEL_EXPORTER_OTLP_ENDPOINT`                     | URL del colector; vacío desactiva exportación local                | No      | Observabilidad |
+| `S3_ENDPOINT`, `S3_BUCKET`                        | URL privada y bucket por entorno                                   | No      | Plataforma     |
+| `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`        | credenciales de mínimo privilegio                                  | Sí      | Plataforma     |
+| `S3_PRESIGN_TTL_SECONDS`                          | entero 60–900; `300`                                               | No      | Seguridad      |
+| `MAX_DOCUMENT_BYTES`                              | entero 1024–26214400; `10485760`                                   | No      | Backend        |
+| `WORKER_ID`, `OUTBOX_POLL_INTERVAL_MS`            | identificador y entero ms; `1000`                                  | No      | Plataforma     |
+| `CLAMAV_HOST`, `CLAMAV_PORT`, `CLAMAV_TIMEOUT_MS` | host, puerto y ms; `127.0.0.1`, `3310`, `30000`                    | No      | Plataforma     |
 
 ## Gestión y rotación
 

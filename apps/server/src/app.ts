@@ -1,6 +1,10 @@
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 
-import { AuthService } from "@aether/auth";
+import {
+  AuthService,
+  OidcProviderUnavailableError,
+  type AuthSession,
+} from "@aether/auth";
 import {
   createOperationalMetrics,
   telemetryTracer,
@@ -261,29 +265,32 @@ export async function buildServer(input: {
       ? 413
       : rateLimited
         ? 429
-        : error instanceof UnauthenticatedError
-          ? 401
-          : error instanceof IdempotencyKeyReusedError ||
-              error instanceof IdempotencyRequestInProgressError ||
-              error instanceof ProjectAlreadyExistsError
-            ? 409
-            : error instanceof CsrfError ||
-                error instanceof AccessDeniedError ||
-                error instanceof DocumentAccessDeniedError ||
-                error instanceof IdentityEmailRequiredError ||
-                (error instanceof OwnershipTransferError &&
-                  error.code === "ACTOR_MUST_BE_OWNER") ||
-                (error instanceof MembershipStatusError &&
-                  error.code === "actor_not_manager")
-              ? 403
-              : error instanceof ResourceNotFoundError ||
-                  error instanceof DocumentNotFoundError ||
-                  error instanceof OutboxDeadLetterNotFoundError
-                ? 404
-                : error instanceof InitiativeVersionConflictError ||
-                    error instanceof ProjectVersionConflictError
-                  ? 409
-                  : 400;
+        : error instanceof OidcProviderUnavailableError
+          ? 503
+          : error instanceof UnauthenticatedError
+            ? 401
+            : error instanceof IdempotencyKeyReusedError ||
+                error instanceof IdempotencyRequestInProgressError ||
+                error instanceof ProjectAlreadyExistsError
+              ? 409
+              : error instanceof CsrfError ||
+                  error instanceof RecentAuthenticationRequiredError ||
+                  error instanceof AccessDeniedError ||
+                  error instanceof DocumentAccessDeniedError ||
+                  error instanceof IdentityEmailRequiredError ||
+                  (error instanceof OwnershipTransferError &&
+                    error.code === "ACTOR_MUST_BE_OWNER") ||
+                  (error instanceof MembershipStatusError &&
+                    error.code === "actor_not_manager")
+                ? 403
+                : error instanceof ResourceNotFoundError ||
+                    error instanceof DocumentNotFoundError ||
+                    error instanceof OutboxDeadLetterNotFoundError
+                  ? 404
+                  : error instanceof InitiativeVersionConflictError ||
+                      error instanceof ProjectVersionConflictError
+                    ? 409
+                    : 400;
     if (input.securityAudit && (status === 401 || status === 403)) {
       const session = await input.auth.authenticate(
         request.cookies[sessionCookie],
@@ -303,6 +310,8 @@ export async function buildServer(input: {
         metadata: {},
       });
     }
+    if (error instanceof OidcProviderUnavailableError)
+      reply.header("Retry-After", "60");
     reply
       .code(status)
       .type("application/problem+json")
@@ -313,55 +322,63 @@ export async function buildServer(input: {
             ? "Carga demasiado grande"
             : status === 429
               ? "Demasiadas solicitudes"
-              : status === 401
-                ? "Sesión requerida"
-                : status === 403
-                  ? "Solicitud rechazada"
-                  : status === 404
-                    ? "Recurso no encontrado"
-                    : status === 409
-                      ? "Conflicto de versión"
-                      : "Solicitud inválida",
+              : status === 503
+                ? "Proveedor de identidad no disponible"
+                : status === 401
+                  ? "Sesión requerida"
+                  : error instanceof RecentAuthenticationRequiredError
+                    ? "Autenticación reciente requerida"
+                    : status === 403
+                      ? "Solicitud rechazada"
+                      : status === 404
+                        ? "Recurso no encontrado"
+                        : status === 409
+                          ? "Conflicto de versión"
+                          : "Solicitud inválida",
         status,
         code: payloadTooLarge
           ? "PAYLOAD_TOO_LARGE"
           : rateLimited
             ? "RATE_LIMITED"
-            : error instanceof UnauthenticatedError
-              ? "UNAUTHENTICATED"
-              : error instanceof IdempotencyKeyReusedError
-                ? "IDEMPOTENCY_KEY_REUSED"
-                : error instanceof IdempotencyRequestInProgressError
-                  ? "IDEMPOTENCY_REQUEST_IN_PROGRESS"
-                  : error instanceof ProjectAlreadyExistsError
-                    ? "CONFLICT"
-                    : error instanceof CsrfError ||
-                        error instanceof AccessDeniedError ||
-                        error instanceof DocumentAccessDeniedError ||
-                        error instanceof IdentityEmailRequiredError ||
-                        (error instanceof OwnershipTransferError &&
-                          error.code === "ACTOR_MUST_BE_OWNER") ||
-                        (error instanceof MembershipStatusError &&
-                          error.code === "actor_not_manager")
-                      ? "FORBIDDEN"
-                      : error instanceof ResourceNotFoundError ||
-                          error instanceof DocumentNotFoundError ||
-                          error instanceof OutboxDeadLetterNotFoundError
-                        ? "NOT_FOUND"
-                        : error instanceof InitiativeVersionConflictError ||
-                            error instanceof ProjectVersionConflictError
-                          ? "CONFLICT"
-                          : error instanceof InitiativeDomainError ||
-                              error instanceof DocumentValidationError ||
-                              error instanceof ProjectDomainError
-                            ? "PRECONDITION_FAILED"
-                            : error instanceof InvitationError
-                              ? "INVITATION_INVALID_OR_EXPIRED"
-                              : error instanceof OwnershipTransferError
-                                ? error.code
-                                : error instanceof MembershipStatusError
-                                  ? error.code.toUpperCase()
-                                  : "VALIDATION_ERROR",
+            : error instanceof OidcProviderUnavailableError
+              ? "OIDC_PROVIDER_UNAVAILABLE"
+              : error instanceof UnauthenticatedError
+                ? "UNAUTHENTICATED"
+                : error instanceof IdempotencyKeyReusedError
+                  ? "IDEMPOTENCY_KEY_REUSED"
+                  : error instanceof IdempotencyRequestInProgressError
+                    ? "IDEMPOTENCY_REQUEST_IN_PROGRESS"
+                    : error instanceof ProjectAlreadyExistsError
+                      ? "CONFLICT"
+                      : error instanceof RecentAuthenticationRequiredError
+                        ? "RECENT_AUTH_REQUIRED"
+                        : error instanceof CsrfError ||
+                            error instanceof AccessDeniedError ||
+                            error instanceof DocumentAccessDeniedError ||
+                            error instanceof IdentityEmailRequiredError ||
+                            (error instanceof OwnershipTransferError &&
+                              error.code === "ACTOR_MUST_BE_OWNER") ||
+                            (error instanceof MembershipStatusError &&
+                              error.code === "actor_not_manager")
+                          ? "FORBIDDEN"
+                          : error instanceof ResourceNotFoundError ||
+                              error instanceof DocumentNotFoundError ||
+                              error instanceof OutboxDeadLetterNotFoundError
+                            ? "NOT_FOUND"
+                            : error instanceof InitiativeVersionConflictError ||
+                                error instanceof ProjectVersionConflictError
+                              ? "CONFLICT"
+                              : error instanceof InitiativeDomainError ||
+                                  error instanceof DocumentValidationError ||
+                                  error instanceof ProjectDomainError
+                                ? "PRECONDITION_FAILED"
+                                : error instanceof InvitationError
+                                  ? "INVITATION_INVALID_OR_EXPIRED"
+                                  : error instanceof OwnershipTransferError
+                                    ? error.code
+                                    : error instanceof MembershipStatusError
+                                      ? error.code.toUpperCase()
+                                      : "VALIDATION_ERROR",
         correlationId: reply.getHeader("X-Correlation-ID"),
         instance: request.url,
       });
@@ -637,6 +654,7 @@ export async function buildServer(input: {
         input.auth,
         input.config,
       );
+      assertRecentAuthentication(session, input.config);
       const { organizationId } = z
         .object({ organizationId: z.string().uuid() })
         .parse(request.params);
@@ -661,6 +679,7 @@ export async function buildServer(input: {
         input.auth,
         input.config,
       );
+      assertRecentAuthentication(session, input.config);
       const { organizationId, actorId } = z
         .object({
           organizationId: z.string().uuid(),
@@ -687,6 +706,7 @@ export async function buildServer(input: {
         input.auth,
         input.config,
       );
+      assertRecentAuthentication(session, input.config);
       const { organizationId, actorId } = z
         .object({
           organizationId: z.string().uuid(),
@@ -1708,6 +1728,7 @@ export async function buildServer(input: {
         input.auth,
         input.config,
       );
+      assertRecentAuthentication(session, input.config);
       if (!input.outboxAdministration)
         throw new Error("Outbox administration service is not configured");
       const params = z
@@ -1955,8 +1976,19 @@ async function requireSession(
   return session;
 }
 
+function assertRecentAuthentication(
+  session: AuthSession,
+  config: ServerConfig,
+  now = new Date(),
+): void {
+  const maximumAgeMs = config.recentAuthMaxAgeSeconds * 1_000;
+  if (now.getTime() - session.createdAt.getTime() > maximumAgeMs)
+    throw new RecentAuthenticationRequiredError();
+}
+
 class CsrfError extends Error {}
 class UnauthenticatedError extends Error {}
+class RecentAuthenticationRequiredError extends Error {}
 class IdentityEmailRequiredError extends Error {}
 class IdempotencyKeyRequiredError extends Error {}
 class IdempotencyKeyReusedError extends Error {}

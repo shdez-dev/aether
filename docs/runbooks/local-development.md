@@ -15,6 +15,7 @@ Los datos locales deben ser ficticios y recreables. No se usan credenciales ni c
 
 - `GET http://127.0.0.1:4000/health` confirma que el proceso de la API está vivo.
 - `GET http://127.0.0.1:4000/ready` confirma además que PostgreSQL acepta una consulta. Un `503` significa que la API no debe recibir tráfico.
+- `GET http://127.0.0.1:4000/ready` valida PostgreSQL y el descubrimiento de Keycloak; úsalo para detectar una dependencia de identidad caída. `GET /health` sólo confirma que el proceso sigue vivo.
 - `GET http://127.0.0.1:4000/metrics` entrega contadores HTTP y del outbox; el worker incorpora profundidad pendiente/en proceso/dead-letter y antigüedad del pendiente más viejo. En producción exige `Authorization: Bearer $METRICS_TOKEN`; en desarrollo local se configura el token en `apps/server/.env` de igual forma.
 - `OTEL_EXPORTER_OTLP_ENDPOINT` es opcional y debe apuntar al endpoint de trazas (por ejemplo, `http://127.0.0.1:4318/v1/traces`). Si se define en server y worker, envía trazas OTLP que conectan solicitud, `correlationId`, evento outbox y su procesamiento. No se exportan cuerpos, cookies, tokens ni correos.
 - `pnpm verify` ejecuta formato, tipos, pruebas unitarias, integración PostgreSQL efímera y build. La misma puerta se ejecuta en GitHub Actions.

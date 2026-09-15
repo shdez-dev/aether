@@ -25,6 +25,12 @@ const configSchema = z.object({
     .min(60)
     .max(43_200)
     .default(1_800),
+  RECENT_AUTH_MAX_AGE_SECONDS: z.coerce
+    .number()
+    .int()
+    .min(60)
+    .max(3_600)
+    .default(900),
   MAX_REQUEST_BODY_BYTES: z.coerce
     .number()
     .int()
@@ -74,6 +80,7 @@ export type ServerConfig = Readonly<{
   sessionEncryptionKey: string;
   sessionTtlSeconds: number;
   sessionRenewalWindowSeconds: number;
+  recentAuthMaxAgeSeconds: number;
   maxRequestBodyBytes: number;
   rateLimitMax: number;
   rateLimitWindowSeconds: number;
@@ -114,6 +121,7 @@ export function readServerConfig(
     sessionEncryptionKey: value.SESSION_ENCRYPTION_KEY,
     sessionTtlSeconds: value.SESSION_TTL_SECONDS,
     sessionRenewalWindowSeconds: value.SESSION_RENEWAL_WINDOW_SECONDS,
+    recentAuthMaxAgeSeconds: value.RECENT_AUTH_MAX_AGE_SECONDS,
     maxRequestBodyBytes: value.MAX_REQUEST_BODY_BYTES,
     rateLimitMax: value.RATE_LIMIT_MAX,
     rateLimitWindowSeconds: value.RATE_LIMIT_WINDOW_SECONDS,

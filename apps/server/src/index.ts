@@ -187,6 +187,7 @@ const app = await buildServer({
   metrics,
   readinessCheck: async () => {
     await pool.query("SELECT 1");
+    await auth.checkIdentityProviderAvailability();
   },
 });
 try {

@@ -4,6 +4,7 @@ import {
   AuthService,
   createAesGcmCipher,
   hashOpaqueToken,
+  OidcProviderUnavailableError,
   type AuthSession,
   type AuthStore,
   type LoginTransaction,
@@ -108,6 +109,88 @@ const fakeOidc: OidcProvider = {
 };
 
 describe("AuthService", () => {
+  it("no conserva transacciones ni crea sesiones cuando OIDC no está disponible", async () => {
+    const store = new InMemoryAuthStore();
+    const unavailableOidc: OidcProvider = {
+      async buildAuthorizationUrl() {
+        throw new OidcProviderUnavailableError();
+      },
+      async exchangeAuthorizationCode() {
+        throw new OidcProviderUnavailableError();
+      },
+    };
+    const auth = new AuthService({
+      store,
+      cipher: createAesGcmCipher(testSessionEncryptionKey),
+      oidc: unavailableOidc,
+      issuer: "https://identity.example",
+      sessionTtlSeconds: 3600,
+      sessionRenewalWindowSeconds: 600,
+    });
+    await expect(auth.beginLogin()).rejects.toBeInstanceOf(
+      OidcProviderUnavailableError,
+    );
+    expect(store.transactions.size).toBe(0);
+    expect(store.sessions.size).toBe(0);
+  });
+
+  it("expone la indisponibilidad del proveedor para readiness sin crear estado", async () => {
+    const store = new InMemoryAuthStore();
+    const auth = new AuthService({
+      store,
+      cipher: createAesGcmCipher(testSessionEncryptionKey),
+      oidc: {
+        async checkAvailability() {
+          throw new OidcProviderUnavailableError();
+        },
+        async buildAuthorizationUrl({ state }) {
+          return `https://identity.example/authorize?state=${state}`;
+        },
+        async exchangeAuthorizationCode() {
+          return { subject: "actor-123", email: "actor@example.test" };
+        },
+      },
+      issuer: "https://identity.example",
+      sessionTtlSeconds: 3600,
+      sessionRenewalWindowSeconds: 600,
+    });
+    await expect(
+      auth.checkIdentityProviderAvailability(),
+    ).rejects.toBeInstanceOf(OidcProviderUnavailableError);
+    expect(store.transactions.size).toBe(0);
+    expect(store.sessions.size).toBe(0);
+  });
+
+  it("consume el intento y no crea sesión si OIDC falla durante el canje", async () => {
+    const store = new InMemoryAuthStore();
+    const auth = new AuthService({
+      store,
+      cipher: createAesGcmCipher(testSessionEncryptionKey),
+      oidc: {
+        async buildAuthorizationUrl({ state }) {
+          return `https://identity.example/authorize?state=${state}`;
+        },
+        async exchangeAuthorizationCode() {
+          throw new OidcProviderUnavailableError();
+        },
+      },
+      issuer: "https://identity.example",
+      sessionTtlSeconds: 3600,
+      sessionRenewalWindowSeconds: 600,
+    });
+    const started = await auth.beginLogin();
+    const state = new URL(started.authorizationUrl).searchParams.get("state")!;
+    await expect(
+      auth.completeLogin({
+        transactionHandle: started.transactionHandle,
+        state,
+        callbackUrl: `https://app.example/auth/callback?code=code&state=${state}`,
+      }),
+    ).rejects.toBeInstanceOf(OidcProviderUnavailableError);
+    expect(store.transactions.size).toBe(0);
+    expect(store.sessions.size).toBe(0);
+  });
+
   it("emite una sesión opaca, impide replay y renueva o revoca en el servidor", async () => {
     const store = new InMemoryAuthStore();
     let now = new Date("2026-09-08T12:00:00.000Z");

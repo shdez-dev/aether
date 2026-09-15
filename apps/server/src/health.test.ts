@@ -26,6 +26,7 @@ const config: ServerConfig = {
   sessionEncryptionKey: testSessionEncryptionKey,
   sessionTtlSeconds: 3600,
   sessionRenewalWindowSeconds: 600,
+  recentAuthMaxAgeSeconds: 900,
   maxRequestBodyBytes: 1_024,
   rateLimitMax: 120,
   rateLimitWindowSeconds: 60,

@@ -88,6 +88,7 @@ export interface SecretCipher {
 }
 
 export interface OidcProvider {
+  checkAvailability?(): Promise<void>;
   buildAuthorizationUrl(input: {
     state: string;
     nonce: string;
@@ -138,6 +139,11 @@ export class AuthService {
     const state = randomOpaqueToken();
     const nonce = randomOpaqueToken();
     const codeVerifier = randomOpaqueToken();
+    const authorizationUrl = await this.options.oidc.buildAuthorizationUrl({
+      state,
+      nonce,
+      codeChallenge: calculateCodeChallenge(codeVerifier),
+    });
     await this.options.store.createLoginTransaction({
       id: randomUUID(),
       handleHash: hashOpaqueToken(handle),
@@ -148,12 +154,12 @@ export class AuthService {
     });
     return {
       transactionHandle: handle,
-      authorizationUrl: await this.options.oidc.buildAuthorizationUrl({
-        state,
-        nonce,
-        codeChallenge: calculateCodeChallenge(codeVerifier),
-      }),
+      authorizationUrl,
     };
+  }
+
+  async checkIdentityProviderAvailability(): Promise<void> {
+    await this.options.oidc.checkAvailability?.();
   }
 
   async completeLogin(input: {
@@ -302,7 +308,9 @@ export class AuthService {
       });
   }
 
-  private async recordSessionAudit(event: AuthSessionAuditEvent): Promise<void> {
+  private async recordSessionAudit(
+    event: AuthSessionAuditEvent,
+  ): Promise<void> {
     if (this.options.audit) await this.options.audit.recordSessionAudit(event);
   }
 }
@@ -313,6 +321,14 @@ export class AuthenticationError extends Error {
   ) {
     super(code);
     this.name = "AuthenticationError";
+  }
+}
+
+/** El proveedor no puede atender un flujo de autenticación en este momento. */
+export class OidcProviderUnavailableError extends Error {
+  constructor() {
+    super("OIDC_PROVIDER_UNAVAILABLE");
+    this.name = "OidcProviderUnavailableError";
   }
 }
 
@@ -369,47 +385,105 @@ export function createKeycloakOidcProvider(config: {
   redirectUri: string;
   allowInsecureRequests?: boolean;
 }): OidcProvider {
-  const discovery = oidc.discovery(
-    new URL(config.issuerUrl),
-    config.clientId,
-    config.clientSecret,
-    undefined,
-    config.allowInsecureRequests
-      ? { execute: [oidc.allowInsecureRequests] }
-      : undefined,
-  );
+  let discovery: ReturnType<typeof oidc.discovery> | undefined;
+  const discover = async () => {
+    if (!discovery) {
+      const pending = oidc.discovery(
+        new URL(config.issuerUrl),
+        config.clientId,
+        config.clientSecret,
+        undefined,
+        config.allowInsecureRequests
+          ? { execute: [oidc.allowInsecureRequests] }
+          : undefined,
+      );
+      discovery = pending;
+      try {
+        return await pending;
+      } catch (error) {
+        if (discovery === pending) discovery = undefined;
+        throw error;
+      }
+    }
+    return discovery;
+  };
   return {
+    async checkAvailability() {
+      try {
+        await discover();
+      } catch (error) {
+        throw oidcProviderError(error);
+      }
+    },
     async buildAuthorizationUrl(input) {
-      const client = await discovery;
-      return oidc.buildAuthorizationUrl(client, {
-        redirect_uri: config.redirectUri,
-        response_type: "code",
-        scope: "openid profile email",
-        state: input.state,
-        nonce: input.nonce,
-        code_challenge: input.codeChallenge,
-        code_challenge_method: "S256",
-      }).href;
+      try {
+        const client = await discover();
+        return oidc.buildAuthorizationUrl(client, {
+          redirect_uri: config.redirectUri,
+          response_type: "code",
+          scope: "openid profile email",
+          state: input.state,
+          nonce: input.nonce,
+          code_challenge: input.codeChallenge,
+          code_challenge_method: "S256",
+        }).href;
+      } catch (error) {
+        throw oidcProviderError(error);
+      }
     },
     async exchangeAuthorizationCode(input) {
-      const client = await discovery;
-      const tokens = await oidc.authorizationCodeGrant(
-        client,
-        new URL(input.callbackUrl),
-        {
-          expectedState: input.state,
-          expectedNonce: input.nonce,
-          pkceCodeVerifier: input.codeVerifier,
-          idTokenExpected: true,
-        },
-      );
-      const subject = tokens.claims()?.sub;
-      if (typeof subject !== "string" || subject.length === 0)
-        throw new Error("OIDC subject missing");
-      const email = tokens.claims()?.email;
-      return { subject, email: typeof email === "string" ? email : null };
+      try {
+        const client = await discover();
+        const tokens = await oidc.authorizationCodeGrant(
+          client,
+          new URL(input.callbackUrl),
+          {
+            expectedState: input.state,
+            expectedNonce: input.nonce,
+            pkceCodeVerifier: input.codeVerifier,
+            idTokenExpected: true,
+          },
+        );
+        const subject = tokens.claims()?.sub;
+        if (typeof subject !== "string" || subject.length === 0)
+          throw new Error("OIDC subject missing");
+        const email = tokens.claims()?.email;
+        return { subject, email: typeof email === "string" ? email : null };
+      } catch (error) {
+        throw oidcProviderError(error);
+      }
     },
   };
+}
+
+function oidcProviderError(error: unknown): unknown {
+  return isOidcConnectivityError(error)
+    ? new OidcProviderUnavailableError()
+    : error;
+}
+
+function isOidcConnectivityError(error: unknown): boolean {
+  const networkCodes = new Set([
+    "ECONNREFUSED",
+    "ECONNRESET",
+    "EHOSTUNREACH",
+    "ENETUNREACH",
+    "ENOTFOUND",
+    "ETIMEDOUT",
+    "UND_ERR_CONNECT_TIMEOUT",
+    "UND_ERR_HEADERS_TIMEOUT",
+  ]);
+  let current = error;
+  for (let depth = 0; depth < 4; depth += 1) {
+    if (!current || typeof current !== "object") return false;
+    const details = current as { code?: unknown; cause?: unknown };
+    if (typeof details.code === "string" && networkCodes.has(details.code))
+      return true;
+    if (current instanceof TypeError && current.message === "fetch failed")
+      return true;
+    current = details.cause;
+  }
+  return false;
 }
 
 function addSeconds(value: Date, seconds: number): Date {
