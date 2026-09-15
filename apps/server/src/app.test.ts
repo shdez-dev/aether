@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   AuthService,
   createAesGcmCipher,
+  hashOpaqueToken,
   type AuthSession,
   type AuthStore,
   type LoginTransaction,
@@ -171,8 +172,9 @@ function responseCookies(response: {
 
 describe("HTTP authentication boundary", () => {
   it("uses HttpOnly opaque cookies and requires Origin plus double-submit CSRF on logout", async () => {
+    const authStore = new InMemoryAuthStore();
     const auth = new AuthService({
-      store: new InMemoryAuthStore(),
+      store: authStore,
       cipher: createAesGcmCipher(config.sessionEncryptionKey),
       oidc,
       issuer: config.oidcIssuerUrl,
@@ -392,8 +394,9 @@ describe("HTTP authentication boundary", () => {
       ids: { next: () => crypto.randomUUID() },
       clock: { now: () => new Date() },
     });
+    const authStore = new InMemoryAuthStore();
     const auth = new AuthService({
-      store: new InMemoryAuthStore(),
+      store: authStore,
       cipher: createAesGcmCipher(config.sessionEncryptionKey),
       oidc,
       issuer: config.oidcIssuerUrl,
@@ -477,6 +480,57 @@ describe("HTTP authentication boundary", () => {
     });
     expect(organizationResponse.statusCode).toBe(201);
     const organization = organizationResponse.json() as { id: string };
+    const suspendedInvitation = await tenants.invite({
+      actorId: "actor-123",
+      organizationId: organization.id,
+      email: "suspended-api@example.test",
+      organizationRole: "member",
+      workspaceIds: [],
+      workspaceRole: "member",
+      expiresInDays: 7,
+    });
+    await tenants.acceptInvitation({
+      token: suspendedInvitation.deliveryToken,
+      actorId: "suspended-api",
+      actorEmail: "suspended-api@example.test",
+    });
+    await tenants.changeMembershipStatus({
+      actorId: "actor-123",
+      organizationId: organization.id,
+      targetActorId: "suspended-api",
+      status: "suspended",
+      correlationId: crypto.randomUUID(),
+    });
+    const suspendedToken = "suspended-session-token";
+    const now = new Date();
+    await authStore.createSession({
+      id: crypto.randomUUID(),
+      tokenHash: hashOpaqueToken(suspendedToken),
+      actorId: "suspended-api",
+      actorEmail: "suspended-api@example.test",
+      issuer: config.oidcIssuerUrl,
+      createdAt: now,
+      lastSeenAt: now,
+      expiresAt: new Date(now.getTime() + 3_600_000),
+      revokedAt: null,
+    });
+    const suspendedAccess = await app.inject({
+      method: "GET",
+      url: `/v1/organizations/${organization.id}/capabilities`,
+      headers: { cookie: `aether_session=${suspendedToken}` },
+    });
+    expect(suspendedAccess.statusCode).toBe(200);
+    expect(suspendedAccess.json()).toMatchObject({
+      canReadOrganization: false,
+      canReadWorkspace: false,
+      canManageOrganization: false,
+    });
+    const suspendedWorkspaceList = await app.inject({
+      method: "GET",
+      url: `/v1/organizations/${organization.id}/workspaces`,
+      headers: { cookie: `aether_session=${suspendedToken}` },
+    });
+    expect(suspendedWorkspaceList.statusCode).toBe(403);
     metricsStore.setSnapshot(organization.id, {
       calculationVersion: "2026-09-v1",
       timezone: "UTC",

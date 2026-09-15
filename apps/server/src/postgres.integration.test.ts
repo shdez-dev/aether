@@ -66,7 +66,7 @@ if (containerRuntimeAvailable || requireContainerRuntime) {
   });
 }
 
-describe("PostgreSQL integration", () => {
+describe.sequential("PostgreSQL integration", () => {
   runPostgresIntegration(
     "applies every migration to a clean database and reapplying is idempotent",
     async () => {
