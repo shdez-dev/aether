@@ -103,6 +103,19 @@ class InMemoryAuthStore implements AuthStore {
     return sessions.filter((session) => session.id !== input.exceptSessionId)
       .length;
   }
+  async rotateSession(input: {
+    actorId: string;
+    sessionId: string;
+    replacement: AuthSession;
+    now: Date;
+  }): Promise<boolean> {
+    const current = this.sessions.get(input.sessionId);
+    if (!current || current.actorId !== input.actorId || current.revokedAt)
+      return false;
+    this.sessions.set(current.id, { ...current, revokedAt: input.now });
+    this.sessions.set(input.replacement.id, input.replacement);
+    return true;
+  }
   async createLoginTransaction(transaction: LoginTransaction): Promise<void> {
     this.transactions.set(transaction.handleHash, transaction);
   }
@@ -286,11 +299,45 @@ describe("HTTP authentication boundary", () => {
       workspaceRole: "viewer",
       expiresInDays: 7,
     });
-    await tenants.acceptInvitation({
-      token: invitation.deliveryToken,
+    const originalViewerToken = "viewer-session-token";
+    const originalViewerCsrf = "viewer-csrf-token";
+    await createAuthenticatedSession(authStore, {
+      token: originalViewerToken,
       actorId: "viewer",
       actorEmail: "viewer@example.test",
     });
+    const invitationAccepted = await app.inject({
+      method: "POST",
+      url: "/v1/invitations/accept",
+      headers: {
+        origin: config.webOrigin,
+        "x-csrf-token": originalViewerCsrf,
+        cookie: `aether_session=${originalViewerToken}; aether_csrf=${originalViewerCsrf}`,
+      },
+      payload: { token: invitation.deliveryToken },
+    });
+    expect(invitationAccepted.statusCode).toBe(200);
+    const rotatedCookies = responseCookies(invitationAccepted);
+    const rotatedSessionCookie = [...rotatedCookies]
+      .reverse()
+      .find((cookie) => cookie.startsWith("aether_session="));
+    if (!rotatedSessionCookie)
+      throw new Error("Rotated session cookie not found");
+    const viewerToken = rotatedSessionCookie
+      .split(";")[0]!
+      .slice("aether_session=".length);
+    const viewerCsrf = cookieValue(rotatedCookies, "aether_csrf");
+    expect(viewerToken).not.toBe(originalViewerToken);
+    expect(viewerCsrf).not.toBe(originalViewerCsrf);
+    expect(
+      (
+        await app.inject({
+          method: "GET",
+          url: "/auth/session",
+          headers: { cookie: `aether_session=${originalViewerToken}` },
+        })
+      ).statusCode,
+    ).toBe(401);
     const otherOrganization = await tenants.createOrganization({
       actorId: "other-owner",
       actorEmail: "other-owner@example.test",
@@ -303,13 +350,6 @@ describe("HTTP authentication boundary", () => {
       organizationId: otherOrganization.id,
       name: "Workspace B",
       mode: "team",
-    });
-    const viewerToken = "viewer-session-token";
-    const viewerCsrf = "viewer-csrf-token";
-    await createAuthenticatedSession(authStore, {
-      token: viewerToken,
-      actorId: "viewer",
-      actorEmail: "viewer@example.test",
     });
     const viewerCookie = `aether_session=${viewerToken}; aether_csrf=${viewerCsrf}`;
     const mutationHeaders = {

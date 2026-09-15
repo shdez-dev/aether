@@ -530,6 +530,16 @@ describe.sequential("PostgreSQL integration", () => {
       expect(
         (await auth.authenticate(first.sessionToken))?.expiresAt.toISOString(),
       ).toBe("2026-09-09T13:55:00.000Z");
+      const firstSession = await auth.authenticate(first.sessionToken);
+      if (!firstSession) throw new Error("First session should be active");
+      const rotated = await auth.rotateSession({
+        currentSession: firstSession,
+        correlationId: randomUUID(),
+      });
+      await expect(auth.authenticate(first.sessionToken)).resolves.toBeNull();
+      await expect(
+        auth.authenticate(rotated.sessionToken),
+      ).resolves.toMatchObject({ createdAt: first.session.createdAt });
       const second = await login();
       const listed = await auth.listSessions(actorId, second.session.id);
       expect(listed).toHaveLength(2);
@@ -541,11 +551,11 @@ describe.sequential("PostgreSQL integration", () => {
       expect(
         await auth.revokeSession({
           actorId,
-          sessionId: first.session.id,
+          sessionId: rotated.session.id,
           correlationId: randomUUID(),
         }),
       ).toBe(true);
-      await expect(auth.authenticate(first.sessionToken)).resolves.toBeNull();
+      await expect(auth.authenticate(rotated.sessionToken)).resolves.toBeNull();
       const third = await login();
       expect(
         await auth.revokeOtherSessions({
@@ -562,6 +572,7 @@ describe.sequential("PostgreSQL integration", () => {
         [actorId],
       );
       expect(events.rows).toEqual([
+        { action: "auth.session_rotated.v1" },
         { action: "auth.session_revoked.v1" },
         { action: "auth.sessions_revoked_others.v1" },
       ]);

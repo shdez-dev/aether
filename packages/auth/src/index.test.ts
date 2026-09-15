@@ -79,6 +79,19 @@ class InMemoryAuthStore implements AuthStore {
     return sessions.filter((session) => session.id !== input.exceptSessionId)
       .length;
   }
+  async rotateSession(input: {
+    actorId: string;
+    sessionId: string;
+    replacement: AuthSession;
+    now: Date;
+  }): Promise<boolean> {
+    const current = this.sessions.get(input.sessionId);
+    if (!current || current.actorId !== input.actorId || current.revokedAt)
+      return false;
+    this.sessions.set(current.id, { ...current, revokedAt: input.now });
+    this.sessions.set(input.replacement.id, input.replacement);
+    return true;
+  }
   async createLoginTransaction(transaction: LoginTransaction): Promise<void> {
     this.transactions.set(transaction.handleHash, transaction);
   }
@@ -230,5 +243,41 @@ describe("AuthService", () => {
     ).toBe("2026-09-08T13:55:00.000Z");
     await auth.logout(completed.sessionToken);
     await expect(auth.authenticate(completed.sessionToken)).resolves.toBeNull();
+  });
+
+  it("rota el token al elevar privilegios sin alterar la antigüedad de autenticación", async () => {
+    const store = new InMemoryAuthStore();
+    const authenticatedAt = new Date("2026-09-08T12:00:00.000Z");
+    let now = authenticatedAt;
+    const auth = new AuthService({
+      store,
+      cipher: createAesGcmCipher(testSessionEncryptionKey),
+      oidc: fakeOidc,
+      issuer: "https://identity.example",
+      sessionTtlSeconds: 3600,
+      sessionRenewalWindowSeconds: 600,
+      now: () => now,
+    });
+    const started = await auth.beginLogin();
+    const state = new URL(started.authorizationUrl).searchParams.get("state")!;
+    const completed = await auth.completeLogin({
+      transactionHandle: started.transactionHandle,
+      state,
+      callbackUrl: `https://app.example/auth/callback?code=code&state=${state}`,
+    });
+    now = new Date("2026-09-08T12:20:00.000Z");
+    const rotated = await auth.rotateSession({
+      currentSession: completed.session,
+      correlationId: "00000000-0000-4000-8000-000000000001",
+    });
+    expect(rotated.sessionToken).not.toBe(completed.sessionToken);
+    await expect(auth.authenticate(completed.sessionToken)).resolves.toBeNull();
+    await expect(
+      auth.authenticate(rotated.sessionToken),
+    ).resolves.toMatchObject({
+      id: rotated.session.id,
+      createdAt: authenticatedAt,
+      lastSeenAt: now,
+    });
   });
 });

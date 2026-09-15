@@ -3,6 +3,7 @@ import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   AuthService,
   OidcProviderUnavailableError,
+  randomOpaqueToken,
   type AuthSession,
 } from "@aether/auth";
 import {
@@ -888,6 +889,20 @@ export async function buildServer(input: {
       actorEmail: requireActorEmail(session.actorEmail),
       correlationId: correlationId(reply),
     });
+    const rotated = await input.auth.rotateSession({
+      currentSession: session,
+      correlationId: correlationId(reply),
+    });
+    reply.setCookie(
+      sessionCookie,
+      rotated.sessionToken,
+      sessionCookieOptions(input.config),
+    );
+    reply.setCookie(
+      csrfCookie,
+      randomOpaqueToken(),
+      csrfCookieOptions(input.config),
+    );
     return reply
       .code(200)
       .send({ ...invitation, expiresAt: invitation.expiresAt.toISOString() });

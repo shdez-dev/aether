@@ -40,7 +40,8 @@ export type AuthSessionAuditEvent = Readonly<{
   action:
     | "auth.session_logged_out.v1"
     | "auth.session_revoked.v1"
-    | "auth.sessions_revoked_others.v1";
+    | "auth.sessions_revoked_others.v1"
+    | "auth.session_rotated.v1";
   actorId: string;
   targetSessionId: string | null;
   correlationId: string;
@@ -70,6 +71,12 @@ export interface AuthStore {
     exceptSessionId: string;
     now: Date;
   }): Promise<number>;
+  rotateSession(input: {
+    actorId: string;
+    sessionId: string;
+    replacement: AuthSession;
+    now: Date;
+  }): Promise<boolean>;
   createLoginTransaction(transaction: LoginTransaction): Promise<void>;
   consumeLoginTransaction(input: {
     handleHash: string;
@@ -284,6 +291,44 @@ export class AuthService {
     return revoked;
   }
 
+  async rotateSession(input: {
+    currentSession: AuthSession;
+    correlationId: string;
+  }): Promise<LoginCompletion> {
+    const now = this.now();
+    const sessionToken = randomOpaqueToken();
+    const session: AuthSession = {
+      id: randomUUID(),
+      tokenHash: hashOpaqueToken(sessionToken),
+      actorId: input.currentSession.actorId,
+      actorEmail: input.currentSession.actorEmail,
+      issuer: input.currentSession.issuer,
+      // createdAt representa la autenticación OIDC más reciente, no la emisión
+      // del token. Así una rotación por elevación no satisface recent-auth.
+      createdAt: input.currentSession.createdAt,
+      lastSeenAt: now,
+      expiresAt: addSeconds(now, this.options.sessionTtlSeconds),
+      revokedAt: null,
+    };
+    const rotated = await this.options.store.rotateSession({
+      actorId: input.currentSession.actorId,
+      sessionId: input.currentSession.id,
+      replacement: session,
+      now,
+    });
+    if (!rotated) throw new AuthenticationError("SESSION_NOT_ACTIVE");
+    await this.recordSessionAudit({
+      id: randomUUID(),
+      action: "auth.session_rotated.v1",
+      actorId: session.actorId,
+      targetSessionId: input.currentSession.id,
+      correlationId: input.correlationId,
+      occurredAt: now,
+      payload: { reason: "privilege_elevation" },
+    });
+    return { sessionToken, session };
+  }
+
   async logout(
     sessionToken: string | undefined,
     correlationId: string = randomUUID(),
@@ -317,7 +362,8 @@ export class AuthService {
 
 export class AuthenticationError extends Error {
   constructor(
-    public readonly code: "INVALID_LOGIN_TRANSACTION" | "CSRF_REJECTED",
+    public readonly code:
+      "INVALID_LOGIN_TRANSACTION" | "CSRF_REJECTED" | "SESSION_NOT_ACTIVE",
   ) {
     super(code);
     this.name = "AuthenticationError";

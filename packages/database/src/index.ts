@@ -162,6 +162,50 @@ export class PostgresAuthStore implements AuthStore, AuthSessionAuditStore {
     return result.rowCount ?? 0;
   }
 
+  async rotateSession(input: {
+    actorId: string;
+    sessionId: string;
+    replacement: AuthSession;
+    now: Date;
+  }): Promise<boolean> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const revoked = await client.query(
+        `UPDATE auth_sessions SET revoked_at = $3
+         WHERE id = $1 AND actor_id = $2 AND revoked_at IS NULL
+         RETURNING id`,
+        [input.sessionId, input.actorId, input.now],
+      );
+      if ((revoked.rowCount ?? 0) !== 1) {
+        await client.query("ROLLBACK");
+        return false;
+      }
+      await client.query(
+        `INSERT INTO auth_sessions (id, token_hash, actor_id, actor_email, issuer, created_at, last_seen_at, expires_at, revoked_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [
+          input.replacement.id,
+          input.replacement.tokenHash,
+          input.replacement.actorId,
+          input.replacement.actorEmail,
+          input.replacement.issuer,
+          input.replacement.createdAt,
+          input.replacement.lastSeenAt,
+          input.replacement.expiresAt,
+          input.replacement.revokedAt,
+        ],
+      );
+      await client.query("COMMIT");
+      return true;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   async recordSessionAudit(event: AuthSessionAuditEvent): Promise<void> {
     await this.pool.query(
       `INSERT INTO auth_session_audit_events
