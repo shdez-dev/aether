@@ -232,6 +232,27 @@ export class InMemoryTenantStore implements TenantStore {
       return "replacement_not_active";
     return "reassigned";
   }
+  async archiveWorkspace(input: {
+    organizationId: string;
+    workspaceId: string;
+    actorId: string;
+    auditEventId: string;
+    correlationId: string;
+    occurredAt: Date;
+  }): Promise<"archived" | "not_found" | "already_archived"> {
+    const workspace = this.workspaces.get(input.workspaceId);
+    if (!workspace || workspace.organizationId !== input.organizationId)
+      return "not_found";
+    if (workspace.status === "archived") return "already_archived";
+    this.workspaces.set(input.workspaceId, {
+      ...workspace,
+      status: "archived",
+      archivedAt: input.occurredAt,
+      archivedByActorId: input.actorId,
+      version: workspace.version + 1,
+    });
+    return "archived";
+  }
 
   private organizationKey(actorId: string, organizationId: string): string {
     return `${actorId}:${organizationId}`;

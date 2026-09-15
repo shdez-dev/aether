@@ -401,7 +401,7 @@ export class PostgresTenantStore implements TenantStore {
 
   async findWorkspace(workspaceId: string): Promise<Workspace | null> {
     const result = await this.pool.query<WorkspaceRow>(
-      "SELECT id, organization_id, name, mode, version FROM workspaces WHERE id = $1",
+      "SELECT id, organization_id, name, mode, version, status, archived_at, archived_by_actor_id FROM workspaces WHERE id = $1",
       [workspaceId],
     );
     return result.rows[0] ? toWorkspace(result.rows[0]) : null;
@@ -418,7 +418,7 @@ export class PostgresTenantStore implements TenantStore {
     organizationId: string;
   }): Promise<readonly Workspace[]> {
     const result = await this.pool.query<WorkspaceRow>(
-      `SELECT workspaces.id, workspaces.organization_id, workspaces.name, workspaces.mode, workspaces.version FROM workspaces LEFT JOIN workspace_memberships ON workspace_memberships.workspace_id = workspaces.id WHERE workspaces.organization_id = $1 AND EXISTS (SELECT 1 FROM organization_memberships WHERE organization_id = $1 AND actor_id = $2 AND status = 'active') AND (EXISTS (SELECT 1 FROM organization_memberships WHERE organization_id = $1 AND actor_id = $2 AND status = 'active' AND role IN ('owner','admin')) OR workspace_memberships.actor_id = $2) ORDER BY workspaces.name`,
+      `SELECT workspaces.id, workspaces.organization_id, workspaces.name, workspaces.mode, workspaces.version, workspaces.status, workspaces.archived_at, workspaces.archived_by_actor_id FROM workspaces LEFT JOIN workspace_memberships ON workspace_memberships.workspace_id = workspaces.id WHERE workspaces.organization_id = $1 AND EXISTS (SELECT 1 FROM organization_memberships WHERE organization_id = $1 AND actor_id = $2 AND status = 'active') AND (EXISTS (SELECT 1 FROM organization_memberships WHERE organization_id = $1 AND actor_id = $2 AND status = 'active' AND role IN ('owner','admin')) OR workspace_memberships.actor_id = $2) ORDER BY workspaces.name`,
       [input.organizationId, input.actorId],
     );
     return result.rows.map(toWorkspace);
@@ -792,6 +792,65 @@ export class PostgresTenantStore implements TenantStore {
       client.release();
     }
   }
+
+  async archiveWorkspace(input: {
+    organizationId: string;
+    workspaceId: string;
+    actorId: string;
+    auditEventId: string;
+    correlationId: string;
+    occurredAt: Date;
+  }): Promise<"archived" | "not_found" | "already_archived"> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await client.query<{ status: "active" | "archived" }>(
+        `SELECT status FROM workspaces WHERE id = $1 AND organization_id = $2 FOR UPDATE`,
+        [input.workspaceId, input.organizationId],
+      );
+      const workspace = result.rows[0];
+      if (!workspace) {
+        await client.query("ROLLBACK");
+        return "not_found";
+      }
+      if (workspace.status === "archived") {
+        await client.query("ROLLBACK");
+        return "already_archived";
+      }
+      await client.query(
+        `UPDATE workspaces
+         SET status = 'archived', archived_at = $3, archived_by_actor_id = $4, version = version + 1
+         WHERE id = $1 AND organization_id = $2`,
+        [
+          input.workspaceId,
+          input.organizationId,
+          input.occurredAt,
+          input.actorId,
+        ],
+      );
+      await client.query(
+        `INSERT INTO workspace_audit_events
+         (id, workspace_id, organization_id, actor_id, event_type, correlation_id, occurred_at, payload)
+         VALUES ($1, $2, $3, $4, 'workspace.archived.v1', $5, $6, $7)`,
+        [
+          input.auditEventId,
+          input.workspaceId,
+          input.organizationId,
+          input.actorId,
+          input.correlationId,
+          input.occurredAt,
+          {},
+        ],
+      );
+      await client.query("COMMIT");
+      return "archived";
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
 }
 
 type WorkspaceRow = {
@@ -800,6 +859,9 @@ type WorkspaceRow = {
   name: string;
   mode: Workspace["mode"];
   version: number;
+  status: Workspace["status"];
+  archived_at: Date | null;
+  archived_by_actor_id: string | null;
 };
 type InvitationRow = {
   id: string;
@@ -817,6 +879,9 @@ function toWorkspace(row: WorkspaceRow): Workspace {
     name: row.name,
     mode: row.mode,
     version: row.version,
+    status: row.status,
+    archivedAt: row.archived_at,
+    archivedByActorId: row.archived_by_actor_id,
   };
 }
 function toInvitation(row: InvitationRow): Invitation {

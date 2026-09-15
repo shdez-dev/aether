@@ -14,6 +14,7 @@ import type { InitiativeAuditStore, InitiativeStore } from "./initiatives.js";
 import { InitiativeVersionConflictError } from "./initiatives.js";
 import {
   AccessDeniedError,
+  assertWorkspaceWritable,
   ResourceNotFoundError,
   type TenantStore,
 } from "./tenancy.js";
@@ -144,6 +145,10 @@ export class EvaluationService {
       input.initiativeId,
       input.organizationId,
     );
+    await assertWorkspaceWritable(
+      this.dependencies.tenancy,
+      initiative.workspaceId,
+    );
     if (initiative.status !== "presented")
       throw new EvaluationDomainError("EVALUATION_INCOMPLETE");
     if (initiative.version !== input.expectedVersion)
@@ -214,6 +219,10 @@ export class EvaluationService {
     const initiative = await this.requireInitiative(
       input.initiativeId,
       input.organizationId,
+    );
+    await assertWorkspaceWritable(
+      this.dependencies.tenancy,
+      initiative.workspaceId,
     );
     if (initiative.status !== "under_review")
       throw new EvaluationDomainError("EVALUATION_INCOMPLETE");

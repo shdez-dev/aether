@@ -7,7 +7,7 @@ import {
 } from "@aether/domain";
 import type { DurableDomainEvent, DurableEventHandler } from "./outbox.js";
 
-import type { TenantStore } from "./tenancy.js";
+import { assertWorkspaceWritable, type TenantStore } from "./tenancy.js";
 
 export type DocumentResource = Readonly<{
   organizationId: string;
@@ -596,6 +596,10 @@ export class DocumentService {
     resourceId: string,
   ) {
     const resource = await this.requireResource(resourceType, resourceId);
+    await assertWorkspaceWritable(
+      this.dependencies.tenancy,
+      resource.workspaceId,
+    );
     await this.assertWrite(
       actorId,
       resource.organizationId,
@@ -649,6 +653,7 @@ export class DocumentService {
     organizationId: string,
     workspaceId: string,
   ) {
+    await assertWorkspaceWritable(this.dependencies.tenancy, workspaceId);
     if (
       !canCreateInitiative(
         await this.roles(actorId, organizationId, workspaceId),

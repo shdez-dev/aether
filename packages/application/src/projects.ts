@@ -14,6 +14,7 @@ import {
 
 import {
   AccessDeniedError,
+  assertWorkspaceWritable,
   ResourceNotFoundError,
   type TenantStore,
 } from "./tenancy.js";
@@ -119,6 +120,10 @@ export class ProjectService {
       decision.outcome !== "approved"
     )
       throw new ProjectDomainError("INVALID_PROJECT_TRANSITION");
+    await assertWorkspaceWritable(
+      this.dependencies.tenancy,
+      initiative.workspaceId,
+    );
     if (await this.dependencies.projects.findByInitiative(initiative.id))
       throw new ProjectAlreadyExistsError();
     await Promise.all(
@@ -442,6 +447,10 @@ export class ProjectService {
     actorId: string,
     project: Project,
   ): Promise<void> {
+    await assertWorkspaceWritable(
+      this.dependencies.tenancy,
+      project.workspaceId,
+    );
     const role = await this.dependencies.tenancy.findOrganizationRole({
       actorId,
       organizationId: project.organizationId,

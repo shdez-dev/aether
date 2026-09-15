@@ -28,6 +28,16 @@ describe("evidence references", () => {
       ownerActorId: "owner",
       ownerEmail: "owner@example.test",
     });
+    await tenancy.createWorkspace({
+      id: workspaceId,
+      organizationId,
+      name: "Evaluación",
+      mode: "team",
+      version: 0,
+      status: "active",
+      archivedAt: null,
+      archivedByActorId: null,
+    });
     references.setSubject("evaluation", evaluationId, {
       organizationId,
       workspaceId,

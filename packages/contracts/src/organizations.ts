@@ -28,6 +28,9 @@ export const WorkspaceResponseSchema = z.object({
   name: z.string(),
   mode: z.enum(["personal", "team", "institutional"]),
   version: z.number().int().nonnegative(),
+  status: z.enum(["active", "archived"]),
+  archivedAt: z.string().datetime().nullable(),
+  archivedByActorId: z.string().nullable(),
 });
 
 export const OrganizationRoleSchema = z.enum(["owner", "admin", "member"]);

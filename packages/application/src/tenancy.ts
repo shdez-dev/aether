@@ -20,6 +20,9 @@ export type Workspace = Readonly<{
   name: string;
   mode: "personal" | "team" | "institutional";
   version: number;
+  status: "active" | "archived";
+  archivedAt: Date | null;
+  archivedByActorId: string | null;
 }>;
 export type Invitation = Readonly<{
   id: string;
@@ -99,6 +102,14 @@ export interface TenantStore {
     | "replacement_not_active"
     | "replacement_conflicts_with_project_role"
   >;
+  archiveWorkspace(input: {
+    organizationId: string;
+    workspaceId: string;
+    actorId: string;
+    auditEventId: string;
+    correlationId: string;
+    occurredAt: Date;
+  }): Promise<"archived" | "not_found" | "already_archived">;
 }
 
 export interface TenantIdGenerator {
@@ -162,6 +173,9 @@ export class TenantService {
       name: input.name,
       mode: input.mode,
       version: 0,
+      status: "active",
+      archivedAt: null,
+      archivedByActorId: null,
     };
     await this.dependencies.store.createWorkspace(workspace);
     return workspace;
@@ -184,6 +198,31 @@ export class TenantService {
       "workspace:read",
     );
     return workspace;
+  }
+  async archiveWorkspace(input: {
+    actorId: string;
+    organizationId: string;
+    workspaceId: string;
+    correlationId: string;
+  }): Promise<void> {
+    const workspace = await this.dependencies.store.findWorkspace(
+      input.workspaceId,
+    );
+    if (!workspace || workspace.organizationId !== input.organizationId)
+      throw new ResourceNotFoundError("WORKSPACE_NOT_FOUND");
+    await this.assertAllowed(
+      input.actorId,
+      input.organizationId,
+      input.workspaceId,
+      "workspace:manage",
+    );
+    const result = await this.dependencies.store.archiveWorkspace({
+      ...input,
+      auditEventId: this.dependencies.ids.next(),
+      occurredAt: this.dependencies.clock.now(),
+    });
+    if (result === "not_found")
+      throw new ResourceNotFoundError("WORKSPACE_NOT_FOUND");
   }
   async listOrganizations(actorId: string): Promise<readonly Organization[]> {
     return this.dependencies.store.listOrganizations(actorId);
@@ -366,6 +405,19 @@ export class ResourceNotFoundError extends Error {
   ) {
     super(code);
   }
+}
+export class WorkspaceArchivedError extends Error {
+  constructor() {
+    super("WORKSPACE_ARCHIVED");
+  }
+}
+export async function assertWorkspaceWritable(
+  tenancy: Pick<TenantStore, "findWorkspace">,
+  workspaceId: string,
+): Promise<void> {
+  const workspace = await tenancy.findWorkspace(workspaceId);
+  if (!workspace) throw new ResourceNotFoundError("WORKSPACE_NOT_FOUND");
+  if (workspace.status === "archived") throw new WorkspaceArchivedError();
 }
 export class InvitationError extends Error {
   constructor(public readonly code: "INVITATION_INVALID_OR_EXPIRED") {

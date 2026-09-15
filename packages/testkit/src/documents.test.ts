@@ -231,6 +231,9 @@ describe("document evidence slice", () => {
       name: "W",
       mode: "team",
       version: 0,
+      status: "active",
+      archivedAt: null,
+      archivedByActorId: null,
     });
     const store = new InMemoryDocumentStore();
     const objects = new InMemoryDocumentObjectStore();
@@ -310,6 +313,9 @@ describe("document evidence slice", () => {
       name: "W",
       mode: "team",
       version: 0,
+      status: "active",
+      archivedAt: null,
+      archivedByActorId: null,
     });
     const store = new InMemoryDocumentStore();
     const objects = new InMemoryDocumentObjectStore();

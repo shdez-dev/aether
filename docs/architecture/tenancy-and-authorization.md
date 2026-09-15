@@ -44,4 +44,14 @@ destinatario, fecha y correlación.
 
 ## Interfaz
 
+## Archivado de workspace
+
+Archivar no elimina ni cambia el `organizationId`: conserva el workspace, sus
+recursos y su historial para lectura autorizada. Sólo un administrador del
+workspace u organización puede hacerlo y la operación exige autenticación
+reciente. Desde ese momento, los casos de uso de escritura de iniciativas,
+evaluaciones, proyectos, documentos, evidencia y comentarios responden
+`WORKSPACE_ARCHIVED`; las consultas siguen disponibles. El registro
+`workspace.archived.v1` conserva actor, fecha y correlación.
+
 `GET /v1/organizations/{organizationId}/capabilities` devuelve capacidades calculadas en servidor. La interfaz usa esas capacidades para mostrar u ocultar acciones mediante `canRenderWorkspaceAction`, pero la API repite la autorización en cada mutación y lectura.

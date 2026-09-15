@@ -14,6 +14,7 @@ import {
 } from "./documents.js";
 import {
   AccessDeniedError,
+  assertWorkspaceWritable,
   ResourceNotFoundError,
   type TenantStore,
 } from "./tenancy.js";
@@ -71,6 +72,10 @@ export class EvidenceService {
     const subject = await this.dependencies.subjects.resolve(input);
     if (!subject || subject.organizationId !== input.organizationId)
       throw new ResourceNotFoundError("EVIDENCE_SUBJECT_NOT_FOUND");
+    await assertWorkspaceWritable(
+      this.dependencies.tenancy,
+      subject.workspaceId,
+    );
     const found = await this.dependencies.documents.findVersion({
       documentId: input.documentId,
       versionId: input.documentVersionId,

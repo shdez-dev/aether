@@ -1,7 +1,11 @@
 import type { DocumentResourceType } from "@aether/domain";
 import { type DocumentProjectAccess, type DocumentStore } from "./documents.js";
 import { type NotificationService } from "./notifications.js";
-import { AccessDeniedError, type TenantStore } from "./tenancy.js";
+import {
+  AccessDeniedError,
+  assertWorkspaceWritable,
+  type TenantStore,
+} from "./tenancy.js";
 
 export type Comment = Readonly<{
   id: string;
@@ -53,6 +57,7 @@ export class CommentService {
       input.resourceType,
       input.resourceId,
     );
+    await assertWorkspaceWritable(this.d.tenancy, resource.workspaceId);
     for (const actorId of new Set(input.mentionedActorIds))
       if (
         !(await this.d.tenancy.findOrganizationRole({
@@ -119,6 +124,7 @@ export class CommentService {
       comment.resourceType,
       comment.resourceId,
     );
+    await assertWorkspaceWritable(this.d.tenancy, comment.workspaceId);
     const updated = {
       ...comment,
       resolvedAt: input.reopen ? null : this.d.clock.now(),

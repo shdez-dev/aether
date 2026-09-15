@@ -321,6 +321,23 @@ paths:
           $ref: "#/components/responses/Problem"
         "404":
           $ref: "#/components/responses/Problem"
+  /v1/organizations/{organizationId}/workspaces/{workspaceId}/archive:
+    post:
+      tags: [Workspaces]
+      operationId: archiveWorkspace
+      summary: Archivar un workspace conservando su historia
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationId"
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "204": { description: Workspace archivado. }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
   /v1/organizations/{organizationId}/capabilities:
     get:
       tags: [Organizations]
@@ -413,7 +430,8 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/ChangeMembershipStatusRequest" }
+            schema:
+              { $ref: "#/components/schemas/ChangeMembershipStatusRequest" }
       responses:
         "204": { description: Membresía actualizada y auditada. }
         "401": { $ref: "#/components/responses/Problem" }
@@ -437,7 +455,10 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/ReassignMemberResponsibilitiesRequest" }
+            schema:
+              {
+                $ref: "#/components/schemas/ReassignMemberResponsibilitiesRequest",
+              }
       responses:
         "204": { description: Responsabilidades reasignadas y auditadas. }
         default: { $ref: "#/components/responses/Problem" }
@@ -1447,13 +1468,26 @@ components:
         mode: { type: string, enum: [personal, team, institutional] }
     Workspace:
       type: object
-      required: [id, organizationId, name, mode, version]
+      required:
+        [
+          id,
+          organizationId,
+          name,
+          mode,
+          version,
+          status,
+          archivedAt,
+          archivedByActorId,
+        ]
       properties:
         id: { type: string, format: uuid }
         organizationId: { type: string, format: uuid }
         name: { type: string }
         mode: { type: string, enum: [personal, team, institutional] }
         version: { type: integer, minimum: 0 }
+        status: { type: string, enum: [active, archived] }
+        archivedAt: { type: [string, "null"], format: date-time }
+        archivedByActorId: { type: [string, "null"] }
     CreateInvitationRequest:
       type: object
       additionalProperties: false

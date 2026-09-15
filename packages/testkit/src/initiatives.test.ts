@@ -6,6 +6,7 @@ import {
   InitiativeService,
   InitiativeVersionConflictError,
   TenantService,
+  WorkspaceArchivedError,
 } from "@aether/application";
 
 import {
@@ -208,5 +209,24 @@ describe("initiative vertical slice", () => {
       "initiative.evaluated.v1",
       "initiative.decided.v2",
     ]);
+    await tenants.archiveWorkspace({
+      actorId: "owner",
+      organizationId: organization.id,
+      workspaceId: workspace.id,
+      correlationId: ids.next(),
+    });
+    await expect(
+      initiatives.edit({
+        actorId: "author",
+        organizationId: organization.id,
+        initiativeId: created.id,
+        correlationId: ids.next(),
+        expectedVersion: presented.version + 2,
+        title: "No debe editarse",
+        problemStatement: "Proceso lento",
+        expectedOutcome: "Menos tiempo",
+        classification: "internal",
+      }),
+    ).rejects.toBeInstanceOf(WorkspaceArchivedError);
   });
 });

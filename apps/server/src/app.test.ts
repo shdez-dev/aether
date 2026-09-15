@@ -300,6 +300,40 @@ describe("HTTP authentication boundary", () => {
       payload: { name: "Aether Test", timezone: "UTC", locale: "es-CL" },
     });
     expect(organization.statusCode).toBe(201);
+    const workspace = await app.inject({
+      method: "POST",
+      url: "/v1/workspaces",
+      headers: {
+        origin: config.webOrigin,
+        "x-csrf-token": csrf,
+        cookie: `aether_session=${session}; aether_csrf=${csrf}`,
+      },
+      payload: {
+        organizationId: organization.json().id,
+        name: "Archivo",
+        mode: "team",
+      },
+    });
+    expect(workspace.statusCode).toBe(201);
+    const archivedWorkspace = await app.inject({
+      method: "POST",
+      url: `/v1/organizations/${organization.json().id}/workspaces/${workspace.json().id}/archive`,
+      headers: {
+        origin: config.webOrigin,
+        "x-csrf-token": csrf,
+        cookie: `aether_session=${session}; aether_csrf=${csrf}`,
+      },
+    });
+    expect(archivedWorkspace.statusCode).toBe(204);
+    const archivedWorkspaceDetail = await app.inject({
+      method: "GET",
+      url: `/v1/workspaces/${workspace.json().id}?organizationId=${organization.json().id}`,
+      headers: { cookie: `aether_session=${session}` },
+    });
+    expect(archivedWorkspaceDetail.json()).toMatchObject({
+      status: "archived",
+      archivedByActorId: "actor-123",
+    });
     const invitation = await tenants.invite({
       actorId: "actor-123",
       organizationId: organization.json().id,

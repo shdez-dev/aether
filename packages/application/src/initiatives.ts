@@ -14,7 +14,11 @@ import {
 } from "@aether/domain";
 
 import type { TenantStore } from "./tenancy.js";
-import { AccessDeniedError, ResourceNotFoundError } from "./tenancy.js";
+import {
+  AccessDeniedError,
+  assertWorkspaceWritable,
+  ResourceNotFoundError,
+} from "./tenancy.js";
 
 export type InitiativeAuditEvent = Readonly<{
   id: string;
@@ -82,6 +86,7 @@ export class InitiativeService {
     expectedOutcome: string;
     classification: InitiativeClassification;
   }): Promise<Initiative> {
+    await assertWorkspaceWritable(this.dependencies.tenancy, input.workspaceId);
     await this.assertCreateAllowed(
       input.actorId,
       input.organizationId,
@@ -127,6 +132,10 @@ export class InitiativeService {
     const current = await this.requireInitiative(
       input.initiativeId,
       input.organizationId,
+    );
+    await assertWorkspaceWritable(
+      this.dependencies.tenancy,
+      current.workspaceId,
     );
     await this.assertInitiativeAction(input.actorId, current, "edit");
     this.assertVersion(current, input.expectedVersion);
@@ -281,6 +290,10 @@ export class InitiativeService {
     const current = await this.requireInitiative(
       input.initiativeId,
       input.organizationId,
+    );
+    await assertWorkspaceWritable(
+      this.dependencies.tenancy,
+      current.workspaceId,
     );
     await this.assertInitiativeAction(input.actorId, current, action);
     this.assertVersion(current, input.expectedVersion);

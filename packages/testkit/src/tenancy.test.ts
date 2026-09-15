@@ -4,6 +4,8 @@ import {
   AccessDeniedError,
   ResourceNotFoundError,
   TenantService,
+  WorkspaceArchivedError,
+  assertWorkspaceWritable,
 } from "@aether/application";
 
 import { InMemoryTenantStore } from "./tenancy.js";
@@ -27,6 +29,42 @@ function createTenantService(now = new Date("2026-09-08T12:00:00.000Z")) {
 }
 
 describe("TenantService", () => {
+  it("archiva un workspace con autorización, conserva lectura y bloquea nuevas escrituras", async () => {
+    const { service, store } = createTenantService();
+    const organization = await service.createOrganization({
+      actorId: "owner",
+      actorEmail: "owner@example.test",
+      name: "A",
+      timezone: "UTC",
+      locale: "es-CL",
+    });
+    const workspace = await service.createWorkspace({
+      actorId: "owner",
+      organizationId: organization.id,
+      name: "Archivo",
+      mode: "team",
+    });
+    await service.archiveWorkspace({
+      actorId: "owner",
+      organizationId: organization.id,
+      workspaceId: workspace.id,
+      correlationId: "00000000-0000-4000-8000-000000000098",
+    });
+    await expect(
+      service.getWorkspace({
+        actorId: "owner",
+        organizationId: organization.id,
+        workspaceId: workspace.id,
+      }),
+    ).resolves.toMatchObject({
+      status: "archived",
+      archivedByActorId: "owner",
+    });
+    await expect(
+      assertWorkspaceWritable(store, workspace.id),
+    ).rejects.toBeInstanceOf(WorkspaceArchivedError);
+  });
+
   it("aísla workspaces entre organizaciones y concede acceso sólo tras aceptar una invitación válida", async () => {
     const { service } = createTenantService();
     const organizationA = await service.createOrganization({

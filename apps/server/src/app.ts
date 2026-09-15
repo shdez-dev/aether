@@ -39,6 +39,7 @@ import {
   ProductMetricsService,
   OutboxAdministrationService,
   OutboxDeadLetterNotFoundError,
+  WorkspaceArchivedError,
 } from "@aether/application";
 import {
   CreateInvitationRequestSchema,
@@ -273,24 +274,26 @@ export async function buildServer(input: {
                 error instanceof IdempotencyRequestInProgressError ||
                 error instanceof ProjectAlreadyExistsError
               ? 409
-              : error instanceof CsrfError ||
-                  error instanceof RecentAuthenticationRequiredError ||
-                  error instanceof AccessDeniedError ||
-                  error instanceof DocumentAccessDeniedError ||
-                  error instanceof IdentityEmailRequiredError ||
-                  (error instanceof OwnershipTransferError &&
-                    error.code === "ACTOR_MUST_BE_OWNER") ||
-                  (error instanceof MembershipStatusError &&
-                    error.code === "actor_not_manager")
-                ? 403
-                : error instanceof ResourceNotFoundError ||
-                    error instanceof DocumentNotFoundError ||
-                    error instanceof OutboxDeadLetterNotFoundError
-                  ? 404
-                  : error instanceof InitiativeVersionConflictError ||
-                      error instanceof ProjectVersionConflictError
-                    ? 409
-                    : 400;
+              : error instanceof WorkspaceArchivedError
+                ? 409
+                : error instanceof CsrfError ||
+                    error instanceof RecentAuthenticationRequiredError ||
+                    error instanceof AccessDeniedError ||
+                    error instanceof DocumentAccessDeniedError ||
+                    error instanceof IdentityEmailRequiredError ||
+                    (error instanceof OwnershipTransferError &&
+                      error.code === "ACTOR_MUST_BE_OWNER") ||
+                    (error instanceof MembershipStatusError &&
+                      error.code === "actor_not_manager")
+                  ? 403
+                  : error instanceof ResourceNotFoundError ||
+                      error instanceof DocumentNotFoundError ||
+                      error instanceof OutboxDeadLetterNotFoundError
+                    ? 404
+                    : error instanceof InitiativeVersionConflictError ||
+                        error instanceof ProjectVersionConflictError
+                      ? 409
+                      : 400;
     if (input.securityAudit && (status === 401 || status === 403)) {
       const session = await input.auth.authenticate(
         request.cookies[sessionCookie],
@@ -350,35 +353,38 @@ export async function buildServer(input: {
                     ? "IDEMPOTENCY_REQUEST_IN_PROGRESS"
                     : error instanceof ProjectAlreadyExistsError
                       ? "CONFLICT"
-                      : error instanceof RecentAuthenticationRequiredError
-                        ? "RECENT_AUTH_REQUIRED"
-                        : error instanceof CsrfError ||
-                            error instanceof AccessDeniedError ||
-                            error instanceof DocumentAccessDeniedError ||
-                            error instanceof IdentityEmailRequiredError ||
-                            (error instanceof OwnershipTransferError &&
-                              error.code === "ACTOR_MUST_BE_OWNER") ||
-                            (error instanceof MembershipStatusError &&
-                              error.code === "actor_not_manager")
-                          ? "FORBIDDEN"
-                          : error instanceof ResourceNotFoundError ||
-                              error instanceof DocumentNotFoundError ||
-                              error instanceof OutboxDeadLetterNotFoundError
-                            ? "NOT_FOUND"
-                            : error instanceof InitiativeVersionConflictError ||
-                                error instanceof ProjectVersionConflictError
-                              ? "CONFLICT"
-                              : error instanceof InitiativeDomainError ||
-                                  error instanceof DocumentValidationError ||
-                                  error instanceof ProjectDomainError
-                                ? "PRECONDITION_FAILED"
-                                : error instanceof InvitationError
-                                  ? "INVITATION_INVALID_OR_EXPIRED"
-                                  : error instanceof OwnershipTransferError
-                                    ? error.code
-                                    : error instanceof MembershipStatusError
-                                      ? error.code.toUpperCase()
-                                      : "VALIDATION_ERROR",
+                      : error instanceof WorkspaceArchivedError
+                        ? "WORKSPACE_ARCHIVED"
+                        : error instanceof RecentAuthenticationRequiredError
+                          ? "RECENT_AUTH_REQUIRED"
+                          : error instanceof CsrfError ||
+                              error instanceof AccessDeniedError ||
+                              error instanceof DocumentAccessDeniedError ||
+                              error instanceof IdentityEmailRequiredError ||
+                              (error instanceof OwnershipTransferError &&
+                                error.code === "ACTOR_MUST_BE_OWNER") ||
+                              (error instanceof MembershipStatusError &&
+                                error.code === "actor_not_manager")
+                            ? "FORBIDDEN"
+                            : error instanceof ResourceNotFoundError ||
+                                error instanceof DocumentNotFoundError ||
+                                error instanceof OutboxDeadLetterNotFoundError
+                              ? "NOT_FOUND"
+                              : error instanceof
+                                    InitiativeVersionConflictError ||
+                                  error instanceof ProjectVersionConflictError
+                                ? "CONFLICT"
+                                : error instanceof InitiativeDomainError ||
+                                    error instanceof DocumentValidationError ||
+                                    error instanceof ProjectDomainError
+                                  ? "PRECONDITION_FAILED"
+                                  : error instanceof InvitationError
+                                    ? "INVITATION_INVALID_OR_EXPIRED"
+                                    : error instanceof OwnershipTransferError
+                                      ? error.code
+                                      : error instanceof MembershipStatusError
+                                        ? error.code.toUpperCase()
+                                        : "VALIDATION_ERROR",
         correlationId: reply.getHeader("X-Correlation-ID"),
         instance: request.url,
       });
@@ -598,6 +604,30 @@ export async function buildServer(input: {
       ...query,
     });
   });
+  app.post(
+    "/v1/organizations/:organizationId/workspaces/:workspaceId/archive",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      assertRecentAuthentication(session, input.config);
+      const params = z
+        .object({
+          organizationId: z.string().uuid(),
+          workspaceId: z.string().uuid(),
+        })
+        .parse(request.params);
+      await input.tenants.archiveWorkspace({
+        actorId: session.actorId,
+        correlationId: correlationId(reply),
+        ...params,
+      });
+      return reply.code(204).send();
+    },
+  );
   app.get(
     "/v1/organizations/:organizationId/capabilities",
     async (request, reply) => {
