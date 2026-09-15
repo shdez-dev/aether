@@ -24,6 +24,14 @@ export type Workspace = Readonly<{
   archivedAt: Date | null;
   archivedByActorId: string | null;
 }>;
+export type Team = Readonly<{
+  id: string;
+  organizationId: string;
+  workspaceId: string;
+  name: string;
+  version: number;
+  memberActorIds: readonly string[];
+}>;
 export type Invitation = Readonly<{
   id: string;
   organizationId: string;
@@ -110,6 +118,13 @@ export interface TenantStore {
     correlationId: string;
     occurredAt: Date;
   }): Promise<"archived" | "not_found" | "already_archived">;
+  createTeam(
+    input: Team & { actorId: string; correlationId: string; occurredAt: Date },
+  ): Promise<"created" | "workspace_not_found" | "member_not_active">;
+  listTeams(input: {
+    organizationId: string;
+    workspaceId: string;
+  }): Promise<readonly Team[]>;
 }
 
 export interface TenantIdGenerator {
@@ -223,6 +238,55 @@ export class TenantService {
     });
     if (result === "not_found")
       throw new ResourceNotFoundError("WORKSPACE_NOT_FOUND");
+  }
+  async createTeam(input: {
+    actorId: string;
+    organizationId: string;
+    workspaceId: string;
+    name: string;
+    memberActorIds: readonly string[];
+    correlationId: string;
+  }): Promise<Team> {
+    await this.assertAllowed(
+      input.actorId,
+      input.organizationId,
+      input.workspaceId,
+      "workspace:manage",
+    );
+    await assertWorkspaceWritable(this.dependencies.store, input.workspaceId);
+    const memberActorIds = [...new Set(input.memberActorIds)];
+    const team: Team = {
+      id: this.dependencies.ids.next(),
+      organizationId: input.organizationId,
+      workspaceId: input.workspaceId,
+      name: input.name,
+      version: 0,
+      memberActorIds,
+    };
+    const result = await this.dependencies.store.createTeam({
+      ...team,
+      actorId: input.actorId,
+      correlationId: input.correlationId,
+      occurredAt: this.dependencies.clock.now(),
+    });
+    if (result === "workspace_not_found")
+      throw new ResourceNotFoundError("WORKSPACE_NOT_FOUND");
+    if (result === "member_not_active")
+      throw new TeamError("TEAM_MEMBER_NOT_ACTIVE");
+    return team;
+  }
+  async listTeams(input: {
+    actorId: string;
+    organizationId: string;
+    workspaceId: string;
+  }): Promise<readonly Team[]> {
+    await this.assertAllowed(
+      input.actorId,
+      input.organizationId,
+      input.workspaceId,
+      "workspace:read",
+    );
+    return this.dependencies.store.listTeams(input);
   }
   async listOrganizations(actorId: string): Promise<readonly Organization[]> {
     return this.dependencies.store.listOrganizations(actorId);
@@ -421,6 +485,11 @@ export async function assertWorkspaceWritable(
 }
 export class InvitationError extends Error {
   constructor(public readonly code: "INVITATION_INVALID_OR_EXPIRED") {
+    super(code);
+  }
+}
+export class TeamError extends Error {
+  constructor(public readonly code: "TEAM_MEMBER_NOT_ACTIVE") {
     super(code);
   }
 }

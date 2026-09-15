@@ -338,6 +338,52 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
+  /v1/organizations/{organizationId}/workspaces/{workspaceId}/teams:
+    get:
+      tags: [Workspaces]
+      operationId: listWorkspaceTeams
+      summary: Listar equipos visibles del workspace
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationId"
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: Equipos del workspace autorizado.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Team" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+    post:
+      tags: [Workspaces]
+      operationId: createWorkspaceTeam
+      summary: Crear un equipo dentro de un workspace
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationId"
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateTeamRequest" }
+      responses:
+        "201":
+          description: Equipo creado y auditado.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Team" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
   /v1/organizations/{organizationId}/capabilities:
     get:
       tags: [Organizations]
@@ -1488,6 +1534,29 @@ components:
         status: { type: string, enum: [active, archived] }
         archivedAt: { type: [string, "null"], format: date-time }
         archivedByActorId: { type: [string, "null"] }
+    CreateTeamRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 255 }
+        memberActorIds:
+          type: array
+          maxItems: 500
+          items: { type: string, minLength: 1, maxLength: 255 }
+    Team:
+      type: object
+      additionalProperties: false
+      required: [id, organizationId, workspaceId, name, version, memberActorIds]
+      properties:
+        id: { type: string, format: uuid }
+        organizationId: { type: string, format: uuid }
+        workspaceId: { type: string, format: uuid }
+        name: { type: string }
+        version: { type: integer, minimum: 0 }
+        memberActorIds:
+          type: array
+          items: { type: string }
     CreateInvitationRequest:
       type: object
       additionalProperties: false

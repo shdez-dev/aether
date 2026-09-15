@@ -33,6 +33,22 @@ export const WorkspaceResponseSchema = z.object({
   archivedByActorId: z.string().nullable(),
 });
 
+export const CreateTeamRequestSchema = z.object({
+  name: NonEmptyTextSchema.max(255),
+  memberActorIds: z
+    .array(z.string().trim().min(1).max(255))
+    .max(500)
+    .default([]),
+});
+export const TeamResponseSchema = z.object({
+  id: UuidSchema,
+  organizationId: UuidSchema,
+  workspaceId: UuidSchema,
+  name: z.string(),
+  version: z.number().int().nonnegative(),
+  memberActorIds: z.array(z.string()),
+});
+
 export const OrganizationRoleSchema = z.enum(["owner", "admin", "member"]);
 export const WorkspaceRoleSchema = z.enum(["admin", "member", "viewer"]);
 
@@ -82,6 +98,8 @@ export type CreateWorkspaceRequest = z.infer<
   typeof CreateWorkspaceRequestSchema
 >;
 export type WorkspaceResponse = z.infer<typeof WorkspaceResponseSchema>;
+export type CreateTeamRequest = z.infer<typeof CreateTeamRequestSchema>;
+export type TeamResponse = z.infer<typeof TeamResponseSchema>;
 export type CreateInvitationRequest = z.infer<
   typeof CreateInvitationRequestSchema
 >;

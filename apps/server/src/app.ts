@@ -50,6 +50,7 @@ import {
   CreateInitiativeDraftRequestSchema,
   CreateOrganizationRequestSchema,
   CreateWorkspaceRequestSchema,
+  CreateTeamRequestSchema,
   DecideInitiativeRequestSchema,
   ActivateEvaluationStandardRequestSchema,
   AuditHistoryQuerySchema,
@@ -631,6 +632,50 @@ export async function buildServer(input: {
         ...params,
       });
       return reply.code(204).send();
+    },
+  );
+  app.get(
+    "/v1/organizations/:organizationId/workspaces/:workspaceId/teams",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      const params = z
+        .object({
+          organizationId: z.string().uuid(),
+          workspaceId: z.string().uuid(),
+        })
+        .parse(request.params);
+      return input.tenants.listTeams({ actorId: session.actorId, ...params });
+    },
+  );
+  app.post(
+    "/v1/organizations/:organizationId/workspaces/:workspaceId/teams",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      const params = z
+        .object({
+          organizationId: z.string().uuid(),
+          workspaceId: z.string().uuid(),
+        })
+        .parse(request.params);
+      const body = CreateTeamRequestSchema.parse(request.body);
+      return reply.code(201).send(
+        await input.tenants.createTeam({
+          actorId: session.actorId,
+          correlationId: correlationId(reply),
+          ...params,
+          ...body,
+        }),
+      );
     },
   );
   app.get(

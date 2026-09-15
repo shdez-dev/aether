@@ -290,6 +290,24 @@ describe("HTTP authentication boundary", () => {
       name: "Workspace A",
       mode: "team",
     });
+    const ownerToken = "owner-session-token";
+    const ownerCsrf = "owner-csrf-token";
+    await createAuthenticatedSession(authStore, {
+      token: ownerToken,
+      actorId: "owner",
+      actorEmail: "owner@example.test",
+    });
+    const createdTeam = await app.inject({
+      method: "POST",
+      url: `/v1/organizations/${organization.id}/workspaces/${workspace.id}/teams`,
+      headers: {
+        origin: config.webOrigin,
+        "x-csrf-token": ownerCsrf,
+        cookie: `aether_session=${ownerToken}; aether_csrf=${ownerCsrf}`,
+      },
+      payload: { name: "Método", memberActorIds: ["owner"] },
+    });
+    expect(createdTeam.statusCode).toBe(201);
     const invitation = await tenants.invite({
       actorId: "owner",
       organizationId: organization.id,
@@ -387,6 +405,25 @@ describe("HTTP authentication boundary", () => {
       headers: { cookie: viewerCookie },
     });
     expect(readableWorkspace.statusCode).toBe(200);
+    const visibleTeams = await app.inject({
+      method: "GET",
+      url: `/v1/organizations/${organization.id}/workspaces/${workspace.id}/teams`,
+      headers: { cookie: viewerCookie },
+    });
+    expect(visibleTeams.statusCode).toBe(200);
+    expect(visibleTeams.json()).toEqual([
+      expect.objectContaining({
+        id: createdTeam.json().id,
+        memberActorIds: ["owner"],
+      }),
+    ]);
+    const deniedTeamCreation = await app.inject({
+      method: "POST",
+      url: `/v1/organizations/${organization.id}/workspaces/${workspace.id}/teams`,
+      headers: mutationHeaders,
+      payload: { name: "No permitido", memberActorIds: [] },
+    });
+    expect(deniedTeamCreation.statusCode).toBe(403);
 
     const deniedWorkspaceCreation = await app.inject({
       method: "POST",

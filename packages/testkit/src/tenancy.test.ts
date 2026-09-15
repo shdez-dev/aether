@@ -29,6 +29,63 @@ function createTenantService(now = new Date("2026-09-08T12:00:00.000Z")) {
 }
 
 describe("TenantService", () => {
+  it("gestiona equipos dentro de un workspace sin convertirlos en permisos implícitos", async () => {
+    const { service } = createTenantService();
+    const organization = await service.createOrganization({
+      actorId: "owner",
+      actorEmail: "owner@example.test",
+      name: "A",
+      timezone: "UTC",
+      locale: "es-CL",
+    });
+    const workspace = await service.createWorkspace({
+      actorId: "owner",
+      organizationId: organization.id,
+      name: "Equipo",
+      mode: "team",
+    });
+    const invitation = await service.invite({
+      actorId: "owner",
+      organizationId: organization.id,
+      email: "viewer@example.test",
+      organizationRole: "member",
+      workspaceIds: [workspace.id],
+      workspaceRole: "viewer",
+      expiresInDays: 7,
+    });
+    await service.acceptInvitation({
+      token: invitation.deliveryToken,
+      actorId: "viewer",
+      actorEmail: "viewer@example.test",
+    });
+    const team = await service.createTeam({
+      actorId: "owner",
+      organizationId: organization.id,
+      workspaceId: workspace.id,
+      name: "Método",
+      memberActorIds: ["owner", "viewer", "viewer"],
+      correlationId: "00000000-0000-4000-8000-000000000096",
+    });
+    expect(team.memberActorIds).toEqual(["owner", "viewer"]);
+    await expect(
+      service.listTeams({
+        actorId: "viewer",
+        organizationId: organization.id,
+        workspaceId: workspace.id,
+      }),
+    ).resolves.toEqual([team]);
+    await expect(
+      service.createTeam({
+        actorId: "viewer",
+        organizationId: organization.id,
+        workspaceId: workspace.id,
+        name: "No permitido",
+        memberActorIds: [],
+        correlationId: "00000000-0000-4000-8000-000000000095",
+      }),
+    ).rejects.toBeInstanceOf(AccessDeniedError);
+  });
+
   it("aplica la matriz de permisos a operaciones de tenencia permitidas y denegadas", async () => {
     const { service } = createTenantService();
     const organization = await service.createOrganization({

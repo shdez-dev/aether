@@ -1,6 +1,7 @@
 import type {
   Invitation,
   Organization,
+  Team,
   TenantStore,
   Workspace,
 } from "@aether/application";
@@ -11,6 +12,7 @@ export class InMemoryTenantStore implements TenantStore {
   readonly organizations = new Map<string, Organization>();
   readonly workspaces = new Map<string, Workspace>();
   readonly invitations = new Map<string, Invitation & { tokenHash: string }>();
+  readonly teams = new Map<string, Team>();
   readonly ownershipTransfers: Array<{
     organizationId: string;
     actorId: string;
@@ -252,6 +254,49 @@ export class InMemoryTenantStore implements TenantStore {
       version: workspace.version + 1,
     });
     return "archived";
+  }
+  async createTeam(
+    input: Team & {
+      actorId: string;
+      correlationId: string;
+      occurredAt: Date;
+    },
+  ): Promise<"created" | "workspace_not_found" | "member_not_active"> {
+    const workspace = this.workspaces.get(input.workspaceId);
+    if (
+      !workspace ||
+      workspace.organizationId !== input.organizationId ||
+      workspace.status !== "active"
+    )
+      return "workspace_not_found";
+    if (
+      input.memberActorIds.some(
+        (actorId) =>
+          this.organizationStatuses.get(
+            this.organizationKey(actorId, input.organizationId),
+          ) !== "active",
+      )
+    )
+      return "member_not_active";
+    this.teams.set(input.id, {
+      id: input.id,
+      organizationId: input.organizationId,
+      workspaceId: input.workspaceId,
+      name: input.name,
+      version: input.version,
+      memberActorIds: [...input.memberActorIds],
+    });
+    return "created";
+  }
+  async listTeams(input: {
+    organizationId: string;
+    workspaceId: string;
+  }): Promise<readonly Team[]> {
+    return [...this.teams.values()].filter(
+      (team) =>
+        team.organizationId === input.organizationId &&
+        team.workspaceId === input.workspaceId,
+    );
   }
 
   private organizationKey(actorId: string, organizationId: string): string {

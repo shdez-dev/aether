@@ -47,6 +47,7 @@ import type {
   ProjectClosureStore,
   Invitation,
   Organization,
+  Team,
   TenantStore,
   Workspace,
 } from "@aether/application";
@@ -895,7 +896,110 @@ export class PostgresTenantStore implements TenantStore {
       client.release();
     }
   }
+
+  async createTeam(
+    input: Team & {
+      actorId: string;
+      correlationId: string;
+      occurredAt: Date;
+    },
+  ): Promise<"created" | "workspace_not_found" | "member_not_active"> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const workspace = await client.query(
+        `SELECT id FROM workspaces
+         WHERE id = $1 AND organization_id = $2 AND status = 'active' FOR UPDATE`,
+        [input.workspaceId, input.organizationId],
+      );
+      if ((workspace.rowCount ?? 0) !== 1) {
+        await client.query("ROLLBACK");
+        return "workspace_not_found";
+      }
+      if (input.memberActorIds.length > 0) {
+        const members = await client.query<{ actor_id: string }>(
+          `SELECT actor_id FROM organization_memberships
+           WHERE organization_id = $1 AND actor_id = ANY($2::text[]) AND status = 'active'`,
+          [input.organizationId, input.memberActorIds],
+        );
+        if (members.rows.length !== input.memberActorIds.length) {
+          await client.query("ROLLBACK");
+          return "member_not_active";
+        }
+      }
+      await client.query(
+        `INSERT INTO teams (id, organization_id, workspace_id, name, version)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [
+          input.id,
+          input.organizationId,
+          input.workspaceId,
+          input.name,
+          input.version,
+        ],
+      );
+      for (const actorId of input.memberActorIds)
+        await client.query(
+          "INSERT INTO team_memberships (team_id, actor_id) VALUES ($1, $2)",
+          [input.id, actorId],
+        );
+      await client.query(
+        `INSERT INTO team_audit_events
+         (id, organization_id, workspace_id, team_id, actor_id, event_type, correlation_id, occurred_at, payload)
+         VALUES ($1,$2,$3,$4,$5,'team.created.v1',$6,$7,$8)`,
+        [
+          crypto.randomUUID(),
+          input.organizationId,
+          input.workspaceId,
+          input.id,
+          input.actorId,
+          input.correlationId,
+          input.occurredAt,
+          asJson({ memberActorIds: input.memberActorIds }),
+        ],
+      );
+      await client.query("COMMIT");
+      return "created";
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async listTeams(input: {
+    organizationId: string;
+    workspaceId: string;
+  }): Promise<readonly Team[]> {
+    const result = await this.pool.query<TeamRow>(
+      `SELECT teams.id, teams.organization_id, teams.workspace_id, teams.name,
+              teams.version, COALESCE(array_agg(team_memberships.actor_id ORDER BY team_memberships.actor_id)
+                FILTER (WHERE team_memberships.actor_id IS NOT NULL), '{}') AS member_actor_ids
+       FROM teams LEFT JOIN team_memberships ON team_memberships.team_id = teams.id
+       WHERE teams.organization_id = $1 AND teams.workspace_id = $2
+       GROUP BY teams.id ORDER BY teams.name`,
+      [input.organizationId, input.workspaceId],
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      organizationId: row.organization_id,
+      workspaceId: row.workspace_id,
+      name: row.name,
+      version: row.version,
+      memberActorIds: row.member_actor_ids,
+    }));
+  }
 }
+
+type TeamRow = {
+  id: string;
+  organization_id: string;
+  workspace_id: string;
+  name: string;
+  version: number;
+  member_actor_ids: string[];
+};
 
 type WorkspaceRow = {
   id: string;
