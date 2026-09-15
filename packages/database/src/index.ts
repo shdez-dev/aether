@@ -990,6 +990,73 @@ export class PostgresTenantStore implements TenantStore {
       memberActorIds: row.member_actor_ids,
     }));
   }
+  async replaceTeamMembers(input: {
+    organizationId: string;
+    workspaceId: string;
+    teamId: string;
+    actorId: string;
+    memberActorIds: readonly string[];
+    correlationId: string;
+    occurredAt: Date;
+  }): Promise<"updated" | "team_not_found" | "member_not_active"> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const team = await client.query(
+        `SELECT id FROM teams WHERE id = $1 AND organization_id = $2 AND workspace_id = $3 FOR UPDATE`,
+        [input.teamId, input.organizationId, input.workspaceId],
+      );
+      if ((team.rowCount ?? 0) !== 1) {
+        await client.query("ROLLBACK");
+        return "team_not_found";
+      }
+      if (input.memberActorIds.length > 0) {
+        const members = await client.query<{ actor_id: string }>(
+          `SELECT actor_id FROM organization_memberships
+           WHERE organization_id = $1 AND actor_id = ANY($2::text[]) AND status = 'active'`,
+          [input.organizationId, input.memberActorIds],
+        );
+        if (members.rows.length !== input.memberActorIds.length) {
+          await client.query("ROLLBACK");
+          return "member_not_active";
+        }
+      }
+      await client.query("DELETE FROM team_memberships WHERE team_id = $1", [
+        input.teamId,
+      ]);
+      for (const actorId of input.memberActorIds)
+        await client.query(
+          "INSERT INTO team_memberships (team_id, actor_id) VALUES ($1, $2)",
+          [input.teamId, actorId],
+        );
+      await client.query(
+        "UPDATE teams SET version = version + 1 WHERE id = $1",
+        [input.teamId],
+      );
+      await client.query(
+        `INSERT INTO team_audit_events
+         (id, organization_id, workspace_id, team_id, actor_id, event_type, correlation_id, occurred_at, payload)
+         VALUES ($1,$2,$3,$4,$5,'team.members_replaced.v1',$6,$7,$8)`,
+        [
+          crypto.randomUUID(),
+          input.organizationId,
+          input.workspaceId,
+          input.teamId,
+          input.actorId,
+          input.correlationId,
+          input.occurredAt,
+          asJson({ memberActorIds: input.memberActorIds }),
+        ],
+      );
+      await client.query("COMMIT");
+      return "updated";
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
 }
 
 type TeamRow = {

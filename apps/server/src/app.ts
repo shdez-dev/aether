@@ -51,6 +51,7 @@ import {
   CreateOrganizationRequestSchema,
   CreateWorkspaceRequestSchema,
   CreateTeamRequestSchema,
+  ReplaceTeamMembersRequestSchema,
   DecideInitiativeRequestSchema,
   ActivateEvaluationStandardRequestSchema,
   AuditHistoryQuerySchema,
@@ -630,6 +631,32 @@ export async function buildServer(input: {
         actorId: session.actorId,
         correlationId: correlationId(reply),
         ...params,
+      });
+      return reply.code(204).send();
+    },
+  );
+  app.put(
+    "/v1/organizations/:organizationId/workspaces/:workspaceId/teams/:teamId/members",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      const params = z
+        .object({
+          organizationId: z.string().uuid(),
+          workspaceId: z.string().uuid(),
+          teamId: z.string().uuid(),
+        })
+        .parse(request.params);
+      const body = ReplaceTeamMembersRequestSchema.parse(request.body);
+      await input.tenants.replaceTeamMembers({
+        actorId: session.actorId,
+        correlationId: correlationId(reply),
+        ...params,
+        ...body,
       });
       return reply.code(204).send();
     },

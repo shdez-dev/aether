@@ -125,6 +125,15 @@ export interface TenantStore {
     organizationId: string;
     workspaceId: string;
   }): Promise<readonly Team[]>;
+  replaceTeamMembers(input: {
+    organizationId: string;
+    workspaceId: string;
+    teamId: string;
+    actorId: string;
+    memberActorIds: readonly string[];
+    correlationId: string;
+    occurredAt: Date;
+  }): Promise<"updated" | "team_not_found" | "member_not_active">;
 }
 
 export interface TenantIdGenerator {
@@ -287,6 +296,30 @@ export class TenantService {
       "workspace:read",
     );
     return this.dependencies.store.listTeams(input);
+  }
+  async replaceTeamMembers(input: {
+    actorId: string;
+    organizationId: string;
+    workspaceId: string;
+    teamId: string;
+    memberActorIds: readonly string[];
+    correlationId: string;
+  }): Promise<void> {
+    await this.assertAllowed(
+      input.actorId,
+      input.organizationId,
+      input.workspaceId,
+      "workspace:manage",
+    );
+    await assertWorkspaceWritable(this.dependencies.store, input.workspaceId);
+    const result = await this.dependencies.store.replaceTeamMembers({
+      ...input,
+      memberActorIds: [...new Set(input.memberActorIds)],
+      occurredAt: this.dependencies.clock.now(),
+    });
+    if (result === "team_not_found") throw new TeamError("TEAM_NOT_FOUND");
+    if (result === "member_not_active")
+      throw new TeamError("TEAM_MEMBER_NOT_ACTIVE");
   }
   async listOrganizations(actorId: string): Promise<readonly Organization[]> {
     return this.dependencies.store.listOrganizations(actorId);
@@ -489,7 +522,9 @@ export class InvitationError extends Error {
   }
 }
 export class TeamError extends Error {
-  constructor(public readonly code: "TEAM_MEMBER_NOT_ACTIVE") {
+  constructor(
+    public readonly code: "TEAM_MEMBER_NOT_ACTIVE" | "TEAM_NOT_FOUND",
+  ) {
     super(code);
   }
 }

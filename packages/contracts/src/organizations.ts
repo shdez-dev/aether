@@ -48,6 +48,9 @@ export const TeamResponseSchema = z.object({
   version: z.number().int().nonnegative(),
   memberActorIds: z.array(z.string()),
 });
+export const ReplaceTeamMembersRequestSchema = z.object({
+  memberActorIds: z.array(z.string().trim().min(1).max(255)).max(500),
+});
 
 export const OrganizationRoleSchema = z.enum(["owner", "admin", "member"]);
 export const WorkspaceRoleSchema = z.enum(["admin", "member", "viewer"]);
@@ -100,6 +103,9 @@ export type CreateWorkspaceRequest = z.infer<
 export type WorkspaceResponse = z.infer<typeof WorkspaceResponseSchema>;
 export type CreateTeamRequest = z.infer<typeof CreateTeamRequestSchema>;
 export type TeamResponse = z.infer<typeof TeamResponseSchema>;
+export type ReplaceTeamMembersRequest = z.infer<
+  typeof ReplaceTeamMembersRequestSchema
+>;
 export type CreateInvitationRequest = z.infer<
   typeof CreateInvitationRequestSchema
 >;

@@ -298,6 +298,38 @@ export class InMemoryTenantStore implements TenantStore {
         team.workspaceId === input.workspaceId,
     );
   }
+  async replaceTeamMembers(input: {
+    organizationId: string;
+    workspaceId: string;
+    teamId: string;
+    actorId: string;
+    memberActorIds: readonly string[];
+    correlationId: string;
+    occurredAt: Date;
+  }): Promise<"updated" | "team_not_found" | "member_not_active"> {
+    const team = this.teams.get(input.teamId);
+    if (
+      !team ||
+      team.organizationId !== input.organizationId ||
+      team.workspaceId !== input.workspaceId
+    )
+      return "team_not_found";
+    if (
+      input.memberActorIds.some(
+        (actorId) =>
+          this.organizationStatuses.get(
+            this.organizationKey(actorId, input.organizationId),
+          ) !== "active",
+      )
+    )
+      return "member_not_active";
+    this.teams.set(input.teamId, {
+      ...team,
+      memberActorIds: [...input.memberActorIds],
+      version: team.version + 1,
+    });
+    return "updated";
+  }
 
   private organizationKey(actorId: string, organizationId: string): string {
     return `${actorId}:${organizationId}`;
