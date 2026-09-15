@@ -384,6 +384,31 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
+  /v1/organizations/{organizationId}/workspaces/{workspaceId}/teams/{teamId}/members:
+    put:
+      tags: [Workspaces]
+      operationId: replaceTeamMembers
+      summary: Reemplazar los integrantes activos de un equipo
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationId"
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: teamId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReplaceTeamMembersRequest" }
+      responses:
+        "204": { description: Integrantes reemplazados y auditados. }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
   /v1/organizations/{organizationId}/capabilities:
     get:
       tags: [Organizations]
@@ -1557,6 +1582,15 @@ components:
         memberActorIds:
           type: array
           items: { type: string }
+    ReplaceTeamMembersRequest:
+      type: object
+      additionalProperties: false
+      required: [memberActorIds]
+      properties:
+        memberActorIds:
+          type: array
+          maxItems: 500
+          items: { type: string, minLength: 1, maxLength: 255 }
     CreateInvitationRequest:
       type: object
       additionalProperties: false
