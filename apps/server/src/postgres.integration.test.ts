@@ -94,6 +94,108 @@ describe.sequential("PostgreSQL integration", () => {
   );
 
   runPostgresIntegration(
+    "makes organization and workspace scope immutable in PostgreSQL",
+    async () => {
+      const ids = { next: randomUUID };
+      const tenants = new TenantService({
+        store: new PostgresTenantStore(pool),
+        ids,
+        tokens: {
+          generate: () => "scope-token",
+          hash: (value) => `scope:${value}`,
+        },
+        clock: { now: () => new Date("2026-09-16T01:00:00.000Z") },
+      });
+      const organization = await tenants.createOrganization({
+        actorId: "scope-owner",
+        actorEmail: "scope-owner@example.test",
+        name: "Immutable scope",
+        timezone: "UTC",
+        locale: "es-CL",
+      });
+      const otherOrganization = await tenants.createOrganization({
+        actorId: "other-scope-owner",
+        actorEmail: "other-scope-owner@example.test",
+        name: "Other immutable scope",
+        timezone: "UTC",
+        locale: "es-CL",
+      });
+      const workspace = await tenants.createWorkspace({
+        actorId: "scope-owner",
+        organizationId: organization.id,
+        name: "Source workspace",
+        mode: "team",
+      });
+      const otherWorkspace = await tenants.createWorkspace({
+        actorId: "other-scope-owner",
+        organizationId: otherOrganization.id,
+        name: "Target workspace",
+        mode: "team",
+      });
+      const team = await tenants.createTeam({
+        actorId: "scope-owner",
+        organizationId: organization.id,
+        workspaceId: workspace.id,
+        name: "Source team",
+        memberActorIds: ["scope-owner"],
+        correlationId: randomUUID(),
+      });
+      await tenants.setWorkspacePolicyOverride({
+        actorId: "scope-owner",
+        organizationId: organization.id,
+        workspaceId: workspace.id,
+        dataResidencyRegion: "cl",
+        retentionDays: 365,
+        correlationId: randomUUID(),
+      });
+
+      await expect(
+        pool.query("UPDATE workspaces SET organization_id = $1 WHERE id = $2", [
+          otherOrganization.id,
+          workspace.id,
+        ]),
+      ).rejects.toThrow("Organization scope is immutable");
+      await expect(
+        pool.query("UPDATE teams SET workspace_id = $1 WHERE id = $2", [
+          otherWorkspace.id,
+          team.id,
+        ]),
+      ).rejects.toThrow("Tenant scope is immutable");
+      await expect(
+        pool.query(
+          "UPDATE workspace_policy_overrides SET organization_id = $1 WHERE workspace_id = $2",
+          [otherOrganization.id, workspace.id],
+        ),
+      ).rejects.toThrow("Tenant scope is immutable");
+      await expect(
+        pool.query(
+          `INSERT INTO documents
+           (id, organization_id, workspace_id, resource_type, resource_id,
+            classification, created_by_actor_id, created_at)
+           VALUES ($1, $2, $3, 'initiative', $4, 'internal', 'scope-owner', NOW())`,
+          [randomUUID(), otherOrganization.id, workspace.id, randomUUID()],
+        ),
+      ).rejects.toThrow("Workspace must belong to the record organization");
+
+      await expect(
+        pool.query<{ organization_id: string }>(
+          "SELECT organization_id FROM workspaces WHERE id = $1",
+          [workspace.id],
+        ),
+      ).resolves.toMatchObject({
+        rows: [{ organization_id: organization.id }],
+      });
+      await expect(
+        pool.query<{ workspace_id: string }>(
+          "SELECT workspace_id FROM teams WHERE id = $1",
+          [team.id],
+        ),
+      ).resolves.toMatchObject({ rows: [{ workspace_id: workspace.id }] });
+    },
+    120_000,
+  );
+
+  runPostgresIntegration(
     "persists the complete temporary access lifecycle and its append-only audit",
     async () => {
       let now = new Date("2026-09-15T15:00:00.000Z");

@@ -2,7 +2,9 @@
 
 ## Entidades y aislamiento
 
-`Organization` es el límite primario de aislamiento. Todos los workspaces pertenecen exactamente a una organización y nunca pueden cambiarla. Las consultas de workspace reciben ambos identificadores: si el workspace no pertenece a la organización del contexto, se responde como inexistente.
+`Organization` es el límite primario de aislamiento. Todos los workspaces pertenecen exactamente a una organización y nunca pueden cambiarla. PostgreSQL impide actualizar el `organization_id` de un workspace y mantiene inmutables el par `organization_id` + `workspace_id` de equipos, iniciativas, evaluaciones, decisiones, proyectos, documentos, políticas de workspace, grants y demás recursos institucionales ya soportados. También rechaza una inserción que relacione un workspace con otra organización. Las consultas de workspace reciben ambos identificadores: si el workspace no pertenece a la organización del contexto, se responde como inexistente.
+
+No existe una mutación genérica para transferir recursos entre organizaciones ni para mover un workspace o equipo. Un traslado entre organizaciones exige exportación e importación aprobadas; una reubicación futura de documento requerirá un comando específico, auditado y una migración que cambie la barrera de manera deliberada.
 
 | Entidad                   | Identidad                        | Regla central                                          |
 | ------------------------- | -------------------------------- | ------------------------------------------------------ |
