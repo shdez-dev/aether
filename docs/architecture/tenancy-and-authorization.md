@@ -33,9 +33,16 @@ workspace.
 
 ## Invitaciones
 
-La invitación almacena sólo el hash de su token, el correo normalizado, roles y workspaces concedidos, y vence entre 1 y 30 días. Al aceptarla, una transacción valida token, expiración y coincidencia con el correo OIDC autenticado; después crea membresías de organización y workspace, y marca la invitación como consumida.
+La invitación almacena sólo el hash de su token, el correo normalizado, roles y workspaces concedidos, y vence entre 1 y 30 días. Al aceptarla, una transacción valida token, expiración y coincidencia con el correo OIDC autenticado; después crea membresías de organización y workspace, y marca la invitación como consumida. Repetir la aceptación desde la misma identidad devuelve la invitación ya aceptada sin crear membresías ni auditoría duplicadas.
 
 El token de aceptación se reserva para el adaptador de correo/outbox; la API no lo devuelve. El envío de correo será una integración posterior, sin cambiar este modelo ni exponer el token en logs o URL.
+
+El destinatario autenticado puede rechazar una invitación vigente mediante el
+token; owner y admin pueden revocar una pendiente con autenticación reciente.
+Rechazo, revocación y expiración son terminales y no conceden membresías. La
+expiración se materializa de forma transaccional al intentar consumir o revocar
+una invitación vencida. Esos eventos conservan sólo actor, correlación e
+identificador de invitación, sin correo ni token.
 
 ## Auditoría de ciclo de vida
 

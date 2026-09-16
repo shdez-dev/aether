@@ -124,6 +124,26 @@ paths:
               schema: { type: string, format: uri }
         "404":
           $ref: "#/components/responses/Problem"
+  /v1/organizations/{organizationId}/invitations/{invitationId}:
+    delete:
+      tags: [Organizations]
+      operationId: revokeInvitation
+      summary: Revocar una invitación pendiente
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationId"
+        - name: invitationId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "204": { description: Invitación revocada y auditada. }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
         "429":
           $ref: "#/components/responses/Problem"
   /auth/callback:
@@ -916,6 +936,26 @@ paths:
           $ref: "#/components/responses/Problem"
         "403":
           $ref: "#/components/responses/Problem"
+  /v1/invitations/reject:
+    post:
+      tags: [Organizations]
+      operationId: rejectInvitation
+      summary: Rechazar una invitación vigente asociada al correo autenticado
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AcceptInvitationRequest"
+      responses:
+        "204": { description: Invitación rechazada y auditada. }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
   /v1/evaluation-standards:
     get:
       tags: [Initiatives]

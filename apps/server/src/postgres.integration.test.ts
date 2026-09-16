@@ -190,6 +190,139 @@ describe.sequential("PostgreSQL integration", () => {
   );
 
   runPostgresIntegration(
+    "persists rejected, revoked, and expired invitations without granting membership",
+    async () => {
+      let now = new Date("2026-09-16T03:00:00.000Z");
+      let tokenSequence = 0;
+      const tenants = new TenantService({
+        store: new PostgresTenantStore(pool),
+        ids: { next: randomUUID },
+        tokens: {
+          generate: () => `invitation-${++tokenSequence}`.padEnd(32, "x"),
+          hash: (value) => `invitation-lifecycle:${value}`,
+        },
+        clock: { now: () => now },
+      });
+      const organization = await tenants.createOrganization({
+        actorId: "invitation-owner",
+        actorEmail: "invitation-owner@example.test",
+        name: "Invitation lifecycle",
+        timezone: "UTC",
+        locale: "es-CL",
+      });
+      const accepted = await tenants.invite({
+        actorId: "invitation-owner",
+        organizationId: organization.id,
+        email: "accepted-lifecycle@example.test",
+        organizationRole: "member",
+        workspaceIds: [],
+        workspaceRole: "viewer",
+        expiresInDays: 7,
+      });
+      await tenants.acceptInvitation({
+        token: accepted.deliveryToken,
+        actorId: "accepted-lifecycle",
+        actorEmail: "accepted-lifecycle@example.test",
+      });
+      await expect(
+        tenants.acceptInvitation({
+          token: accepted.deliveryToken,
+          actorId: "accepted-lifecycle",
+          actorEmail: "accepted-lifecycle@example.test",
+        }),
+      ).resolves.toMatchObject({ id: accepted.invitation.id });
+
+      const rejected = await tenants.invite({
+        actorId: "invitation-owner",
+        organizationId: organization.id,
+        email: "rejected-lifecycle@example.test",
+        organizationRole: "member",
+        workspaceIds: [],
+        workspaceRole: "viewer",
+        expiresInDays: 7,
+      });
+      await tenants.rejectInvitation({
+        token: rejected.deliveryToken,
+        actorId: "rejected-lifecycle",
+        actorEmail: "rejected-lifecycle@example.test",
+      });
+
+      const revoked = await tenants.invite({
+        actorId: "invitation-owner",
+        organizationId: organization.id,
+        email: "revoked-lifecycle@example.test",
+        organizationRole: "member",
+        workspaceIds: [],
+        workspaceRole: "viewer",
+        expiresInDays: 7,
+      });
+      await tenants.revokeInvitation({
+        actorId: "invitation-owner",
+        organizationId: organization.id,
+        invitationId: revoked.invitation.id,
+        correlationId: randomUUID(),
+      });
+
+      const expired = await tenants.invite({
+        actorId: "invitation-owner",
+        organizationId: organization.id,
+        email: "expired-lifecycle@example.test",
+        organizationRole: "member",
+        workspaceIds: [],
+        workspaceRole: "viewer",
+        expiresInDays: 1,
+      });
+      now = new Date("2026-09-18T03:00:00.000Z");
+      await expect(
+        tenants.acceptInvitation({
+          token: expired.deliveryToken,
+          actorId: "expired-lifecycle",
+          actorEmail: "expired-lifecycle@example.test",
+        }),
+      ).rejects.toMatchObject({ code: "INVITATION_INVALID_OR_EXPIRED" });
+
+      const states = await pool.query<{
+        id: string;
+        accepted_at: Date | null;
+        rejected_at: Date | null;
+        revoked_at: Date | null;
+        expired_at: Date | null;
+      }>(
+        `SELECT id, accepted_at, rejected_at, revoked_at, expired_at
+         FROM invitations WHERE organization_id = $1`,
+        [organization.id],
+      );
+      const byId = new Map(states.rows.map((row) => [row.id, row]));
+      expect(byId.get(accepted.invitation.id)?.accepted_at).not.toBeNull();
+      expect(byId.get(rejected.invitation.id)?.rejected_at).not.toBeNull();
+      expect(byId.get(revoked.invitation.id)?.revoked_at).not.toBeNull();
+      expect(byId.get(expired.invitation.id)?.expired_at).not.toBeNull();
+      await expect(
+        new PostgresTenantStore(pool).findOrganizationRole({
+          actorId: "rejected-lifecycle",
+          organizationId: organization.id,
+        }),
+      ).resolves.toBeNull();
+      const audit = await pool.query<{ event_type: string }>(
+        `SELECT event_type FROM organization_membership_audit_events
+         WHERE organization_id = $1 AND event_type LIKE 'organization.invitation_%'
+         ORDER BY event_type`,
+        [organization.id],
+      );
+      expect(audit.rows.map((row) => row.event_type)).toEqual([
+        "organization.invitation_expired.v1",
+        "organization.invitation_issued.v1",
+        "organization.invitation_issued.v1",
+        "organization.invitation_issued.v1",
+        "organization.invitation_issued.v1",
+        "organization.invitation_rejected.v1",
+        "organization.invitation_revoked.v1",
+      ]);
+    },
+    120_000,
+  );
+
+  runPostgresIntegration(
     "makes organization and workspace scope immutable in PostgreSQL",
     async () => {
       const ids = { next: randomUUID };

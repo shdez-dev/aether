@@ -94,7 +94,9 @@ export interface TenantStore {
       occurredAt?: Date;
     };
   }): Promise<void>;
-  createWorkspace(input: Workspace & { actorId: string; audit: LifecycleAudit }): Promise<void>;
+  createWorkspace(
+    input: Workspace & { actorId: string; audit: LifecycleAudit },
+  ): Promise<void>;
   findWorkspace(workspaceId: string): Promise<Workspace | null>;
   listOrganizations(actorId: string): Promise<readonly Organization[]>;
   listWorkspaces(input: {
@@ -110,7 +112,11 @@ export interface TenantStore {
     workspaceId: string;
   }): Promise<WorkspaceRole | null>;
   createInvitation(
-    input: Invitation & { tokenHash: string; actorId: string; audit: LifecycleAudit },
+    input: Invitation & {
+      tokenHash: string;
+      actorId: string;
+      audit: LifecycleAudit;
+    },
   ): Promise<void>;
   acceptInvitation(input: {
     tokenHash: string;
@@ -120,6 +126,22 @@ export interface TenantStore {
     auditEventId: string;
     correlationId: string;
   }): Promise<Invitation | null>;
+  rejectInvitation(input: {
+    tokenHash: string;
+    actorId: string;
+    actorEmail: string;
+    now: Date;
+    auditEventId: string;
+    correlationId: string;
+  }): Promise<Invitation | null>;
+  revokeInvitation(input: {
+    organizationId: string;
+    invitationId: string;
+    actorId: string;
+    now: Date;
+    auditEventId: string;
+    correlationId: string;
+  }): Promise<"revoked" | "not_found" | "not_pending">;
   transferOwnership(input: {
     organizationId: string;
     actorId: string;
@@ -531,6 +553,47 @@ export class TenantService {
     return invitation;
   }
 
+  async rejectInvitation(input: {
+    token: string;
+    actorId: string;
+    actorEmail: string;
+    correlationId?: string;
+  }): Promise<Invitation> {
+    const invitation = await this.dependencies.store.rejectInvitation({
+      tokenHash: this.dependencies.tokens.hash(input.token),
+      actorId: input.actorId,
+      actorEmail: input.actorEmail.toLowerCase(),
+      now: this.dependencies.clock.now(),
+      auditEventId: this.dependencies.ids.next(),
+      correlationId: input.correlationId ?? this.dependencies.ids.next(),
+    });
+    if (!invitation) throw new InvitationError("INVITATION_INVALID_OR_EXPIRED");
+    return invitation;
+  }
+
+  async revokeInvitation(input: {
+    actorId: string;
+    organizationId: string;
+    invitationId: string;
+    correlationId: string;
+  }): Promise<void> {
+    await this.assertAllowed(
+      input.actorId,
+      input.organizationId,
+      null,
+      "member:invite",
+    );
+    const result = await this.dependencies.store.revokeInvitation({
+      ...input,
+      now: this.dependencies.clock.now(),
+      auditEventId: this.dependencies.ids.next(),
+    });
+    if (result === "not_found")
+      throw new InvitationLifecycleError("INVITATION_NOT_FOUND");
+    if (result === "not_pending")
+      throw new InvitationLifecycleError("INVITATION_NOT_PENDING");
+  }
+
   async transferOwnership(input: {
     actorId: string;
     organizationId: string;
@@ -808,6 +871,13 @@ export async function assertWorkspaceWritable(
 }
 export class InvitationError extends Error {
   constructor(public readonly code: "INVITATION_INVALID_OR_EXPIRED") {
+    super(code);
+  }
+}
+export class InvitationLifecycleError extends Error {
+  constructor(
+    public readonly code: "INVITATION_NOT_FOUND" | "INVITATION_NOT_PENDING",
+  ) {
     super(code);
   }
 }

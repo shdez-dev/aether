@@ -26,6 +26,7 @@ import {
   ProjectDomainError,
   ProjectVersionConflictError,
   InvitationError,
+  InvitationLifecycleError,
   OwnershipTransferError,
   MembershipStatusError,
   ResourceNotFoundError,
@@ -49,6 +50,7 @@ import {
 } from "@aether/application";
 import {
   CreateInvitationRequestSchema,
+  InvitationTokenRequestSchema,
   TransferOrganizationOwnershipRequestSchema,
   ChangeMembershipStatusRequestSchema,
   ReassignMemberResponsibilitiesRequestSchema,
@@ -304,7 +306,9 @@ export async function buildServer(input: {
                       "SUPPORT_ACCESS_NOT_PENDING",
                       "SUPPORT_ACCESS_NOT_ACTIVE",
                       "SUPPORT_ACCESS_EXPIRED",
-                    ].includes(error.code))
+                    ].includes(error.code)) ||
+                  (error instanceof InvitationLifecycleError &&
+                    error.code === "INVITATION_NOT_PENDING")
                 ? 409
                 : error instanceof CsrfError ||
                     error instanceof RecentAuthenticationRequiredError ||
@@ -325,6 +329,8 @@ export async function buildServer(input: {
                       ].includes(error.code))
                   ? 403
                   : error instanceof ResourceNotFoundError ||
+                      (error instanceof InvitationLifecycleError &&
+                        error.code === "INVITATION_NOT_FOUND") ||
                       error instanceof DocumentNotFoundError ||
                       error instanceof OutboxDeadLetterNotFoundError ||
                       error instanceof PolicyNotConfiguredError ||
@@ -424,6 +430,8 @@ export async function buildServer(input: {
                                   ].includes(error.code))
                               ? "FORBIDDEN"
                               : error instanceof ResourceNotFoundError ||
+                                  (error instanceof InvitationLifecycleError &&
+                                    error.code === "INVITATION_NOT_FOUND") ||
                                   error instanceof DocumentNotFoundError ||
                                   error instanceof
                                     OutboxDeadLetterNotFoundError ||
@@ -449,12 +457,15 @@ export async function buildServer(input: {
                                         : error instanceof InvitationError
                                           ? "INVITATION_INVALID_OR_EXPIRED"
                                           : error instanceof
-                                              OwnershipTransferError
+                                              InvitationLifecycleError
                                             ? error.code
                                             : error instanceof
-                                                MembershipStatusError
-                                              ? error.code.toUpperCase()
-                                              : "VALIDATION_ERROR",
+                                                OwnershipTransferError
+                                              ? error.code
+                                              : error instanceof
+                                                  MembershipStatusError
+                                                ? error.code.toUpperCase()
+                                                : "VALIDATION_ERROR",
         correlationId: reply.getHeader("X-Correlation-ID"),
         instance: request.url,
       });
@@ -1190,6 +1201,30 @@ export async function buildServer(input: {
       return reply.code(204).send();
     },
   );
+  app.delete(
+    "/v1/organizations/:organizationId/invitations/:invitationId",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      assertRecentAuthentication(session, input.config);
+      const params = z
+        .object({
+          organizationId: z.string().uuid(),
+          invitationId: z.string().uuid(),
+        })
+        .parse(request.params);
+      await input.tenants.revokeInvitation({
+        actorId: session.actorId,
+        correlationId: correlationId(reply),
+        ...params,
+      });
+      return reply.code(204).send();
+    },
+  );
   app.patch(
     "/v1/organizations/:organizationId/members/:actorId/status",
     async (request, reply) => {
@@ -1365,9 +1400,7 @@ export async function buildServer(input: {
       input.auth,
       input.config,
     );
-    const body = z
-      .object({ token: z.string().min(32).max(255) })
-      .parse(request.body);
+    const body = InvitationTokenRequestSchema.parse(request.body);
     const invitation = await input.tenants.acceptInvitation({
       token: body.token,
       actorId: session.actorId,
@@ -1391,6 +1424,22 @@ export async function buildServer(input: {
     return reply
       .code(200)
       .send({ ...invitation, expiresAt: invitation.expiresAt.toISOString() });
+  });
+  app.post("/v1/invitations/reject", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    const body = InvitationTokenRequestSchema.parse(request.body);
+    await input.tenants.rejectInvitation({
+      token: body.token,
+      actorId: session.actorId,
+      actorEmail: requireActorEmail(session.actorEmail),
+      correlationId: correlationId(reply),
+    });
+    return reply.code(204).send();
   });
   app.post("/v1/initiatives", async (request, reply) => {
     const session = await requireSession(

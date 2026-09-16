@@ -68,6 +68,9 @@ export const CreateInvitationRequestSchema = z.object({
   workspaceRole: WorkspaceRoleSchema.default("member"),
   expiresInDays: z.number().int().min(1).max(30).default(7),
 });
+export const InvitationTokenRequestSchema = z.object({
+  token: z.string().min(32).max(255),
+});
 
 export const TransferOrganizationOwnershipRequestSchema = z.object({
   targetActorId: z.string().trim().min(1).max(255),
@@ -156,6 +159,9 @@ export type ReplaceTeamMembersRequest = z.infer<
 >;
 export type CreateInvitationRequest = z.infer<
   typeof CreateInvitationRequestSchema
+>;
+export type InvitationTokenRequest = z.infer<
+  typeof InvitationTokenRequestSchema
 >;
 export type InvitationResponse = z.infer<typeof InvitationResponseSchema>;
 export type TransferOrganizationOwnershipRequest = z.infer<

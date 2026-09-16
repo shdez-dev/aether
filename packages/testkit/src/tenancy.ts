@@ -64,6 +64,13 @@ export class InMemoryTenantStore implements TenantStore {
     "active" | "suspended" | "revoked"
   >();
   private readonly workspaceRoles = new Map<string, WorkspaceRole>();
+  private readonly invitationStates = new Map<
+    string,
+    {
+      state: "pending" | "accepted" | "rejected" | "revoked" | "expired";
+      acceptedByActorId?: string;
+    }
+  >();
 
   async bootstrapOrganization(input: {
     organization: Organization;
@@ -218,6 +225,7 @@ export class InMemoryTenantStore implements TenantStore {
       occurredAt: new Date(),
     };
     this.invitations.set(input.tokenHash, input);
+    this.invitationStates.set(input.tokenHash, { state: "pending" });
     this.organizationMembershipAuditEvents.push({
       id: audit.auditEventId,
       organizationId: input.organizationId,
@@ -242,13 +250,29 @@ export class InMemoryTenantStore implements TenantStore {
     correlationId: string;
   }): Promise<Invitation | null> {
     const invitation = this.invitations.get(input.tokenHash);
+    const lifecycle = this.invitationStates.get(input.tokenHash);
     if (
       !invitation ||
-      invitation.expiresAt <= input.now ||
       invitation.email.toLowerCase() !== input.actorEmail.toLowerCase()
     )
       return null;
-    this.invitations.delete(input.tokenHash);
+    if (lifecycle?.state === "accepted")
+      return lifecycle.acceptedByActorId === input.actorId ? invitation : null;
+    if (lifecycle?.state !== "pending") return null;
+    if (invitation.expiresAt <= input.now) {
+      this.expireInvitation({
+        tokenHash: input.tokenHash,
+        actorId: input.actorId,
+        auditEventId: input.auditEventId,
+        correlationId: input.correlationId,
+        occurredAt: input.now,
+      });
+      return null;
+    }
+    this.invitationStates.set(input.tokenHash, {
+      state: "accepted",
+      acceptedByActorId: input.actorId,
+    });
     this.organizationRoles.set(
       this.organizationKey(input.actorId, invitation.organizationId),
       invitation.organizationRole,
@@ -273,6 +297,111 @@ export class InMemoryTenantStore implements TenantStore {
       payload: { invitationId: invitation.id },
     });
     return invitation;
+  }
+  async rejectInvitation(input: {
+    tokenHash: string;
+    actorId: string;
+    actorEmail: string;
+    now: Date;
+    auditEventId: string;
+    correlationId: string;
+  }): Promise<Invitation | null> {
+    const invitation = this.invitations.get(input.tokenHash);
+    const lifecycle = this.invitationStates.get(input.tokenHash);
+    if (
+      !invitation ||
+      lifecycle?.state !== "pending" ||
+      invitation.email.toLowerCase() !== input.actorEmail.toLowerCase()
+    )
+      return null;
+    if (invitation.expiresAt <= input.now) {
+      this.expireInvitation({
+        tokenHash: input.tokenHash,
+        actorId: input.actorId,
+        auditEventId: input.auditEventId,
+        correlationId: input.correlationId,
+        occurredAt: input.now,
+      });
+      return null;
+    }
+    this.invitationStates.set(input.tokenHash, { state: "rejected" });
+    this.organizationMembershipAuditEvents.push({
+      id: input.auditEventId,
+      organizationId: invitation.organizationId,
+      actorId: input.actorId,
+      targetActorId: input.actorId,
+      eventType: "organization.invitation_rejected.v1",
+      correlationId: input.correlationId,
+      occurredAt: input.now,
+      payload: { invitationId: invitation.id },
+    });
+    return invitation;
+  }
+  async revokeInvitation(input: {
+    organizationId: string;
+    invitationId: string;
+    actorId: string;
+    now: Date;
+    auditEventId: string;
+    correlationId: string;
+  }): Promise<"revoked" | "not_found" | "not_pending"> {
+    const found = [...this.invitations.entries()].find(
+      ([, invitation]) =>
+        invitation.id === input.invitationId &&
+        invitation.organizationId === input.organizationId,
+    );
+    if (!found) return "not_found";
+    const [tokenHash, invitation] = found;
+    const lifecycle = this.invitationStates.get(tokenHash);
+    if (lifecycle?.state !== "pending") return "not_pending";
+    if (invitation.expiresAt <= input.now) {
+      this.expireInvitation({
+        tokenHash,
+        actorId: input.actorId,
+        auditEventId: input.auditEventId,
+        correlationId: input.correlationId,
+        occurredAt: input.now,
+      });
+      return "not_pending";
+    }
+    this.invitationStates.set(tokenHash, { state: "revoked" });
+    this.organizationMembershipAuditEvents.push({
+      id: input.auditEventId,
+      organizationId: invitation.organizationId,
+      actorId: input.actorId,
+      targetActorId: input.actorId,
+      eventType: "organization.invitation_revoked.v1",
+      correlationId: input.correlationId,
+      occurredAt: input.now,
+      payload: { invitationId: invitation.id },
+    });
+    return "revoked";
+  }
+
+  private expireInvitation(input: {
+    tokenHash: string;
+    actorId: string;
+    auditEventId: string;
+    correlationId: string;
+    occurredAt: Date;
+  }): void {
+    const invitation = this.invitations.get(input.tokenHash);
+    if (
+      !invitation ||
+      this.invitationStates.get(input.tokenHash)?.state !== "pending"
+    )
+      return;
+    this.invitationStates.set(input.tokenHash, { state: "expired" });
+    this.organizationMembershipAuditEvents.push({
+      id: input.auditEventId,
+      organizationId: invitation.organizationId,
+      actorId: input.actorId,
+      targetActorId: input.actorId,
+      eventType: "organization.invitation_expired.v1",
+      correlationId: input.correlationId,
+      occurredAt: input.occurredAt,
+      payload: { invitationId: invitation.id },
+    });
   }
   async transferOwnership(input: {
     organizationId: string;

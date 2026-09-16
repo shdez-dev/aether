@@ -12,6 +12,8 @@ import { InMemoryTenantStore } from "./tenancy.js";
 
 function createTenantService(now = new Date("2026-09-08T12:00:00.000Z")) {
   let sequence = 0;
+  let tokenSequence = 0;
+  let currentTime = now;
   const store = new InMemoryTenantStore();
   const service = new TenantService({
     store,
@@ -20,12 +22,18 @@ function createTenantService(now = new Date("2026-09-08T12:00:00.000Z")) {
         `00000000-0000-4000-8000-${String(++sequence).padStart(12, "0")}`,
     },
     tokens: {
-      generate: () => "x".repeat(43),
+      generate: () => String(++tokenSequence).padStart(43, "x"),
       hash: (value) => `hash:${value}`,
     },
-    clock: { now: () => now },
+    clock: { now: () => currentTime },
   });
-  return { service, store };
+  return {
+    service,
+    store,
+    setTime: (value: Date) => {
+      currentTime = value;
+    },
+  };
 }
 
 describe("TenantService", () => {
@@ -86,12 +94,121 @@ describe("TenantService", () => {
         payload: { mode: "institutional" },
       }),
     ]);
-    expect(JSON.stringify(store.organizationMembershipAuditEvents)).not.toContain(
-      "member@example.test",
+    expect(
+      JSON.stringify(store.organizationMembershipAuditEvents),
+    ).not.toContain("member@example.test");
+    expect(
+      JSON.stringify(store.organizationMembershipAuditEvents),
+    ).not.toContain(invitation.deliveryToken);
+  });
+
+  it("rechaza, revoca y vence invitaciones sin conceder acceso ni duplicar aceptación", async () => {
+    const { service, store, setTime } = createTenantService();
+    const organization = await service.createOrganization({
+      actorId: "owner",
+      actorEmail: "owner@example.test",
+      name: "Ciclo de invitaciones",
+      timezone: "UTC",
+      locale: "es-CL",
+    });
+    const accepted = await service.invite({
+      actorId: "owner",
+      organizationId: organization.id,
+      email: "accepted@example.test",
+      organizationRole: "member",
+      workspaceIds: [],
+      workspaceRole: "viewer",
+      expiresInDays: 7,
+    });
+    await service.acceptInvitation({
+      token: accepted.deliveryToken,
+      actorId: "accepted",
+      actorEmail: "accepted@example.test",
+    });
+    await expect(
+      service.acceptInvitation({
+        token: accepted.deliveryToken,
+        actorId: "accepted",
+        actorEmail: "accepted@example.test",
+      }),
+    ).resolves.toMatchObject({ id: accepted.invitation.id });
+
+    const rejected = await service.invite({
+      actorId: "owner",
+      organizationId: organization.id,
+      email: "rejected@example.test",
+      organizationRole: "member",
+      workspaceIds: [],
+      workspaceRole: "viewer",
+      expiresInDays: 7,
+    });
+    await service.rejectInvitation({
+      token: rejected.deliveryToken,
+      actorId: "rejected",
+      actorEmail: "rejected@example.test",
+    });
+    await expect(
+      service.acceptInvitation({
+        token: rejected.deliveryToken,
+        actorId: "rejected",
+        actorEmail: "rejected@example.test",
+      }),
+    ).rejects.toMatchObject({ code: "INVITATION_INVALID_OR_EXPIRED" });
+
+    const revoked = await service.invite({
+      actorId: "owner",
+      organizationId: organization.id,
+      email: "revoked@example.test",
+      organizationRole: "member",
+      workspaceIds: [],
+      workspaceRole: "viewer",
+      expiresInDays: 7,
+    });
+    await service.revokeInvitation({
+      actorId: "owner",
+      organizationId: organization.id,
+      invitationId: revoked.invitation.id,
+      correlationId: "00000000-0000-4000-8000-000000000114",
+    });
+    await expect(
+      service.acceptInvitation({
+        token: revoked.deliveryToken,
+        actorId: "revoked",
+        actorEmail: "revoked@example.test",
+      }),
+    ).rejects.toMatchObject({ code: "INVITATION_INVALID_OR_EXPIRED" });
+
+    const expired = await service.invite({
+      actorId: "owner",
+      organizationId: organization.id,
+      email: "expired@example.test",
+      organizationRole: "member",
+      workspaceIds: [],
+      workspaceRole: "viewer",
+      expiresInDays: 1,
+    });
+    setTime(new Date("2026-09-10T12:00:00.000Z"));
+    await expect(
+      service.acceptInvitation({
+        token: expired.deliveryToken,
+        actorId: "expired",
+        actorEmail: "expired@example.test",
+      }),
+    ).rejects.toMatchObject({ code: "INVITATION_INVALID_OR_EXPIRED" });
+    expect(
+      store.organizationMembershipAuditEvents.map((event) => event.eventType),
+    ).toEqual(
+      expect.arrayContaining([
+        "organization.invitation_rejected.v1",
+        "organization.invitation_revoked.v1",
+        "organization.invitation_expired.v1",
+      ]),
     );
-    expect(JSON.stringify(store.organizationMembershipAuditEvents)).not.toContain(
-      invitation.deliveryToken,
-    );
+    expect(
+      store.organizationMembershipAuditEvents.filter(
+        (event) => event.eventType === "organization.membership_activated.v1",
+      ),
+    ).toHaveLength(1);
   });
 
   it("gestiona equipos dentro de un workspace sin convertirlos en permisos implícitos", async () => {

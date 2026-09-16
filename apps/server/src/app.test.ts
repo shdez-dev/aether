@@ -423,6 +423,66 @@ describe("HTTP authentication boundary", () => {
         })
       ).statusCode,
     ).toBe(401);
+    const rejectedInvitation = await tenants.invite({
+      actorId: "owner",
+      organizationId: organization.id,
+      email: "rejecting-viewer@example.test",
+      organizationRole: "member",
+      workspaceIds: [],
+      workspaceRole: "viewer",
+      expiresInDays: 7,
+    });
+    const rejectingToken = "rejecting-viewer-session";
+    const rejectingCsrf = "rejecting-viewer-csrf";
+    await createAuthenticatedSession(authStore, {
+      token: rejectingToken,
+      actorId: "rejecting-viewer",
+      actorEmail: "rejecting-viewer@example.test",
+    });
+    const rejected = await app.inject({
+      method: "POST",
+      url: "/v1/invitations/reject",
+      headers: {
+        origin: config.webOrigin,
+        "x-csrf-token": rejectingCsrf,
+        cookie: `aether_session=${rejectingToken}; aether_csrf=${rejectingCsrf}`,
+      },
+      payload: { token: rejectedInvitation.deliveryToken },
+    });
+    expect(rejected.statusCode).toBe(204);
+    const rejectedAcceptance = await app.inject({
+      method: "POST",
+      url: "/v1/invitations/accept",
+      headers: {
+        origin: config.webOrigin,
+        "x-csrf-token": rejectingCsrf,
+        cookie: `aether_session=${rejectingToken}; aether_csrf=${rejectingCsrf}`,
+      },
+      payload: { token: rejectedInvitation.deliveryToken },
+    });
+    expect(rejectedAcceptance.statusCode).toBe(400);
+    expect(rejectedAcceptance.json()).toMatchObject({
+      code: "INVITATION_INVALID_OR_EXPIRED",
+    });
+    const revokedInvitation = await tenants.invite({
+      actorId: "owner",
+      organizationId: organization.id,
+      email: "revoked-viewer@example.test",
+      organizationRole: "member",
+      workspaceIds: [],
+      workspaceRole: "viewer",
+      expiresInDays: 7,
+    });
+    const revoked = await app.inject({
+      method: "DELETE",
+      url: `/v1/organizations/${organization.id}/invitations/${revokedInvitation.invitation.id}`,
+      headers: {
+        origin: config.webOrigin,
+        "x-csrf-token": ownerCsrf,
+        cookie: `aether_session=${ownerToken}; aether_csrf=${ownerCsrf}`,
+      },
+    });
+    expect(revoked.statusCode).toBe(204);
     const otherOrganization = await tenants.createOrganization({
       actorId: "other-owner",
       actorEmail: "other-owner@example.test",

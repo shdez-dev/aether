@@ -503,13 +503,7 @@ export class PostgresTenantStore implements TenantStore {
       await client.query("BEGIN");
       await client.query(
         "INSERT INTO workspaces (id, organization_id, name, mode, version) VALUES ($1, $2, $3, $4, $5)",
-        [
-          input.id,
-          input.organizationId,
-          input.name,
-          input.mode,
-          input.version,
-        ],
+        [input.id, input.organizationId, input.name, input.mode, input.version],
       );
       await client.query(
         `INSERT INTO workspace_audit_events
@@ -585,7 +579,11 @@ export class PostgresTenantStore implements TenantStore {
   }
 
   async createInvitation(
-    input: Invitation & { tokenHash: string; actorId: string; audit: LifecycleAudit },
+    input: Invitation & {
+      tokenHash: string;
+      actorId: string;
+      audit: LifecycleAudit;
+    },
   ): Promise<void> {
     const client = await this.pool.connect();
     try {
@@ -642,9 +640,10 @@ export class PostgresTenantStore implements TenantStore {
     try {
       await client.query("BEGIN");
       const found = await client.query<InvitationRow>(
-        `SELECT id, organization_id, email, organization_role, workspace_ids, workspace_role, expires_at
-         FROM invitations WHERE token_hash = $1 AND accepted_at IS NULL AND expires_at > $2 AND LOWER(email) = LOWER($3) FOR UPDATE`,
-        [input.tokenHash, input.now, input.actorEmail],
+        `SELECT id, organization_id, email, organization_role, workspace_ids, workspace_role, expires_at,
+                accepted_at, accepted_by_actor_id, rejected_at, revoked_at, expired_at
+         FROM invitations WHERE token_hash = $1 AND LOWER(email) = LOWER($2) FOR UPDATE`,
+        [input.tokenHash, input.actorEmail],
       );
       const row = found.rows[0];
       if (!row) {
@@ -652,6 +651,31 @@ export class PostgresTenantStore implements TenantStore {
         return null;
       }
       const invitation = toInvitation(row);
+      if (row.accepted_at) {
+        await client.query("COMMIT");
+        return row.accepted_by_actor_id === input.actorId ? invitation : null;
+      }
+      if (row.rejected_at || row.revoked_at || row.expired_at) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      if (invitation.expiresAt <= input.now) {
+        await client.query(
+          "UPDATE invitations SET expired_at = $2 WHERE id = $1",
+          [invitation.id, input.now],
+        );
+        await this.recordInvitationAuditEvent(client, {
+          id: input.auditEventId,
+          organizationId: invitation.organizationId,
+          actorId: input.actorId,
+          eventType: "organization.invitation_expired.v1",
+          correlationId: input.correlationId,
+          occurredAt: input.now,
+          invitationId: invitation.id,
+        });
+        await client.query("COMMIT");
+        return null;
+      }
       await client.query(
         `INSERT INTO organization_memberships (organization_id, actor_id, actor_email, role) VALUES ($1, $2, $3, $4)
          ON CONFLICT (organization_id, actor_id) DO UPDATE SET role = EXCLUDED.role, actor_email = EXCLUDED.actor_email, status = 'active', status_changed_at = $5`,
@@ -695,6 +719,178 @@ export class PostgresTenantStore implements TenantStore {
     } finally {
       client.release();
     }
+  }
+
+  async rejectInvitation(input: {
+    tokenHash: string;
+    actorId: string;
+    actorEmail: string;
+    now: Date;
+    auditEventId: string;
+    correlationId: string;
+  }): Promise<Invitation | null> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const found = await client.query<InvitationRow>(
+        `SELECT id, organization_id, email, organization_role, workspace_ids, workspace_role, expires_at,
+                accepted_at, accepted_by_actor_id, rejected_at, revoked_at, expired_at
+         FROM invitations WHERE token_hash = $1 AND LOWER(email) = LOWER($2) FOR UPDATE`,
+        [input.tokenHash, input.actorEmail],
+      );
+      const row = found.rows[0];
+      if (
+        !row ||
+        row.accepted_at ||
+        row.rejected_at ||
+        row.revoked_at ||
+        row.expired_at
+      ) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const invitation = toInvitation(row);
+      if (invitation.expiresAt <= input.now) {
+        await client.query(
+          "UPDATE invitations SET expired_at = $2 WHERE id = $1",
+          [invitation.id, input.now],
+        );
+        await this.recordInvitationAuditEvent(client, {
+          id: input.auditEventId,
+          organizationId: invitation.organizationId,
+          actorId: input.actorId,
+          eventType: "organization.invitation_expired.v1",
+          correlationId: input.correlationId,
+          occurredAt: input.now,
+          invitationId: invitation.id,
+        });
+        await client.query("COMMIT");
+        return null;
+      }
+      await client.query(
+        "UPDATE invitations SET rejected_at = $2, rejected_by_actor_id = $3 WHERE id = $1",
+        [invitation.id, input.now, input.actorId],
+      );
+      await this.recordInvitationAuditEvent(client, {
+        id: input.auditEventId,
+        organizationId: invitation.organizationId,
+        actorId: input.actorId,
+        eventType: "organization.invitation_rejected.v1",
+        correlationId: input.correlationId,
+        occurredAt: input.now,
+        invitationId: invitation.id,
+      });
+      await client.query("COMMIT");
+      return invitation;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async revokeInvitation(input: {
+    organizationId: string;
+    invitationId: string;
+    actorId: string;
+    now: Date;
+    auditEventId: string;
+    correlationId: string;
+  }): Promise<"revoked" | "not_found" | "not_pending"> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const found = await client.query<InvitationRow>(
+        `SELECT id, organization_id, email, organization_role, workspace_ids, workspace_role, expires_at,
+                accepted_at, accepted_by_actor_id, rejected_at, revoked_at, expired_at
+         FROM invitations WHERE id = $1 AND organization_id = $2 FOR UPDATE`,
+        [input.invitationId, input.organizationId],
+      );
+      const row = found.rows[0];
+      if (!row) {
+        await client.query("ROLLBACK");
+        return "not_found";
+      }
+      if (
+        row.accepted_at ||
+        row.rejected_at ||
+        row.revoked_at ||
+        row.expired_at
+      ) {
+        await client.query("ROLLBACK");
+        return "not_pending";
+      }
+      const invitation = toInvitation(row);
+      if (invitation.expiresAt <= input.now) {
+        await client.query(
+          "UPDATE invitations SET expired_at = $2 WHERE id = $1",
+          [invitation.id, input.now],
+        );
+        await this.recordInvitationAuditEvent(client, {
+          id: input.auditEventId,
+          organizationId: invitation.organizationId,
+          actorId: input.actorId,
+          eventType: "organization.invitation_expired.v1",
+          correlationId: input.correlationId,
+          occurredAt: input.now,
+          invitationId: invitation.id,
+        });
+        await client.query("COMMIT");
+        return "not_pending";
+      }
+      await client.query(
+        "UPDATE invitations SET revoked_at = $2, revoked_by_actor_id = $3 WHERE id = $1",
+        [invitation.id, input.now, input.actorId],
+      );
+      await this.recordInvitationAuditEvent(client, {
+        id: input.auditEventId,
+        organizationId: invitation.organizationId,
+        actorId: input.actorId,
+        eventType: "organization.invitation_revoked.v1",
+        correlationId: input.correlationId,
+        occurredAt: input.now,
+        invitationId: invitation.id,
+      });
+      await client.query("COMMIT");
+      return "revoked";
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  private async recordInvitationAuditEvent(
+    client: PoolClient,
+    input: {
+      id: string;
+      organizationId: string;
+      actorId: string;
+      eventType:
+        | "organization.invitation_rejected.v1"
+        | "organization.invitation_revoked.v1"
+        | "organization.invitation_expired.v1";
+      correlationId: string;
+      occurredAt: Date;
+      invitationId: string;
+    },
+  ): Promise<void> {
+    await client.query(
+      `INSERT INTO organization_membership_audit_events
+       (id, organization_id, actor_id, target_actor_id, event_type, correlation_id, occurred_at, payload)
+       VALUES ($1, $2, $3, $3, $4, $5, $6, $7)`,
+      [
+        input.id,
+        input.organizationId,
+        input.actorId,
+        input.eventType,
+        input.correlationId,
+        input.occurredAt,
+        asJson({ invitationId: input.invitationId }),
+      ],
+    );
   }
 
   async transferOwnership(input: {
@@ -2261,6 +2457,11 @@ type InvitationRow = {
   workspace_ids: string[];
   workspace_role: WorkspaceRole;
   expires_at: Date;
+  accepted_at: Date | null;
+  accepted_by_actor_id: string | null;
+  rejected_at: Date | null;
+  revoked_at: Date | null;
+  expired_at: Date | null;
 };
 function toWorkspace(row: WorkspaceRow): Workspace {
   return {
