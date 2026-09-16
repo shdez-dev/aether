@@ -41,6 +41,7 @@ import {
   OutboxAdministrationService,
   OutboxDeadLetterNotFoundError,
   WorkspaceArchivedError,
+  PolicyNotConfiguredError,
 } from "@aether/application";
 import {
   CreateInvitationRequestSchema,
@@ -52,6 +53,8 @@ import {
   CreateWorkspaceRequestSchema,
   CreateTeamRequestSchema,
   ReplaceTeamMembersRequestSchema,
+  TenancyPolicyValuesSchema,
+  WorkspacePolicyOverrideRequestSchema,
   DecideInitiativeRequestSchema,
   ActivateEvaluationStandardRequestSchema,
   AuditHistoryQuerySchema,
@@ -377,21 +380,24 @@ export async function buildServer(input: {
                                 error instanceof DocumentNotFoundError ||
                                 error instanceof OutboxDeadLetterNotFoundError
                               ? "NOT_FOUND"
-                              : error instanceof
-                                    InitiativeVersionConflictError ||
-                                  error instanceof ProjectVersionConflictError
-                                ? "CONFLICT"
-                                : error instanceof InitiativeDomainError ||
-                                    error instanceof DocumentValidationError ||
-                                    error instanceof ProjectDomainError
-                                  ? "PRECONDITION_FAILED"
-                                  : error instanceof InvitationError
-                                    ? "INVITATION_INVALID_OR_EXPIRED"
-                                    : error instanceof OwnershipTransferError
-                                      ? error.code
-                                      : error instanceof MembershipStatusError
-                                        ? error.code.toUpperCase()
-                                        : "VALIDATION_ERROR",
+                              : error instanceof PolicyNotConfiguredError
+                                ? "NOT_FOUND"
+                                : error instanceof
+                                      InitiativeVersionConflictError ||
+                                    error instanceof ProjectVersionConflictError
+                                  ? "CONFLICT"
+                                  : error instanceof InitiativeDomainError ||
+                                      error instanceof
+                                        DocumentValidationError ||
+                                      error instanceof ProjectDomainError
+                                    ? "PRECONDITION_FAILED"
+                                    : error instanceof InvitationError
+                                      ? "INVITATION_INVALID_OR_EXPIRED"
+                                      : error instanceof OwnershipTransferError
+                                        ? error.code
+                                        : error instanceof MembershipStatusError
+                                          ? error.code.toUpperCase()
+                                          : "VALIDATION_ERROR",
         correlationId: reply.getHeader("X-Correlation-ID"),
         instance: request.url,
       });
@@ -547,6 +553,7 @@ export async function buildServer(input: {
     const organization = await input.tenants.createOrganization({
       actorId: session.actorId,
       actorEmail: requireActorEmail(session.actorEmail),
+      correlationId: correlationId(reply),
       ...body,
     });
     return reply.code(201).send(organization);
@@ -560,6 +567,53 @@ export async function buildServer(input: {
     );
     return input.tenants.listOrganizations(session.actorId);
   });
+  app.get(
+    "/v1/organizations/:organizationId/policy",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      const params = z
+        .object({ organizationId: z.string().uuid() })
+        .parse(request.params);
+      const query = z
+        .object({ workspaceId: z.string().uuid().optional() })
+        .parse(request.query);
+      return toEffectiveTenancyPolicyResponse(
+        await input.tenants.getEffectivePolicy({
+          actorId: session.actorId,
+          ...params,
+          ...(query.workspaceId ? { workspaceId: query.workspaceId } : {}),
+        }),
+      );
+    },
+  );
+  app.put(
+    "/v1/organizations/:organizationId/policy",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      assertCsrf(request, input.config);
+      const params = z
+        .object({ organizationId: z.string().uuid() })
+        .parse(request.params);
+      const body = TenancyPolicyValuesSchema.parse(request.body);
+      const policy = await input.tenants.updateOrganizationPolicy({
+        actorId: session.actorId,
+        correlationId: correlationId(reply),
+        ...params,
+        ...body,
+      });
+      return toOrganizationPolicyResponse(policy);
+    },
+  );
   app.get(
     "/v1/organizations/:organizationId/workspaces",
     async (request, reply) => {
@@ -628,6 +682,56 @@ export async function buildServer(input: {
         })
         .parse(request.params);
       await input.tenants.archiveWorkspace({
+        actorId: session.actorId,
+        correlationId: correlationId(reply),
+        ...params,
+      });
+      return reply.code(204).send();
+    },
+  );
+  app.put(
+    "/v1/organizations/:organizationId/workspaces/:workspaceId/policy-override",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      assertCsrf(request, input.config);
+      const params = z
+        .object({
+          organizationId: z.string().uuid(),
+          workspaceId: z.string().uuid(),
+        })
+        .parse(request.params);
+      const body = WorkspacePolicyOverrideRequestSchema.parse(request.body);
+      const override = await input.tenants.setWorkspacePolicyOverride({
+        actorId: session.actorId,
+        correlationId: correlationId(reply),
+        ...params,
+        ...body,
+      });
+      return toWorkspacePolicyOverrideResponse(override);
+    },
+  );
+  app.delete(
+    "/v1/organizations/:organizationId/workspaces/:workspaceId/policy-override",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      assertCsrf(request, input.config);
+      const params = z
+        .object({
+          organizationId: z.string().uuid(),
+          workspaceId: z.string().uuid(),
+        })
+        .parse(request.params);
+      await input.tenants.clearWorkspacePolicyOverride({
         actorId: session.actorId,
         correlationId: correlationId(reply),
         ...params,
@@ -2033,6 +2137,55 @@ function toProjectResponse(
     ...project,
     createdAt: project.createdAt.toISOString(),
     updatedAt: project.updatedAt.toISOString(),
+  };
+}
+function toOrganizationPolicyResponse(policy: {
+  organizationId: string;
+  dataResidencyRegion: string;
+  retentionDays: number;
+  version: number;
+  updatedByActorId: string;
+  updatedAt: Date;
+}) {
+  return {
+    ...policy,
+    updatedAt: policy.updatedAt.toISOString(),
+  };
+}
+function toWorkspacePolicyOverrideResponse(
+  override: {
+    organizationId: string;
+    workspaceId: string;
+    dataResidencyRegion: string | null;
+    retentionDays: number | null;
+    version: number;
+    updatedByActorId: string;
+    updatedAt: Date;
+  } | null,
+) {
+  if (!override) return null;
+  return {
+    ...override,
+    updatedAt: override.updatedAt.toISOString(),
+  };
+}
+function toEffectiveTenancyPolicyResponse(policy: {
+  organizationId: string;
+  workspaceId: string | null;
+  dataResidencyRegion: { value: string; origin: "organization" | "workspace" };
+  retentionDays: { value: number; origin: "organization" | "workspace" };
+  organizationPolicy: Parameters<typeof toOrganizationPolicyResponse>[0];
+  workspaceOverride: Parameters<typeof toWorkspacePolicyOverrideResponse>[0];
+}) {
+  return {
+    organizationId: policy.organizationId,
+    workspaceId: policy.workspaceId,
+    dataResidencyRegion: policy.dataResidencyRegion,
+    retentionDays: policy.retentionDays,
+    organizationPolicy: toOrganizationPolicyResponse(policy.organizationPolicy),
+    workspaceOverride: toWorkspacePolicyOverrideResponse(
+      policy.workspaceOverride,
+    ),
   };
 }
 function toDocumentVersionResponse(value: {

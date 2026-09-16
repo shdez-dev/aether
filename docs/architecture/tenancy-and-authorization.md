@@ -55,3 +55,22 @@ evaluaciones, proyectos, documentos, evidencia y comentarios responden
 `workspace.archived.v1` conserva actor, fecha y correlación.
 
 `GET /v1/organizations/{organizationId}/capabilities` devuelve capacidades calculadas en servidor. La interfaz usa esas capacidades para mostrar u ocultar acciones mediante `canRenderWorkspaceAction`, pero la API repite la autorización en cada mutación y lectura.
+
+## Políticas de residencia y retención
+
+Cada organización nueva debe declarar una política explícita con región de
+residencia y días de retención. Owner y admin pueden actualizarla mediante
+`PUT /v1/organizations/{organizationId}/policy`. Los workspaces consultan la
+política efectiva mediante el mismo recurso y `workspaceId`; cada valor incluye
+su origen (`organization` o `workspace`).
+
+Una excepción de workspace se configura con
+`PUT /v1/organizations/{organizationId}/workspaces/{workspaceId}/policy-override`
+y se retira con `DELETE` explícito. Requiere `workspace:manage`, conserva ambos
+identificadores de tenencia y no puede cruzar organizaciones. Configurar,
+actualizar y retirar políticas escribe un evento append-only correlacionado en
+`tenancy_policy_audit_events` dentro de la misma transacción PostgreSQL.
+
+Las organizaciones creadas antes de la migración de políticas pueden carecer de
+configuración hasta que un owner o admin la establezca; la consulta devuelve un
+problema seguro de recurso no disponible y nunca inventa valores por defecto.

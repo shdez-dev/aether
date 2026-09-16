@@ -14,6 +14,37 @@ export type Organization = Readonly<{
   locale: string;
   version: number;
 }>;
+export type OrganizationPolicy = Readonly<{
+  organizationId: string;
+  dataResidencyRegion: string;
+  retentionDays: number;
+  version: number;
+  updatedByActorId: string;
+  updatedAt: Date;
+}>;
+export type WorkspacePolicyOverride = Readonly<{
+  organizationId: string;
+  workspaceId: string;
+  dataResidencyRegion: string | null;
+  retentionDays: number | null;
+  version: number;
+  updatedByActorId: string;
+  updatedAt: Date;
+}>;
+export type EffectiveTenancyPolicy = Readonly<{
+  organizationId: string;
+  workspaceId: string | null;
+  dataResidencyRegion: Readonly<{
+    value: string;
+    origin: "organization" | "workspace";
+  }>;
+  retentionDays: Readonly<{
+    value: number;
+    origin: "organization" | "workspace";
+  }>;
+  organizationPolicy: OrganizationPolicy;
+  workspaceOverride: WorkspacePolicyOverride | null;
+}>;
 export type Workspace = Readonly<{
   id: string;
   organizationId: string;
@@ -47,6 +78,14 @@ export interface TenantStore {
     organization: Organization;
     ownerActorId: string;
     ownerEmail: string;
+    policy?: Pick<
+      OrganizationPolicy,
+      "dataResidencyRegion" | "retentionDays"
+    > & {
+      auditEventId?: string;
+      correlationId?: string;
+      occurredAt?: Date;
+    };
   }): Promise<void>;
   createWorkspace(workspace: Workspace): Promise<void>;
   findWorkspace(workspaceId: string): Promise<Workspace | null>;
@@ -134,6 +173,37 @@ export interface TenantStore {
     correlationId: string;
     occurredAt: Date;
   }): Promise<"updated" | "team_not_found" | "member_not_active">;
+  findEffectivePolicy(input: {
+    organizationId: string;
+    workspaceId?: string;
+  }): Promise<EffectiveTenancyPolicy | null>;
+  updateOrganizationPolicy(input: {
+    organizationId: string;
+    actorId: string;
+    dataResidencyRegion: string;
+    retentionDays: number;
+    auditEventId: string;
+    correlationId: string;
+    occurredAt: Date;
+  }): Promise<OrganizationPolicy>;
+  setWorkspacePolicyOverride(input: {
+    organizationId: string;
+    workspaceId: string;
+    actorId: string;
+    dataResidencyRegion: string | null;
+    retentionDays: number | null;
+    auditEventId: string;
+    correlationId: string;
+    occurredAt: Date;
+  }): Promise<WorkspacePolicyOverride | null>;
+  clearWorkspacePolicyOverride(input: {
+    organizationId: string;
+    workspaceId: string;
+    actorId: string;
+    auditEventId: string;
+    correlationId: string;
+    occurredAt: Date;
+  }): Promise<"cleared" | "not_found">;
 }
 
 export interface TenantIdGenerator {
@@ -163,6 +233,8 @@ export class TenantService {
     name: string;
     timezone: string;
     locale: string;
+    policy?: Pick<OrganizationPolicy, "dataResidencyRegion" | "retentionDays">;
+    correlationId?: string;
   }): Promise<Organization> {
     const organization: Organization = {
       id: this.dependencies.ids.next(),
@@ -175,6 +247,17 @@ export class TenantService {
       organization,
       ownerActorId: input.actorId,
       ownerEmail: input.actorEmail,
+      ...(input.policy
+        ? {
+            policy: {
+              ...input.policy,
+              auditEventId: this.dependencies.ids.next(),
+              correlationId:
+                input.correlationId ?? this.dependencies.ids.next(),
+              occurredAt: this.dependencies.clock.now(),
+            },
+          }
+        : {}),
     });
     return organization;
   }
@@ -471,6 +554,106 @@ export class TenantService {
     return calculateCapabilities({ organizationRole, workspaceRole });
   }
 
+  async getEffectivePolicy(input: {
+    actorId: string;
+    organizationId: string;
+    workspaceId?: string;
+  }): Promise<EffectiveTenancyPolicy> {
+    if (input.workspaceId) {
+      const workspace = await this.dependencies.store.findWorkspace(
+        input.workspaceId,
+      );
+      if (!workspace || workspace.organizationId !== input.organizationId)
+        throw new ResourceNotFoundError("WORKSPACE_NOT_FOUND");
+      await this.assertAllowed(
+        input.actorId,
+        input.organizationId,
+        input.workspaceId,
+        "workspace:read",
+      );
+    } else {
+      await this.assertAllowed(
+        input.actorId,
+        input.organizationId,
+        null,
+        "organization:read",
+      );
+    }
+    const policy = await this.dependencies.store.findEffectivePolicy({
+      organizationId: input.organizationId,
+      ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
+    });
+    if (!policy) throw new PolicyNotConfiguredError();
+    return policy;
+  }
+
+  async updateOrganizationPolicy(input: {
+    actorId: string;
+    organizationId: string;
+    dataResidencyRegion: string;
+    retentionDays: number;
+    correlationId: string;
+  }): Promise<OrganizationPolicy> {
+    await this.assertAllowed(
+      input.actorId,
+      input.organizationId,
+      null,
+      "organization:manage",
+    );
+    return this.dependencies.store.updateOrganizationPolicy({
+      ...input,
+      auditEventId: this.dependencies.ids.next(),
+      occurredAt: this.dependencies.clock.now(),
+    });
+  }
+
+  async setWorkspacePolicyOverride(input: {
+    actorId: string;
+    organizationId: string;
+    workspaceId: string;
+    dataResidencyRegion: string | null;
+    retentionDays: number | null;
+    correlationId: string;
+  }): Promise<WorkspacePolicyOverride | null> {
+    await this.assertAllowed(
+      input.actorId,
+      input.organizationId,
+      input.workspaceId,
+      "workspace:manage",
+    );
+    const workspace = await this.dependencies.store.findWorkspace(
+      input.workspaceId,
+    );
+    if (!workspace || workspace.organizationId !== input.organizationId)
+      throw new ResourceNotFoundError("WORKSPACE_NOT_FOUND");
+    return this.dependencies.store.setWorkspacePolicyOverride({
+      ...input,
+      auditEventId: this.dependencies.ids.next(),
+      occurredAt: this.dependencies.clock.now(),
+    });
+  }
+
+  async clearWorkspacePolicyOverride(input: {
+    actorId: string;
+    organizationId: string;
+    workspaceId: string;
+    correlationId: string;
+  }): Promise<void> {
+    await this.assertAllowed(
+      input.actorId,
+      input.organizationId,
+      input.workspaceId,
+      "workspace:manage",
+    );
+    const result = await this.dependencies.store.clearWorkspacePolicyOverride({
+      ...input,
+      auditEventId: this.dependencies.ids.next(),
+      occurredAt: this.dependencies.clock.now(),
+    });
+    if (result === "not_found")
+      throw new ResourceNotFoundError("WORKSPACE_NOT_FOUND");
+  }
+
   private async assertAllowed(
     actorId: string,
     organizationId: string,
@@ -506,6 +689,11 @@ export class ResourceNotFoundError extends Error {
 export class WorkspaceArchivedError extends Error {
   constructor() {
     super("WORKSPACE_ARCHIVED");
+  }
+}
+export class PolicyNotConfiguredError extends Error {
+  constructor() {
+    super("TENANCY_POLICY_NOT_CONFIGURED");
   }
 }
 export async function assertWorkspaceWritable(

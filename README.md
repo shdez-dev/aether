@@ -25,9 +25,19 @@ docs/adr/             Decisiones de arquitectura
 docs/runbooks/        Procedimientos operativos
 ```
 
-## Estado inicial
+## Estado funcional actual
 
-La primera rebanada vertical será: invitación, sesión segura, organización, workspace aislado, iniciativa mínima presentada y auditoría consultable. No se implementará lógica de negocio fuera de esa rebanada sin una historia, contrato y caso de prueba.
+La rebanada F1 implementada cubre OIDC con PKCE, sesiones opacas revocables,
+organizaciones, workspaces, equipos, invitaciones, transferencia de propiedad,
+archivado y políticas explícitas de residencia/retención con herencia visible.
+Las concesiones temporales, el acceso JIT de soporte y F5 (documentos,
+evidencia y exportaciones) siguen fuera de alcance.
+
+Las políticas se gestionan mediante los endpoints documentados en
+[`tenancy-and-authorization.md`](docs/architecture/tenancy-and-authorization.md)
+y requieren autorización de servidor, CSRF en mutaciones y auditoría
+correlacionada. No se asignan valores por defecto a organizaciones antiguas que
+aún no tengan política configurada.
 
 ## Gobierno de ingeniería
 
@@ -50,3 +60,21 @@ La primera rebanada vertical será: invitación, sesión segura, organización, 
 - [Outbox y trabajos asíncronos](docs/architecture/outbox-and-worker.md)
 - [Auditoría y trazabilidad](docs/architecture/audit-and-traceability.md)
 - [Frontend y sistema de diseño](docs/architecture/frontend-design-system.md)
+
+## Verificación local
+
+```powershell
+pnpm local:up
+pnpm db:migrate
+pnpm typecheck
+pnpm lint
+pnpm architecture:check
+pnpm openapi:validate
+pnpm test
+```
+
+La configuración local se toma de los `.env` de cada aplicación; los secretos
+no deben escribirse en el repositorio. PostgreSQL es la autoridad transaccional,
+Redis sólo se usa para funciones no durables y Keycloak provee la identidad
+OIDC. La migración de políticas es aditiva y se encuentra en
+[`0028_tenancy_policies_and_access_grants.sql`](packages/database/migrations/0028_tenancy_policies_and_access_grants.sql).

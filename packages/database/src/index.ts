@@ -47,6 +47,9 @@ import type {
   ProjectClosureStore,
   Invitation,
   Organization,
+  OrganizationPolicy,
+  EffectiveTenancyPolicy,
+  WorkspacePolicyOverride,
   Team,
   TenantStore,
   Workspace,
@@ -400,6 +403,14 @@ export class PostgresTenantStore implements TenantStore {
     organization: Organization;
     ownerActorId: string;
     ownerEmail: string;
+    policy?: Pick<
+      OrganizationPolicy,
+      "dataResidencyRegion" | "retentionDays"
+    > & {
+      auditEventId?: string;
+      correlationId?: string;
+      occurredAt?: Date;
+    };
   }): Promise<void> {
     const client = await this.pool.connect();
     try {
@@ -422,6 +433,37 @@ export class PostgresTenantStore implements TenantStore {
           input.ownerEmail.toLowerCase(),
         ],
       );
+      if (input.policy) {
+        const occurredAt = input.policy.occurredAt ?? new Date();
+        await client.query(
+          `INSERT INTO organization_policies
+           (organization_id, data_residency_region, retention_days, version, updated_by_actor_id, updated_at)
+           VALUES ($1, $2, $3, 0, $4, $5)`,
+          [
+            input.organization.id,
+            input.policy.dataResidencyRegion,
+            input.policy.retentionDays,
+            input.ownerActorId,
+            occurredAt,
+          ],
+        );
+        await client.query(
+          `INSERT INTO tenancy_policy_audit_events
+           (id, organization_id, actor_id, event_type, correlation_id, occurred_at, payload)
+           VALUES ($1, $2, $3, 'organization.policy_configured.v1', $4, $5, $6)`,
+          [
+            input.policy.auditEventId ?? crypto.randomUUID(),
+            input.organization.id,
+            input.ownerActorId,
+            input.policy.correlationId ?? crypto.randomUUID(),
+            occurredAt,
+            asJson({
+              dataResidencyRegion: input.policy.dataResidencyRegion,
+              retentionDays: input.policy.retentionDays,
+            }),
+          ],
+        );
+      }
       await client.query("COMMIT");
     } catch (error) {
       await client.query("ROLLBACK");
@@ -1057,6 +1099,251 @@ export class PostgresTenantStore implements TenantStore {
       client.release();
     }
   }
+
+  async findEffectivePolicy(input: {
+    organizationId: string;
+    workspaceId?: string;
+  }): Promise<EffectiveTenancyPolicy | null> {
+    const result = await this.pool.query<PolicyJoinRow>(
+      `SELECT
+         organization_policies.organization_id,
+         organization_policies.data_residency_region AS organization_region,
+         organization_policies.retention_days AS organization_retention_days,
+         organization_policies.version AS organization_version,
+         organization_policies.updated_by_actor_id AS organization_updated_by_actor_id,
+         organization_policies.updated_at AS organization_updated_at,
+         workspace_policy_overrides.workspace_id,
+         workspace_policy_overrides.organization_id AS override_organization_id,
+         workspace_policy_overrides.data_residency_region AS override_region,
+         workspace_policy_overrides.retention_days AS override_retention_days,
+         workspace_policy_overrides.version AS override_version,
+         workspace_policy_overrides.updated_by_actor_id AS override_updated_by_actor_id,
+         workspace_policy_overrides.updated_at AS override_updated_at
+       FROM organization_policies
+       LEFT JOIN workspace_policy_overrides
+         ON workspace_policy_overrides.organization_id = organization_policies.organization_id
+        AND workspace_policy_overrides.workspace_id = $2
+       WHERE organization_policies.organization_id = $1
+         AND ($2 IS NULL OR EXISTS (
+           SELECT 1 FROM workspaces
+           WHERE workspaces.id = $2 AND workspaces.organization_id = $1
+         ))`,
+      [input.organizationId, input.workspaceId ?? null],
+    );
+    const row = result.rows[0];
+    if (!row) return null;
+    const workspaceOverride = row.workspace_id
+      ? {
+          organizationId: row.override_organization_id!,
+          workspaceId: row.workspace_id,
+          dataResidencyRegion: row.override_region,
+          retentionDays: row.override_retention_days,
+          version: row.override_version!,
+          updatedByActorId: row.override_updated_by_actor_id!,
+          updatedAt: row.override_updated_at!,
+        }
+      : null;
+    const organizationPolicy = {
+      organizationId: row.organization_id,
+      dataResidencyRegion: row.organization_region,
+      retentionDays: row.organization_retention_days,
+      version: row.organization_version,
+      updatedByActorId: row.organization_updated_by_actor_id,
+      updatedAt: row.organization_updated_at,
+    } satisfies OrganizationPolicy;
+    return {
+      organizationId: input.organizationId,
+      workspaceId: input.workspaceId ?? null,
+      dataResidencyRegion: {
+        value:
+          workspaceOverride?.dataResidencyRegion ??
+          organizationPolicy.dataResidencyRegion,
+        origin:
+          workspaceOverride?.dataResidencyRegion == null
+            ? "organization"
+            : "workspace",
+      },
+      retentionDays: {
+        value:
+          workspaceOverride?.retentionDays ?? organizationPolicy.retentionDays,
+        origin:
+          workspaceOverride?.retentionDays == null
+            ? "organization"
+            : "workspace",
+      },
+      organizationPolicy,
+      workspaceOverride,
+    };
+  }
+
+  async updateOrganizationPolicy(input: {
+    organizationId: string;
+    actorId: string;
+    dataResidencyRegion: string;
+    retentionDays: number;
+    auditEventId: string;
+    correlationId: string;
+    occurredAt: Date;
+  }): Promise<OrganizationPolicy> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await client.query<OrganizationPolicyRow>(
+        `INSERT INTO organization_policies
+         (organization_id, data_residency_region, retention_days, version, updated_by_actor_id, updated_at)
+         VALUES ($1, $2, $3, 0, $4, $5)
+         ON CONFLICT (organization_id) DO UPDATE SET
+           data_residency_region = EXCLUDED.data_residency_region,
+           retention_days = EXCLUDED.retention_days,
+           version = organization_policies.version + 1,
+           updated_by_actor_id = EXCLUDED.updated_by_actor_id,
+           updated_at = EXCLUDED.updated_at
+         RETURNING organization_id, data_residency_region, retention_days, version, updated_by_actor_id, updated_at`,
+        [
+          input.organizationId,
+          input.dataResidencyRegion,
+          input.retentionDays,
+          input.actorId,
+          input.occurredAt,
+        ],
+      );
+      await client.query(
+        `INSERT INTO tenancy_policy_audit_events
+         (id, organization_id, actor_id, event_type, correlation_id, occurred_at, payload)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [
+          input.auditEventId,
+          input.organizationId,
+          input.actorId,
+          result.rows[0]!.version === 0
+            ? "organization.policy_configured.v1"
+            : "organization.policy_updated.v1",
+          input.correlationId,
+          input.occurredAt,
+          asJson({
+            dataResidencyRegion: input.dataResidencyRegion,
+            retentionDays: input.retentionDays,
+          }),
+        ],
+      );
+      await client.query("COMMIT");
+      return toOrganizationPolicy(result.rows[0]!);
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async setWorkspacePolicyOverride(input: {
+    organizationId: string;
+    workspaceId: string;
+    actorId: string;
+    dataResidencyRegion: string | null;
+    retentionDays: number | null;
+    auditEventId: string;
+    correlationId: string;
+    occurredAt: Date;
+  }): Promise<WorkspacePolicyOverride | null> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await client.query<WorkspacePolicyOverrideRow>(
+        `INSERT INTO workspace_policy_overrides
+         (workspace_id, organization_id, data_residency_region, retention_days, version, updated_by_actor_id, updated_at)
+         SELECT $1, organization_id, $3, $4, 0, $5, $6
+         FROM workspaces WHERE id = $1 AND organization_id = $2
+         ON CONFLICT (workspace_id) DO UPDATE SET
+           data_residency_region = EXCLUDED.data_residency_region,
+           retention_days = EXCLUDED.retention_days,
+           version = workspace_policy_overrides.version + 1,
+           updated_by_actor_id = EXCLUDED.updated_by_actor_id,
+           updated_at = EXCLUDED.updated_at
+         RETURNING workspace_id, organization_id, data_residency_region, retention_days, version, updated_by_actor_id, updated_at`,
+        [
+          input.workspaceId,
+          input.organizationId,
+          input.dataResidencyRegion,
+          input.retentionDays,
+          input.actorId,
+          input.occurredAt,
+        ],
+      );
+      if (!result.rows[0]) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      await client.query(
+        `INSERT INTO tenancy_policy_audit_events
+         (id, organization_id, workspace_id, actor_id, event_type, correlation_id, occurred_at, payload)
+         VALUES ($1, $2, $3, $4, 'workspace.policy_override_set.v1', $5, $6, $7)`,
+        [
+          input.auditEventId,
+          input.organizationId,
+          input.workspaceId,
+          input.actorId,
+          input.correlationId,
+          input.occurredAt,
+          asJson({
+            dataResidencyRegion: input.dataResidencyRegion,
+            retentionDays: input.retentionDays,
+          }),
+        ],
+      );
+      await client.query("COMMIT");
+      return toWorkspacePolicyOverride(result.rows[0]!);
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async clearWorkspacePolicyOverride(input: {
+    organizationId: string;
+    workspaceId: string;
+    actorId: string;
+    auditEventId: string;
+    correlationId: string;
+    occurredAt: Date;
+  }): Promise<"cleared" | "not_found"> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const deleted = await client.query(
+        `DELETE FROM workspace_policy_overrides
+         WHERE workspace_id = $1 AND organization_id = $2
+         RETURNING workspace_id`,
+        [input.workspaceId, input.organizationId],
+      );
+      if (!deleted.rows[0]) {
+        await client.query("ROLLBACK");
+        return "not_found";
+      }
+      await client.query(
+        `INSERT INTO tenancy_policy_audit_events
+         (id, organization_id, workspace_id, actor_id, event_type, correlation_id, occurred_at, payload)
+         VALUES ($1, $2, $3, $4, 'workspace.policy_override_cleared.v1', $5, $6, '{}'::jsonb)`,
+        [
+          input.auditEventId,
+          input.organizationId,
+          input.workspaceId,
+          input.actorId,
+          input.correlationId,
+          input.occurredAt,
+        ],
+      );
+      await client.query("COMMIT");
+      return "cleared";
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
 }
 
 type TeamRow = {
@@ -1066,6 +1353,38 @@ type TeamRow = {
   name: string;
   version: number;
   member_actor_ids: string[];
+};
+type OrganizationPolicyRow = {
+  organization_id: string;
+  data_residency_region: string;
+  retention_days: number;
+  version: number;
+  updated_by_actor_id: string;
+  updated_at: Date;
+};
+type WorkspacePolicyOverrideRow = {
+  workspace_id: string;
+  organization_id: string;
+  data_residency_region: string | null;
+  retention_days: number | null;
+  version: number;
+  updated_by_actor_id: string;
+  updated_at: Date;
+};
+type PolicyJoinRow = {
+  organization_id: string;
+  organization_region: string;
+  organization_retention_days: number;
+  organization_version: number;
+  organization_updated_by_actor_id: string;
+  organization_updated_at: Date;
+  workspace_id: string | null;
+  override_organization_id: string | null;
+  override_region: string | null;
+  override_retention_days: number | null;
+  override_version: number | null;
+  override_updated_by_actor_id: string | null;
+  override_updated_at: Date | null;
 };
 
 type WorkspaceRow = {
@@ -1097,6 +1416,30 @@ function toWorkspace(row: WorkspaceRow): Workspace {
     status: row.status,
     archivedAt: row.archived_at,
     archivedByActorId: row.archived_by_actor_id,
+  };
+}
+function toOrganizationPolicy(row: OrganizationPolicyRow): OrganizationPolicy {
+  return {
+    organizationId: row.organization_id,
+    dataResidencyRegion: row.data_residency_region,
+    retentionDays: Number(row.retention_days),
+    version: Number(row.version),
+    updatedByActorId: row.updated_by_actor_id,
+    updatedAt: row.updated_at,
+  };
+}
+function toWorkspacePolicyOverride(
+  row: WorkspacePolicyOverrideRow,
+): WorkspacePolicyOverride {
+  return {
+    organizationId: row.organization_id,
+    workspaceId: row.workspace_id,
+    dataResidencyRegion: row.data_residency_region,
+    retentionDays:
+      row.retention_days === null ? null : Number(row.retention_days),
+    version: Number(row.version),
+    updatedByActorId: row.updated_by_actor_id,
+    updatedAt: row.updated_at,
   };
 }
 function toInvitation(row: InvitationRow): Invitation {

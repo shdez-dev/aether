@@ -2,10 +2,16 @@ import { z } from "zod";
 
 import { NonEmptyTextSchema, UuidSchema } from "./common.js";
 
+export const TenancyPolicyValuesSchema = z.object({
+  dataResidencyRegion: z.string().trim().min(2).max(64),
+  retentionDays: z.number().int().min(1).max(3650),
+});
+
 export const CreateOrganizationRequestSchema = z.object({
   name: NonEmptyTextSchema.max(255),
   timezone: z.string().trim().min(1).max(64),
   locale: z.string().trim().min(2).max(16),
+  policy: TenancyPolicyValuesSchema,
 });
 
 export const OrganizationResponseSchema = z.object({
@@ -93,6 +99,48 @@ export const AccessCapabilitiesResponseSchema = z.object({
   canInviteMembers: z.boolean(),
 });
 
+export const WorkspacePolicyOverrideRequestSchema = z
+  .object({
+    dataResidencyRegion: z.string().trim().min(2).max(64).nullable(),
+    retentionDays: z.number().int().min(1).max(3650).nullable(),
+  })
+  .refine(
+    (value) =>
+      value.dataResidencyRegion !== null || value.retentionDays !== null,
+    { message: "Debe configurar al menos una excepción de política." },
+  );
+
+const PolicyValueSchema = z.object({
+  value: z.union([z.string(), z.number()]),
+  origin: z.enum(["organization", "workspace"]),
+});
+
+export const EffectiveTenancyPolicyResponseSchema = z.object({
+  organizationId: UuidSchema,
+  workspaceId: UuidSchema.nullable(),
+  dataResidencyRegion: PolicyValueSchema.extend({ value: z.string() }),
+  retentionDays: PolicyValueSchema.extend({ value: z.number().int() }),
+  organizationPolicy: z.object({
+    organizationId: UuidSchema,
+    dataResidencyRegion: z.string(),
+    retentionDays: z.number().int(),
+    version: z.number().int().nonnegative(),
+    updatedByActorId: z.string(),
+    updatedAt: z.string().datetime(),
+  }),
+  workspaceOverride: z
+    .object({
+      organizationId: UuidSchema,
+      workspaceId: UuidSchema,
+      dataResidencyRegion: z.string().nullable(),
+      retentionDays: z.number().int().nullable(),
+      version: z.number().int().nonnegative(),
+      updatedByActorId: z.string(),
+      updatedAt: z.string().datetime(),
+    })
+    .nullable(),
+});
+
 export type CreateOrganizationRequest = z.infer<
   typeof CreateOrganizationRequestSchema
 >;
@@ -121,4 +169,11 @@ export type ReassignMemberResponsibilitiesRequest = z.infer<
 >;
 export type AccessCapabilitiesResponse = z.infer<
   typeof AccessCapabilitiesResponseSchema
+>;
+export type TenancyPolicyValues = z.infer<typeof TenancyPolicyValuesSchema>;
+export type WorkspacePolicyOverrideRequest = z.infer<
+  typeof WorkspacePolicyOverrideRequestSchema
+>;
+export type EffectiveTenancyPolicyResponse = z.infer<
+  typeof EffectiveTenancyPolicyResponseSchema
 >;

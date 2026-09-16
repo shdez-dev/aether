@@ -168,6 +168,128 @@ describe.sequential("PostgreSQL integration", () => {
   );
 
   runPostgresIntegration(
+    "persists tenancy policies, resolves inheritance, and isolates overrides",
+    async () => {
+      const ids = { next: randomUUID };
+      const clock = { now: () => new Date("2026-09-14T14:00:00.000Z") };
+      const tenantStore = new PostgresTenantStore(pool);
+      const tenants = new TenantService({
+        store: tenantStore,
+        ids,
+        tokens: { generate: () => "token", hash: (value) => `policy:${value}` },
+        clock,
+      });
+      const organization = await tenants.createOrganization({
+        actorId: "policy-owner",
+        actorEmail: "policy-owner@example.test",
+        name: "Policy organization",
+        timezone: "UTC",
+        locale: "es-CL",
+        policy: { dataResidencyRegion: "cl", retentionDays: 365 },
+        correlationId: randomUUID(),
+      });
+      const otherOrganization = await tenants.createOrganization({
+        actorId: "other-owner",
+        actorEmail: "other-owner@example.test",
+        name: "Other policy organization",
+        timezone: "UTC",
+        locale: "es-CL",
+        policy: { dataResidencyRegion: "us", retentionDays: 90 },
+        correlationId: randomUUID(),
+      });
+      const workspace = await tenants.createWorkspace({
+        actorId: "policy-owner",
+        organizationId: organization.id,
+        name: "Regional workspace",
+        mode: "institutional",
+      });
+
+      await expect(
+        tenants.getEffectivePolicy({
+          actorId: "policy-owner",
+          organizationId: organization.id,
+          workspaceId: workspace.id,
+        }),
+      ).resolves.toMatchObject({
+        dataResidencyRegion: { value: "cl", origin: "organization" },
+        retentionDays: { value: 365, origin: "organization" },
+      });
+      await tenants.setWorkspacePolicyOverride({
+        actorId: "policy-owner",
+        organizationId: organization.id,
+        workspaceId: workspace.id,
+        dataResidencyRegion: "eu",
+        retentionDays: null,
+        correlationId: randomUUID(),
+      });
+      await tenants.updateOrganizationPolicy({
+        actorId: "policy-owner",
+        organizationId: organization.id,
+        dataResidencyRegion: "cl-south",
+        retentionDays: 180,
+        correlationId: randomUUID(),
+      });
+      await expect(
+        tenants.getEffectivePolicy({
+          actorId: "policy-owner",
+          organizationId: organization.id,
+          workspaceId: workspace.id,
+        }),
+      ).resolves.toMatchObject({
+        dataResidencyRegion: { value: "eu", origin: "workspace" },
+        retentionDays: { value: 180, origin: "organization" },
+        organizationPolicy: { version: 1, dataResidencyRegion: "cl-south" },
+      });
+      await expect(
+        tenantStore.findEffectivePolicy({
+          organizationId: otherOrganization.id,
+          workspaceId: workspace.id,
+        }),
+      ).resolves.toBeNull();
+      await tenants.clearWorkspacePolicyOverride({
+        actorId: "policy-owner",
+        organizationId: organization.id,
+        workspaceId: workspace.id,
+        correlationId: randomUUID(),
+      });
+      await expect(
+        tenants.getEffectivePolicy({
+          actorId: "policy-owner",
+          organizationId: organization.id,
+          workspaceId: workspace.id,
+        }),
+      ).resolves.toMatchObject({
+        dataResidencyRegion: { value: "cl-south", origin: "organization" },
+        retentionDays: { value: 180, origin: "organization" },
+        workspaceOverride: null,
+      });
+      const audit = await pool.query(
+        `SELECT event_type, correlation_id
+         FROM tenancy_policy_audit_events
+         WHERE organization_id = $1
+         ORDER BY occurred_at ASC, id ASC`,
+        [organization.id],
+      );
+      expect(audit.rows).toHaveLength(4);
+      expect(audit.rows.map((row) => row.event_type)).toEqual(
+        expect.arrayContaining([
+          "organization.policy_configured.v1",
+          "workspace.policy_override_set.v1",
+          "organization.policy_updated.v1",
+          "workspace.policy_override_cleared.v1",
+        ]),
+      );
+      await expect(
+        pool.query(
+          "DELETE FROM tenancy_policy_audit_events WHERE organization_id = $1",
+          [organization.id],
+        ),
+      ).rejects.toThrow("append-only");
+    },
+    120_000,
+  );
+
+  runPostgresIntegration(
     "lists and replays only an organization's dead letters with a recovery audit",
     async () => {
       const organizationId = randomUUID();

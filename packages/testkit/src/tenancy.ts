@@ -1,6 +1,9 @@
 import type {
   Invitation,
   Organization,
+  OrganizationPolicy,
+  EffectiveTenancyPolicy,
+  WorkspacePolicyOverride,
   Team,
   TenantStore,
   Workspace,
@@ -13,6 +16,21 @@ export class InMemoryTenantStore implements TenantStore {
   readonly workspaces = new Map<string, Workspace>();
   readonly invitations = new Map<string, Invitation & { tokenHash: string }>();
   readonly teams = new Map<string, Team>();
+  readonly organizationPolicies = new Map<string, OrganizationPolicy>();
+  readonly workspacePolicyOverrides = new Map<
+    string,
+    WorkspacePolicyOverride
+  >();
+  readonly policyAuditEvents: Array<{
+    id: string;
+    organizationId: string;
+    workspaceId: string | null;
+    actorId: string;
+    eventType: string;
+    correlationId: string;
+    occurredAt: Date;
+    payload: Readonly<Record<string, unknown>>;
+  }> = [];
   readonly ownershipTransfers: Array<{
     organizationId: string;
     actorId: string;
@@ -30,6 +48,14 @@ export class InMemoryTenantStore implements TenantStore {
     organization: Organization;
     ownerActorId: string;
     ownerEmail: string;
+    policy?: Pick<
+      OrganizationPolicy,
+      "dataResidencyRegion" | "retentionDays"
+    > & {
+      auditEventId?: string;
+      correlationId?: string;
+      occurredAt?: Date;
+    };
   }): Promise<void> {
     this.organizations.set(input.organization.id, input.organization);
     this.organizationRoles.set(
@@ -40,6 +66,31 @@ export class InMemoryTenantStore implements TenantStore {
       this.organizationKey(input.ownerActorId, input.organization.id),
       "active",
     );
+    if (input.policy) {
+      const occurredAt = input.policy.occurredAt ?? new Date();
+      this.organizationPolicies.set(input.organization.id, {
+        organizationId: input.organization.id,
+        dataResidencyRegion: input.policy.dataResidencyRegion,
+        retentionDays: input.policy.retentionDays,
+        version: 0,
+        updatedByActorId: input.ownerActorId,
+        updatedAt: occurredAt,
+      });
+      this.policyAuditEvents.push({
+        id: input.policy.auditEventId ?? `audit:${input.organization.id}`,
+        organizationId: input.organization.id,
+        workspaceId: null,
+        actorId: input.ownerActorId,
+        eventType: "organization.policy_configured.v1",
+        correlationId:
+          input.policy.correlationId ?? `correlation:${input.organization.id}`,
+        occurredAt,
+        payload: {
+          dataResidencyRegion: input.policy.dataResidencyRegion,
+          retentionDays: input.policy.retentionDays,
+        },
+      });
+    }
   }
   async createWorkspace(workspace: Workspace): Promise<void> {
     this.workspaces.set(workspace.id, workspace);
@@ -329,6 +380,155 @@ export class InMemoryTenantStore implements TenantStore {
       version: team.version + 1,
     });
     return "updated";
+  }
+
+  async findEffectivePolicy(input: {
+    organizationId: string;
+    workspaceId?: string;
+  }): Promise<EffectiveTenancyPolicy | null> {
+    const organizationPolicy = this.organizationPolicies.get(
+      input.organizationId,
+    );
+    if (!organizationPolicy) return null;
+    const workspaceOverride = input.workspaceId
+      ? (this.workspacePolicyOverrides.get(input.workspaceId) ?? null)
+      : null;
+    if (
+      workspaceOverride &&
+      workspaceOverride.organizationId !== input.organizationId
+    )
+      return null;
+    return {
+      organizationId: input.organizationId,
+      workspaceId: input.workspaceId ?? null,
+      dataResidencyRegion: {
+        value:
+          workspaceOverride?.dataResidencyRegion ??
+          organizationPolicy.dataResidencyRegion,
+        origin:
+          workspaceOverride?.dataResidencyRegion === null ||
+          workspaceOverride?.dataResidencyRegion === undefined
+            ? "organization"
+            : "workspace",
+      },
+      retentionDays: {
+        value:
+          workspaceOverride?.retentionDays ?? organizationPolicy.retentionDays,
+        origin:
+          workspaceOverride?.retentionDays === null ||
+          workspaceOverride?.retentionDays === undefined
+            ? "organization"
+            : "workspace",
+      },
+      organizationPolicy,
+      workspaceOverride,
+    };
+  }
+
+  async updateOrganizationPolicy(input: {
+    organizationId: string;
+    actorId: string;
+    dataResidencyRegion: string;
+    retentionDays: number;
+    auditEventId: string;
+    correlationId: string;
+    occurredAt: Date;
+  }): Promise<OrganizationPolicy> {
+    const previous = this.organizationPolicies.get(input.organizationId);
+    const policy: OrganizationPolicy = {
+      organizationId: input.organizationId,
+      dataResidencyRegion: input.dataResidencyRegion,
+      retentionDays: input.retentionDays,
+      version: (previous?.version ?? -1) + 1,
+      updatedByActorId: input.actorId,
+      updatedAt: input.occurredAt,
+    };
+    this.organizationPolicies.set(input.organizationId, policy);
+    this.policyAuditEvents.push({
+      id: input.auditEventId,
+      organizationId: input.organizationId,
+      workspaceId: null,
+      actorId: input.actorId,
+      eventType: previous
+        ? "organization.policy_updated.v1"
+        : "organization.policy_configured.v1",
+      correlationId: input.correlationId,
+      occurredAt: input.occurredAt,
+      payload: {
+        dataResidencyRegion: input.dataResidencyRegion,
+        retentionDays: input.retentionDays,
+      },
+    });
+    return policy;
+  }
+
+  async setWorkspacePolicyOverride(input: {
+    organizationId: string;
+    workspaceId: string;
+    actorId: string;
+    dataResidencyRegion: string | null;
+    retentionDays: number | null;
+    auditEventId: string;
+    correlationId: string;
+    occurredAt: Date;
+  }): Promise<WorkspacePolicyOverride | null> {
+    const workspace = this.workspaces.get(input.workspaceId);
+    if (!workspace || workspace.organizationId !== input.organizationId)
+      return null;
+    const previous = this.workspacePolicyOverrides.get(input.workspaceId);
+    const override: WorkspacePolicyOverride = {
+      organizationId: input.organizationId,
+      workspaceId: input.workspaceId,
+      dataResidencyRegion: input.dataResidencyRegion,
+      retentionDays: input.retentionDays,
+      version: (previous?.version ?? -1) + 1,
+      updatedByActorId: input.actorId,
+      updatedAt: input.occurredAt,
+    };
+    this.workspacePolicyOverrides.set(input.workspaceId, override);
+    this.policyAuditEvents.push({
+      id: input.auditEventId,
+      organizationId: input.organizationId,
+      workspaceId: input.workspaceId,
+      actorId: input.actorId,
+      eventType: "workspace.policy_override_set.v1",
+      correlationId: input.correlationId,
+      occurredAt: input.occurredAt,
+      payload: {
+        dataResidencyRegion: input.dataResidencyRegion,
+        retentionDays: input.retentionDays,
+      },
+    });
+    return override;
+  }
+
+  async clearWorkspacePolicyOverride(input: {
+    organizationId: string;
+    workspaceId: string;
+    actorId: string;
+    auditEventId: string;
+    correlationId: string;
+    occurredAt: Date;
+  }): Promise<"cleared" | "not_found"> {
+    const workspace = this.workspaces.get(input.workspaceId);
+    if (
+      !workspace ||
+      workspace.organizationId !== input.organizationId ||
+      !this.workspacePolicyOverrides.has(input.workspaceId)
+    )
+      return "not_found";
+    this.workspacePolicyOverrides.delete(input.workspaceId);
+    this.policyAuditEvents.push({
+      id: input.auditEventId,
+      organizationId: input.organizationId,
+      workspaceId: input.workspaceId,
+      actorId: input.actorId,
+      eventType: "workspace.policy_override_cleared.v1",
+      correlationId: input.correlationId,
+      occurredAt: input.occurredAt,
+      payload: {},
+    });
+    return "cleared";
   }
 
   private organizationKey(actorId: string, organizationId: string): string {

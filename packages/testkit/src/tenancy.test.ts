@@ -428,4 +428,86 @@ describe("TenantService", () => {
       correlationId: "00000000-0000-4000-8000-000000000102",
     });
   });
+
+  it("resuelve políticas heredadas, permite overrides acotados y conserva auditoría", async () => {
+    const { service, store } = createTenantService();
+    const organization = await service.createOrganization({
+      actorId: "owner",
+      actorEmail: "owner@example.test",
+      name: "Políticas",
+      timezone: "UTC",
+      locale: "es-CL",
+      policy: { dataResidencyRegion: "cl", retentionDays: 365 },
+      correlationId: "00000000-0000-4000-8000-000000000103",
+    });
+    const workspace = await service.createWorkspace({
+      actorId: "owner",
+      organizationId: organization.id,
+      name: "Operación",
+      mode: "institutional",
+    });
+    await expect(
+      service.getEffectivePolicy({
+        actorId: "owner",
+        organizationId: organization.id,
+      }),
+    ).resolves.toMatchObject({
+      dataResidencyRegion: { value: "cl", origin: "organization" },
+      retentionDays: { value: 365, origin: "organization" },
+      workspaceOverride: null,
+    });
+    await service.setWorkspacePolicyOverride({
+      actorId: "owner",
+      organizationId: organization.id,
+      workspaceId: workspace.id,
+      dataResidencyRegion: "eu",
+      retentionDays: null,
+      correlationId: "00000000-0000-4000-8000-000000000104",
+    });
+    await expect(
+      service.getEffectivePolicy({
+        actorId: "owner",
+        organizationId: organization.id,
+        workspaceId: workspace.id,
+      }),
+    ).resolves.toMatchObject({
+      dataResidencyRegion: { value: "eu", origin: "workspace" },
+      retentionDays: { value: 365, origin: "organization" },
+      workspaceOverride: { dataResidencyRegion: "eu", retentionDays: null },
+    });
+    const memberInvitation = await service.invite({
+      actorId: "owner",
+      organizationId: organization.id,
+      email: "member@example.test",
+      organizationRole: "member",
+      workspaceIds: [workspace.id],
+      workspaceRole: "member",
+      expiresInDays: 7,
+    });
+    await service.acceptInvitation({
+      token: memberInvitation.deliveryToken,
+      actorId: "member",
+      actorEmail: "member@example.test",
+    });
+    await expect(
+      service.updateOrganizationPolicy({
+        actorId: "member",
+        organizationId: organization.id,
+        dataResidencyRegion: "us",
+        retentionDays: 30,
+        correlationId: "00000000-0000-4000-8000-000000000105",
+      }),
+    ).rejects.toBeInstanceOf(AccessDeniedError);
+    await service.clearWorkspacePolicyOverride({
+      actorId: "owner",
+      organizationId: organization.id,
+      workspaceId: workspace.id,
+      correlationId: "00000000-0000-4000-8000-000000000106",
+    });
+    expect(store.policyAuditEvents.map((event) => event.eventType)).toEqual([
+      "organization.policy_configured.v1",
+      "workspace.policy_override_set.v1",
+      "workspace.policy_override_cleared.v1",
+    ]);
+  });
 });

@@ -250,6 +250,91 @@ paths:
           $ref: "#/components/responses/Problem"
         default:
           $ref: "#/components/responses/Problem"
+  /v1/organizations/{organizationId}/policy:
+    get:
+      tags: [Organizations]
+      operationId: getEffectiveTenancyPolicy
+      summary: Consultar la política efectiva de una organización o workspace
+      description: Devuelve cada valor con su origen explícito y no revela una política de otra organización.
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationId"
+        - name: workspaceId
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: Política efectiva con herencia visible.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EffectiveTenancyPolicy" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+    put:
+      tags: [Organizations]
+      operationId: updateOrganizationPolicy
+      summary: Configurar la política de la organización
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationId"
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TenancyPolicyValues" }
+      responses:
+        "200":
+          description: Política actualizada y auditada.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrganizationPolicy" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/organizations/{organizationId}/workspaces/{workspaceId}/policy-override:
+    put:
+      tags: [Workspaces]
+      operationId: setWorkspacePolicyOverride
+      summary: Configurar una excepción visible de política para un workspace
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationId"
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WorkspacePolicyOverrideRequest" }
+      responses:
+        "200":
+          description: Excepción configurada y auditada.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WorkspacePolicyOverride" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+    delete:
+      tags: [Workspaces]
+      operationId: clearWorkspacePolicyOverride
+      summary: Retirar la excepción de política de un workspace
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationId"
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "204": { description: Excepción retirada y auditada. }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
   /v1/organizations/{organizationId}/workspaces:
     get:
       tags: [Workspaces]
@@ -1515,11 +1600,12 @@ components:
     CreateOrganizationRequest:
       type: object
       additionalProperties: false
-      required: [name, timezone, locale]
+      required: [name, timezone, locale, policy]
       properties:
         name: { type: string, minLength: 1, maxLength: 255 }
         timezone: { type: string, minLength: 1, maxLength: 64 }
         locale: { type: string, minLength: 2, maxLength: 16 }
+        policy: { $ref: "#/components/schemas/TenancyPolicyValues" }
     Organization:
       type: object
       required: [id, name, timezone, locale, version]
@@ -1673,6 +1759,71 @@ components:
         canReadWorkspace: { type: boolean }
         canManageWorkspace: { type: boolean }
         canInviteMembers: { type: boolean }
+    TenancyPolicyValues:
+      type: object
+      additionalProperties: false
+      required: [dataResidencyRegion, retentionDays]
+      properties:
+        dataResidencyRegion: { type: string, minLength: 2, maxLength: 64 }
+        retentionDays: { type: integer, minimum: 1, maximum: 3650 }
+    OrganizationPolicy:
+      type: object
+      additionalProperties: false
+      required:
+        [organizationId, dataResidencyRegion, retentionDays, version, updatedByActorId, updatedAt]
+      properties:
+        organizationId: { type: string, format: uuid }
+        dataResidencyRegion: { type: string }
+        retentionDays: { type: integer, minimum: 1, maximum: 3650 }
+        version: { type: integer, minimum: 0 }
+        updatedByActorId: { type: string }
+        updatedAt: { type: string, format: date-time }
+    WorkspacePolicyOverrideRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      required: [dataResidencyRegion, retentionDays]
+      properties:
+        dataResidencyRegion: { type: [string, "null"], minLength: 2, maxLength: 64 }
+        retentionDays: { type: [integer, "null"], minimum: 1, maximum: 3650 }
+    WorkspacePolicyOverride:
+      type: object
+      additionalProperties: false
+      required:
+        [organizationId, workspaceId, dataResidencyRegion, retentionDays, version, updatedByActorId, updatedAt]
+      properties:
+        organizationId: { type: string, format: uuid }
+        workspaceId: { type: string, format: uuid }
+        dataResidencyRegion: { type: [string, "null"] }
+        retentionDays: { type: [integer, "null"] }
+        version: { type: integer, minimum: 0 }
+        updatedByActorId: { type: string }
+        updatedAt: { type: string, format: date-time }
+    EffectiveTenancyPolicy:
+      type: object
+      additionalProperties: false
+      required:
+        [organizationId, workspaceId, dataResidencyRegion, retentionDays, organizationPolicy, workspaceOverride]
+      properties:
+        organizationId: { type: string, format: uuid }
+        workspaceId: { type: [string, "null"], format: uuid }
+        dataResidencyRegion:
+          type: object
+          required: [value, origin]
+          properties:
+            value: { type: string }
+            origin: { type: string, enum: [organization, workspace] }
+        retentionDays:
+          type: object
+          required: [value, origin]
+          properties:
+            value: { type: integer }
+            origin: { type: string, enum: [organization, workspace] }
+        organizationPolicy: { $ref: "#/components/schemas/OrganizationPolicy" }
+        workspaceOverride:
+          allOf:
+            - $ref: "#/components/schemas/WorkspacePolicyOverride"
+          nullable: true
     CreateInitiativeDraftRequest:
       type: object
       additionalProperties: false

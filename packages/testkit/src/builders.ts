@@ -13,6 +13,10 @@ export function organizationBuilder(
     name: "Organización de prueba",
     timezone: "America/Santiago",
     locale: "es-CL",
+    policy: {
+      dataResidencyRegion: "cl",
+      retentionDays: 365,
+    },
     ...overrides,
   };
 }

@@ -601,7 +601,12 @@ describe("HTTP authentication boundary", () => {
       method: "POST",
       url: "/v1/organizations",
       headers: { cookie: `aether_session=${session}; aether_csrf=${csrf}` },
-      payload: { name: "Aether Test", timezone: "UTC", locale: "es-CL" },
+      payload: {
+        name: "Aether Test",
+        timezone: "UTC",
+        locale: "es-CL",
+        policy: { dataResidencyRegion: "cl", retentionDays: 365 },
+      },
     });
     expect(mutationWithoutCsrf.statusCode).toBe(403);
     const organization = await app.inject({
@@ -612,7 +617,12 @@ describe("HTTP authentication boundary", () => {
         "x-csrf-token": csrf,
         cookie: `aether_session=${session}; aether_csrf=${csrf}`,
       },
-      payload: { name: "Aether Test", timezone: "UTC", locale: "es-CL" },
+      payload: {
+        name: "Aether Test",
+        timezone: "UTC",
+        locale: "es-CL",
+        policy: { dataResidencyRegion: "cl", retentionDays: 365 },
+      },
     });
     expect(organization.statusCode).toBe(201);
     const workspace = await app.inject({
@@ -630,6 +640,47 @@ describe("HTTP authentication boundary", () => {
       },
     });
     expect(workspace.statusCode).toBe(201);
+    const effectivePolicy = await app.inject({
+      method: "GET",
+      url: `/v1/organizations/${organization.json().id}/policy?workspaceId=${workspace.json().id}`,
+      headers: { cookie: `aether_session=${session}` },
+    });
+    expect(effectivePolicy.statusCode).toBe(200);
+    expect(effectivePolicy.json()).toMatchObject({
+      dataResidencyRegion: { value: "cl", origin: "organization" },
+      retentionDays: { value: 365, origin: "organization" },
+      workspaceOverride: null,
+    });
+    const override = await app.inject({
+      method: "PUT",
+      url: `/v1/organizations/${organization.json().id}/workspaces/${workspace.json().id}/policy-override`,
+      headers: {
+        origin: config.webOrigin,
+        "x-csrf-token": csrf,
+        cookie: `aether_session=${session}; aether_csrf=${csrf}`,
+      },
+      payload: { dataResidencyRegion: "eu", retentionDays: null },
+    });
+    expect(override.statusCode).toBe(200);
+    const overriddenPolicy = await app.inject({
+      method: "GET",
+      url: `/v1/organizations/${organization.json().id}/policy?workspaceId=${workspace.json().id}`,
+      headers: { cookie: `aether_session=${session}` },
+    });
+    expect(overriddenPolicy.json()).toMatchObject({
+      dataResidencyRegion: { value: "eu", origin: "workspace" },
+      retentionDays: { value: 365, origin: "organization" },
+    });
+    const clearedOverride = await app.inject({
+      method: "DELETE",
+      url: `/v1/organizations/${organization.json().id}/workspaces/${workspace.json().id}/policy-override`,
+      headers: {
+        origin: config.webOrigin,
+        "x-csrf-token": csrf,
+        cookie: `aether_session=${session}; aether_csrf=${csrf}`,
+      },
+    });
+    expect(clearedOverride.statusCode).toBe(204);
     const archivedWorkspace = await app.inject({
       method: "POST",
       url: `/v1/organizations/${organization.json().id}/workspaces/${workspace.json().id}/archive`,
@@ -919,7 +970,12 @@ describe("HTTP authentication boundary", () => {
       method: "POST",
       url: "/v1/organizations",
       headers,
-      payload: { name: "Aether Test", timezone: "UTC", locale: "es-CL" },
+      payload: {
+        name: "Aether Test",
+        timezone: "UTC",
+        locale: "es-CL",
+        policy: { dataResidencyRegion: "cl", retentionDays: 365 },
+      },
     });
     expect(organizationResponse.statusCode).toBe(201);
     const organization = organizationResponse.json() as { id: string };
