@@ -473,6 +473,16 @@ describe("HTTP authentication boundary", () => {
       workspaceRole: "viewer",
       expiresInDays: 7,
     });
+    const forbiddenRevocation = await app.inject({
+      method: "DELETE",
+      url: `/v1/organizations/${organization.id}/invitations/${revokedInvitation.invitation.id}`,
+      headers: {
+        origin: config.webOrigin,
+        "x-csrf-token": viewerCsrf,
+        cookie: `aether_session=${viewerToken}; aether_csrf=${viewerCsrf}`,
+      },
+    });
+    expect(forbiddenRevocation.statusCode).toBe(403);
     const revoked = await app.inject({
       method: "DELETE",
       url: `/v1/organizations/${organization.id}/invitations/${revokedInvitation.invitation.id}`,
