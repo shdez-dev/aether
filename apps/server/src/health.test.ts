@@ -38,6 +38,7 @@ const config: ServerConfig = {
   s3SecretAccessKey: "test",
   s3PresignTtlSeconds: 300,
   maxDocumentBytes: 1_048_576,
+  supportOperatorActorIds: [],
 };
 
 function dependencies(serverConfig: ServerConfig = config) {

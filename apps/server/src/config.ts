@@ -65,6 +65,17 @@ const configSchema = z.object({
     .min(1_024)
     .max(26_214_400)
     .default(10_485_760),
+  SUPPORT_OPERATOR_ACTOR_IDS: z
+    .string()
+    .default("")
+    .transform((value) => [
+      ...new Set(
+        value
+          .split(",")
+          .map((actorId) => actorId.trim())
+          .filter(Boolean),
+      ),
+    ]),
 });
 
 export type ServerConfig = Readonly<{
@@ -94,6 +105,7 @@ export type ServerConfig = Readonly<{
   s3SecretAccessKey: string;
   s3PresignTtlSeconds: number;
   maxDocumentBytes: number;
+  supportOperatorActorIds: readonly string[];
 }>;
 
 export function readServerConfig(
@@ -137,5 +149,6 @@ export function readServerConfig(
     s3SecretAccessKey: value.S3_SECRET_ACCESS_KEY,
     s3PresignTtlSeconds: value.S3_PRESIGN_TTL_SECONDS,
     maxDocumentBytes: value.MAX_DOCUMENT_BYTES,
+    supportOperatorActorIds: value.SUPPORT_OPERATOR_ACTOR_IDS,
   };
 }

@@ -20,6 +20,7 @@ import {
   type SecurityAuditStore,
   OutboxAdministrationService,
   TemporaryAccessGrantService,
+  SupportAccessService,
   TenantService,
 } from "@aether/application";
 import {
@@ -32,6 +33,8 @@ import {
   InMemoryTenantStore,
   InMemoryProductMetricsStore,
   InMemoryTemporaryAccessGrantStore,
+  InMemorySupportAccessGrantStore,
+  InMemorySupportOperatorDirectory,
 } from "@aether/testkit";
 
 import { buildServer } from "./app.js";
@@ -163,6 +166,7 @@ const config: ServerConfig = {
   s3SecretAccessKey: "test",
   s3PresignTtlSeconds: 300,
   maxDocumentBytes: 1_048_576,
+  supportOperatorActorIds: [],
 };
 const oidc: OidcProvider = {
   async buildAuthorizationUrl({ state }) {
@@ -1574,6 +1578,155 @@ describe("HTTP authentication boundary", () => {
       "temporary_access_grant.approved.v1",
       "temporary_access_grant.used.v1",
       "temporary_access_grant.revoked.v1",
+    ]);
+    await app.close();
+  });
+
+  it("limita el JIT de soporte a diagnóstico agregado, aprobado y auditable", async () => {
+    const authStore = new InMemoryAuthStore();
+    const tenantStore = new InMemoryTenantStore();
+    const supportStore = new InMemorySupportAccessGrantStore();
+    const ids = { next: () => crypto.randomUUID() };
+    const clock = { now: () => new Date() };
+    const tenants = new TenantService({
+      store: tenantStore,
+      ids,
+      tokens: {
+        generate: () => crypto.randomUUID().replaceAll("-", "").padEnd(43, "x"),
+        hash: (value) => `support-test:${value}`,
+      },
+      clock,
+    });
+    const supportAccess = new SupportAccessService({
+      store: supportStore,
+      operators: new InMemorySupportOperatorDirectory(
+        new Set(["support-operator"]),
+      ),
+      tenancy: tenantStore,
+      ids,
+      clock,
+    });
+    const auth = new AuthService({
+      store: authStore,
+      cipher: createAesGcmCipher(config.sessionEncryptionKey),
+      oidc,
+      issuer: config.oidcIssuerUrl,
+      sessionTtlSeconds: config.sessionTtlSeconds,
+      sessionRenewalWindowSeconds: config.sessionRenewalWindowSeconds,
+    });
+    const app = await buildServer({
+      config,
+      auth,
+      tenants,
+      supportAccess,
+      initiatives: {} as InitiativeService,
+      evaluations: {} as EvaluationService,
+      projects: {} as ProjectService,
+      idempotency: new InMemoryIdempotencyStore(),
+    });
+    const organization = await tenants.createOrganization({
+      actorId: "support-owner",
+      actorEmail: "support-owner@example.test",
+      name: "Support diagnostics",
+      timezone: "UTC",
+      locale: "es-CL",
+    });
+    supportStore.addOrganization(organization.id, {
+      workspaces: { active: 3, archived: 1 },
+      memberships: { active: 5, suspended: 1, revoked: 2 },
+      delivery: { pendingOutboxEvents: 2, deadLetters: 1 },
+      policyConfigured: true,
+    });
+    await createAuthenticatedSession(authStore, {
+      token: "support-owner-token",
+      actorId: "support-owner",
+      actorEmail: "support-owner@example.test",
+    });
+    await createAuthenticatedSession(authStore, {
+      token: "support-operator-token",
+      actorId: "support-operator",
+      actorEmail: "support-operator@example.test",
+    });
+    const csrf = "support-jit-csrf";
+    const mutationHeaders = (token: string) => ({
+      origin: config.webOrigin,
+      "x-csrf-token": csrf,
+      cookie: `aether_session=${token}; aether_csrf=${csrf}`,
+    });
+    const diagnosticUrl = `/v1/admin/support/organizations/${organization.id}/diagnostics`;
+    expect(
+      (
+        await app.inject({
+          method: "GET",
+          url: diagnosticUrl,
+          headers: { cookie: "aether_session=support-operator-token" },
+        })
+      ).statusCode,
+    ).toBe(403);
+    const requested = await app.inject({
+      method: "POST",
+      url: "/v1/admin/support-access-grants",
+      headers: {
+        ...mutationHeaders("support-operator-token"),
+        "idempotency-key": "support-jit-request",
+      },
+      payload: {
+        organizationId: organization.id,
+        reason: "Analizar cola detenida",
+        expiresInMinutes: 30,
+      },
+    });
+    expect(requested.statusCode).toBe(201);
+    expect(requested.json()).toMatchObject({ status: "pending" });
+    const approved = await app.inject({
+      method: "POST",
+      url: `/v1/admin/support-access-grants/${requested.json().id}/approve`,
+      headers: mutationHeaders("support-owner-token"),
+      payload: { organizationId: organization.id },
+    });
+    expect(approved.statusCode).toBe(200);
+    expect(approved.json()).toMatchObject({ status: "active" });
+    const diagnostic = await app.inject({
+      method: "GET",
+      url: diagnosticUrl,
+      headers: { cookie: "aether_session=support-operator-token" },
+    });
+    expect(diagnostic.statusCode).toBe(200);
+    expect(diagnostic.json()).toEqual({
+      organizationId: organization.id,
+      generatedAt: expect.any(String),
+      workspaces: { active: 3, archived: 1 },
+      memberships: { active: 5, suspended: 1, revoked: 2 },
+      delivery: { pendingOutboxEvents: 2, deadLetters: 1 },
+      policyConfigured: true,
+    });
+    expect(JSON.stringify(diagnostic.json())).not.toContain("email");
+    expect(JSON.stringify(diagnostic.json())).not.toContain("document");
+    const revoked = await app.inject({
+      method: "POST",
+      url: `/v1/admin/support-access-grants/${requested.json().id}/revoke`,
+      headers: mutationHeaders("support-owner-token"),
+      payload: {
+        organizationId: organization.id,
+        reason: "Diagnóstico terminado",
+      },
+    });
+    expect(revoked.statusCode).toBe(200);
+    expect(revoked.json()).toMatchObject({ status: "revoked" });
+    expect(
+      (
+        await app.inject({
+          method: "GET",
+          url: diagnosticUrl,
+          headers: { cookie: "aether_session=support-operator-token" },
+        })
+      ).statusCode,
+    ).toBe(403);
+    expect(supportStore.auditEvents.map((event) => event.eventType)).toEqual([
+      "support_access_grant.requested.v1",
+      "support_access_grant.approved.v1",
+      "support_access_grant.used.v1",
+      "support_access_grant.revoked.v1",
     ]);
     await app.close();
   });

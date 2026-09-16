@@ -32,8 +32,9 @@ organizaciones, workspaces, equipos, invitaciones, transferencia de propiedad,
 archivado y políticas explícitas de residencia/retención con herencia visible.
 También cubre concesiones temporales exactas por recurso y acción, con
 solicitud justificada, aprobación independiente de owner, duración máxima de
-ocho horas, revocación y auditoría de cada uso. El acceso JIT de soporte sigue
-fuera de alcance.
+ocho horas, revocación y auditoría de cada uso. El acceso JIT de soporte limita
+la elevación a un diagnóstico agregado predefinido durante un máximo de una
+hora, con aprobación separada y sin acceso a contenido institucional.
 
 Las políticas se gestionan mediante los endpoints documentados en
 [`tenancy-and-authorization.md`](docs/architecture/tenancy-and-authorization.md)
@@ -83,3 +84,10 @@ base está en
 [`0028_tenancy_policies_and_access_grants.sql`](packages/database/migrations/0028_tenancy_policies_and_access_grants.sql)
 y el ciclo de vida auditable en
 [`0029_temporary_access_grant_lifecycle.sql`](packages/database/migrations/0029_temporary_access_grant_lifecycle.sql).
+El ciclo JIT de soporte se completa de forma aditiva en
+[`0030_support_access_grant_lifecycle.sql`](packages/database/migrations/0030_support_access_grant_lifecycle.sql).
+
+Las identidades autorizadas para solicitar JIT se configuran explícitamente en
+`SUPPORT_OPERATOR_ACTOR_IDS`. La elegibilidad no concede permisos por sí sola:
+cada organización debe aprobar una solicitud vigente. El procedimiento está en
+el [runbook de acceso JIT](docs/runbooks/support-jit-access.md).

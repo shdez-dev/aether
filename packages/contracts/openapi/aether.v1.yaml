@@ -24,6 +24,8 @@ tags:
     description: Espacios de trabajo con alcance explícito.
   - name: Temporary access
     description: Grants acotados por recurso y acción, con aprobación separada, caducidad y revocación.
+  - name: Support access
+    description: Acceso JIT a diagnósticos agregados, sin contenido institucional.
   - name: Initiatives
     description: Ciclo de vida de iniciativas antes de convertirse en proyectos.
   - name: Projects
@@ -341,6 +343,132 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
+  /v1/admin/support-access-grants:
+    get:
+      tags: [Support access]
+      operationId: listSupportAccessGrants
+      summary: Listar solicitudes JIT visibles para soporte u owners de la organización
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: organizationId
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: Solicitudes propias o todas las de la organización para sus administradores.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/SupportAccessGrant" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+    post:
+      tags: [Support access]
+      operationId: requestSupportAccessGrant
+      summary: Solicitar acceso JIT de soporte para la identidad elegible autenticada
+      description: Requiere autenticación reciente; la solicitud no concede acceso hasta ser aprobada.
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RequestSupportAccessGrant" }
+      responses:
+        "201":
+          description: Solicitud pendiente de aprobación por un owner distinto.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SupportAccessGrant" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+  /v1/admin/support-access-grants/{grantId}/approve:
+    post:
+      tags: [Support access]
+      operationId: approveSupportAccessGrant
+      summary: Aprobar como owner una solicitud JIT de otro actor
+      description: Requiere autenticación reciente.
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: grantId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SupportAccessGrantContext" }
+      responses:
+        "200":
+          description: Acceso JIT activo por un máximo total de una hora desde la solicitud.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SupportAccessGrant" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+  /v1/admin/support-access-grants/{grantId}/revoke:
+    post:
+      tags: [Support access]
+      operationId: revokeSupportAccessGrant
+      summary: Revocar anticipadamente un acceso JIT
+      description: Puede revocarlo el owner de la organización o el propio operador; requiere autenticación reciente.
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: grantId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RevokeSupportAccessGrant" }
+      responses:
+        "200":
+          description: Acceso revocado y no utilizable.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SupportAccessGrant" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+  /v1/admin/support/organizations/{organizationId}/diagnostics:
+    get:
+      tags: [Support access]
+      operationId: getOrganizationSupportDiagnostic
+      summary: Consultar el diagnóstico técnico agregado permitido por un JIT activo
+      description: Requiere autenticación reciente y audita cada consulta; no devuelve nombres, correos, archivos ni contenido institucional.
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationId"
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: Agregados mínimos de estado operativo.
+          content:
+            application/json:
+              schema:
+                { $ref: "#/components/schemas/OrganizationSupportDiagnostic" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
   /v1/organizations/{organizationId}/temporary-access-grants/{grantId}/approve:
     post:
       tags: [Temporary access]
@@ -1793,6 +1921,96 @@ components:
         revokedAt: { type: [string, "null"], format: date-time }
         revokedByActorId: { type: [string, "null"] }
         status: { type: string, enum: [pending, active, expired, revoked] }
+    RequestSupportAccessGrant:
+      type: object
+      additionalProperties: false
+      required: [organizationId, reason, expiresInMinutes]
+      properties:
+        organizationId: { type: string, format: uuid }
+        reason: { type: string, minLength: 1, maxLength: 2000 }
+        expiresInMinutes: { type: integer, minimum: 1, maximum: 60 }
+    SupportAccessGrantContext:
+      type: object
+      additionalProperties: false
+      required: [organizationId]
+      properties:
+        organizationId: { type: string, format: uuid }
+    RevokeSupportAccessGrant:
+      type: object
+      additionalProperties: false
+      required: [organizationId, reason]
+      properties:
+        organizationId: { type: string, format: uuid }
+        reason: { type: string, minLength: 1, maxLength: 2000 }
+    SupportAccessGrant:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          id,
+          organizationId,
+          supportActorId,
+          requestedByActorId,
+          approvedByActorId,
+          reason,
+          createdAt,
+          expiresAt,
+          approvedAt,
+          revokedAt,
+          revokedByActorId,
+          status,
+        ]
+      properties:
+        id: { type: string, format: uuid }
+        organizationId: { type: string, format: uuid }
+        supportActorId: { type: string }
+        requestedByActorId: { type: string }
+        approvedByActorId: { type: [string, "null"] }
+        reason: { type: string }
+        createdAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        approvedAt: { type: [string, "null"], format: date-time }
+        revokedAt: { type: [string, "null"], format: date-time }
+        revokedByActorId: { type: [string, "null"] }
+        status: { type: string, enum: [pending, active, expired, revoked] }
+    OrganizationSupportDiagnostic:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          organizationId,
+          generatedAt,
+          workspaces,
+          memberships,
+          delivery,
+          policyConfigured,
+        ]
+      properties:
+        organizationId: { type: string, format: uuid }
+        generatedAt: { type: string, format: date-time }
+        workspaces:
+          type: object
+          additionalProperties: false
+          required: [active, archived]
+          properties:
+            active: { type: integer, minimum: 0 }
+            archived: { type: integer, minimum: 0 }
+        memberships:
+          type: object
+          additionalProperties: false
+          required: [active, suspended, revoked]
+          properties:
+            active: { type: integer, minimum: 0 }
+            suspended: { type: integer, minimum: 0 }
+            revoked: { type: integer, minimum: 0 }
+        delivery:
+          type: object
+          additionalProperties: false
+          required: [pendingOutboxEvents, deadLetters]
+          properties:
+            pendingOutboxEvents: { type: integer, minimum: 0 }
+            deadLetters: { type: integer, minimum: 0 }
+        policyConfigured: { type: boolean }
     CreateWorkspaceRequest:
       type: object
       additionalProperties: false

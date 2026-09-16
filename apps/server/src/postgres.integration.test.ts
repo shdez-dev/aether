@@ -13,6 +13,7 @@ import {
   ProjectAlreadyExistsError,
   ProjectService,
   TemporaryAccessGrantService,
+  SupportAccessService,
   TenantService,
 } from "@aether/application";
 import {
@@ -36,6 +37,7 @@ import {
   PostgresDocumentStore,
   PostgresProductMetricsStore,
   PostgresTemporaryAccessGrantStore,
+  PostgresSupportAccessGrantStore,
   PostgresTenantStore,
   migratePool,
 } from "@aether/database";
@@ -240,6 +242,136 @@ describe.sequential("PostgreSQL integration", () => {
       await expect(
         pool.query(
           `DELETE FROM temporary_access_grant_audit_events WHERE grant_id = $1`,
+          [requested.id],
+        ),
+      ).rejects.toThrow();
+    },
+    120_000,
+  );
+
+  runPostgresIntegration(
+    "limits support JIT to audited aggregate diagnostics and one hour",
+    async () => {
+      let now = new Date("2026-09-15T16:00:00.000Z");
+      const ids = { next: randomUUID };
+      const clock = { now: () => now };
+      const tenantStore = new PostgresTenantStore(pool);
+      const supportStore = new PostgresSupportAccessGrantStore(pool);
+      const tenants = new TenantService({
+        store: tenantStore,
+        ids,
+        tokens: {
+          generate: () => randomUUID().replaceAll("-", "").padEnd(43, "x"),
+          hash: (value) => `support-access:${value}`,
+        },
+        clock,
+      });
+      const supportAccess = new SupportAccessService({
+        store: supportStore,
+        operators: {
+          isEligible: async (actorId) => actorId === "postgres-support",
+        },
+        tenancy: tenantStore,
+        ids,
+        clock,
+      });
+      const organization = await tenants.createOrganization({
+        actorId: "postgres-support-owner",
+        actorEmail: "postgres-support-owner@example.test",
+        name: "Support JIT persistence",
+        timezone: "UTC",
+        locale: "es-CL",
+        policy: { dataResidencyRegion: "cl", retentionDays: 365 },
+        correlationId: randomUUID(),
+      });
+      await tenants.createWorkspace({
+        actorId: "postgres-support-owner",
+        organizationId: organization.id,
+        name: "Operational workspace",
+        mode: "institutional",
+      });
+      const requested = await supportAccess.request({
+        actorId: "postgres-support",
+        organizationId: organization.id,
+        reason: "Investigate delivery backlog",
+        expiresInMinutes: 30,
+        correlationId: randomUUID(),
+      });
+      await supportAccess.approve({
+        actorId: "postgres-support-owner",
+        organizationId: organization.id,
+        grantId: requested.id,
+        correlationId: randomUUID(),
+      });
+      await expect(
+        supportAccess.diagnose({
+          actorId: "postgres-support",
+          organizationId: organization.id,
+          correlationId: randomUUID(),
+        }),
+      ).resolves.toEqual({
+        organizationId: organization.id,
+        generatedAt: now,
+        workspaces: { active: 1, archived: 0 },
+        memberships: { active: 1, suspended: 0, revoked: 0 },
+        delivery: { pendingOutboxEvents: 0, deadLetters: 0 },
+        policyConfigured: true,
+      });
+      await supportAccess.revoke({
+        actorId: "postgres-support-owner",
+        organizationId: organization.id,
+        grantId: requested.id,
+        reason: "Diagnostic complete",
+        correlationId: randomUUID(),
+      });
+      await expect(
+        supportAccess.diagnose({
+          actorId: "postgres-support",
+          organizationId: organization.id,
+          correlationId: randomUUID(),
+        }),
+      ).rejects.toMatchObject({ code: "SUPPORT_ACCESS_DENIED" });
+
+      const expiring = await supportAccess.request({
+        actorId: "postgres-support",
+        organizationId: organization.id,
+        reason: "Short diagnostic",
+        expiresInMinutes: 1,
+        correlationId: randomUUID(),
+      });
+      await supportAccess.approve({
+        actorId: "postgres-support-owner",
+        organizationId: organization.id,
+        grantId: expiring.id,
+        correlationId: randomUUID(),
+      });
+      now = new Date("2026-09-15T16:02:00.000Z");
+      await expect(
+        supportAccess.diagnose({
+          actorId: "postgres-support",
+          organizationId: organization.id,
+          correlationId: randomUUID(),
+        }),
+      ).rejects.toMatchObject({ code: "SUPPORT_ACCESS_DENIED" });
+      const events = await pool.query<{ event_type: string }>(
+        `SELECT event_type
+         FROM support_access_grant_audit_events
+         WHERE organization_id = $1
+         ORDER BY occurred_at, id`,
+        [organization.id],
+      );
+      expect(events.rows.map((event) => event.event_type)).toEqual(
+        expect.arrayContaining([
+          "support_access_grant.requested.v1",
+          "support_access_grant.approved.v1",
+          "support_access_grant.used.v1",
+          "support_access_grant.revoked.v1",
+          "support_access_grant.expired.v1",
+        ]),
+      );
+      await expect(
+        pool.query(
+          "DELETE FROM support_access_grant_audit_events WHERE grant_id = $1",
           [requested.id],
         ),
       ).rejects.toThrow();

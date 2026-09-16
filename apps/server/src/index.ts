@@ -13,6 +13,7 @@ import {
   ProjectService,
   TenantService,
   TemporaryAccessGrantService,
+  SupportAccessService,
 } from "@aether/application";
 import {
   AuthService,
@@ -43,6 +44,7 @@ import {
   PostgresNotificationStore,
   PostgresCommentStore,
   PostgresTemporaryAccessGrantStore,
+  PostgresSupportAccessGrantStore,
 } from "@aether/database";
 import {
   createOperationalMetrics,
@@ -83,6 +85,16 @@ const accessGrantStore = new PostgresTemporaryAccessGrantStore(pool);
 const accessGrants = new TemporaryAccessGrantService({
   store: accessGrantStore,
   resources: accessGrantStore,
+  tenancy: new PostgresTenantStore(pool),
+  ids: { next: randomUUID },
+  clock: { now: () => new Date() },
+});
+const supportOperatorIds = new Set(config.supportOperatorActorIds);
+const supportAccess = new SupportAccessService({
+  store: new PostgresSupportAccessGrantStore(pool),
+  operators: {
+    isEligible: async (actorId) => supportOperatorIds.has(actorId),
+  },
   tenancy: new PostgresTenantStore(pool),
   ids: { next: randomUUID },
   clock: { now: () => new Date() },
@@ -188,6 +200,7 @@ const app = await buildServer({
   auth,
   tenants,
   accessGrants,
+  supportAccess,
   initiatives,
   evaluations,
   projects,

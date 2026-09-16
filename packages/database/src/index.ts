@@ -54,6 +54,9 @@ import type {
   TemporaryAccessGrantResourceResolver,
   TemporaryAccessGrantStore,
   TemporaryGrantResourceType,
+  OrganizationSupportDiagnostic,
+  SupportAccessGrant,
+  SupportAccessGrantStore,
   Team,
   TenantStore,
   Workspace,
@@ -1738,6 +1741,359 @@ export class PostgresTemporaryAccessGrantStore
   }
 }
 
+export class PostgresSupportAccessGrantStore implements SupportAccessGrantStore {
+  constructor(private readonly pool: Pool) {}
+
+  async organizationExists(organizationId: string): Promise<boolean> {
+    const result = await this.pool.query(
+      "SELECT 1 FROM organizations WHERE id = $1",
+      [organizationId],
+    );
+    return (result.rowCount ?? 0) === 1;
+  }
+
+  async create(input: {
+    grant: SupportAccessGrant;
+    auditEventId: string;
+    correlationId: string;
+  }): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const grant = input.grant;
+      await client.query(
+        `INSERT INTO support_access_grants
+         (id, organization_id, support_actor_id, requested_by_actor_id,
+          approved_by_actor_id, reason, created_at, expires_at, approved_at,
+          revoked_at, revoked_by_actor_id)
+         VALUES ($1,$2,$3,$4,NULL,$5,$6,$7,NULL,NULL,NULL)`,
+        [
+          grant.id,
+          grant.organizationId,
+          grant.supportActorId,
+          grant.requestedByActorId,
+          grant.reason,
+          grant.createdAt,
+          grant.expiresAt,
+        ],
+      );
+      await insertSupportGrantAudit(client, {
+        id: input.auditEventId,
+        grant,
+        actorId: grant.requestedByActorId,
+        eventType: "support_access_grant.requested.v1",
+        correlationId: input.correlationId,
+        occurredAt: grant.createdAt,
+        payload: {
+          reason: grant.reason,
+          expiresAt: grant.expiresAt.toISOString(),
+        },
+      });
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async findById(grantId: string): Promise<SupportAccessGrant | null> {
+    const result = await this.pool.query<SupportAccessGrantRow>(
+      `${supportAccessGrantSelect} WHERE id = $1`,
+      [grantId],
+    );
+    return result.rows[0] ? toSupportAccessGrant(result.rows[0]) : null;
+  }
+
+  async list(input: {
+    organizationId: string;
+    actorId: string;
+    includeAll: boolean;
+  }): Promise<readonly SupportAccessGrant[]> {
+    const result = await this.pool.query<SupportAccessGrantRow>(
+      `${supportAccessGrantSelect}
+       WHERE organization_id = $1
+         AND ($3::boolean OR support_actor_id = $2)
+       ORDER BY created_at DESC, id DESC`,
+      [input.organizationId, input.actorId, input.includeAll],
+    );
+    return result.rows.map(toSupportAccessGrant);
+  }
+
+  async approve(input: {
+    grantId: string;
+    organizationId: string;
+    actorId: string;
+    approvedAt: Date;
+    auditEventId: string;
+    correlationId: string;
+  }): Promise<
+    | { result: "approved"; grant: SupportAccessGrant }
+    | {
+        result: "not_found" | "not_pending" | "expired" | "actor_not_owner";
+      }
+  > {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const found = await client.query<SupportAccessGrantRow>(
+        `${supportAccessGrantSelect}
+         WHERE id = $1 AND organization_id = $2 FOR UPDATE`,
+        [input.grantId, input.organizationId],
+      );
+      const row = found.rows[0];
+      if (!row) {
+        await client.query("ROLLBACK");
+        return { result: "not_found" };
+      }
+      const current = toSupportAccessGrant(row);
+      if (current.approvedAt || current.revokedAt) {
+        await client.query("ROLLBACK");
+        return { result: "not_pending" };
+      }
+      if (current.expiresAt <= input.approvedAt) {
+        await this.insertExpiration(
+          client,
+          current,
+          current.expiresAt,
+          input.correlationId,
+        );
+        await client.query("COMMIT");
+        return { result: "expired" };
+      }
+      const owner = await client.query(
+        `SELECT 1 FROM organization_memberships
+         WHERE organization_id = $1 AND actor_id = $2
+           AND role = 'owner' AND status = 'active'`,
+        [input.organizationId, input.actorId],
+      );
+      if ((owner.rowCount ?? 0) !== 1) {
+        await client.query("ROLLBACK");
+        return { result: "actor_not_owner" };
+      }
+      const updated = await client.query<SupportAccessGrantRow>(
+        `UPDATE support_access_grants
+         SET approved_by_actor_id = $3, approved_at = $4
+         WHERE id = $1 AND organization_id = $2
+         RETURNING *`,
+        [input.grantId, input.organizationId, input.actorId, input.approvedAt],
+      );
+      const grant = toSupportAccessGrant(updated.rows[0]!);
+      await insertSupportGrantAudit(client, {
+        id: input.auditEventId,
+        grant,
+        actorId: input.actorId,
+        eventType: "support_access_grant.approved.v1",
+        correlationId: input.correlationId,
+        occurredAt: input.approvedAt,
+        payload: {},
+      });
+      await client.query("COMMIT");
+      return { result: "approved", grant };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async revoke(input: {
+    grantId: string;
+    organizationId: string;
+    actorId: string;
+    reason: string;
+    revokedAt: Date;
+    auditEventId: string;
+    correlationId: string;
+  }): Promise<
+    | { result: "revoked"; grant: SupportAccessGrant }
+    | { result: "not_found" | "already_revoked" | "expired" }
+  > {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const found = await client.query<SupportAccessGrantRow>(
+        `${supportAccessGrantSelect}
+         WHERE id = $1 AND organization_id = $2 FOR UPDATE`,
+        [input.grantId, input.organizationId],
+      );
+      const row = found.rows[0];
+      if (!row) {
+        await client.query("ROLLBACK");
+        return { result: "not_found" };
+      }
+      const current = toSupportAccessGrant(row);
+      if (current.revokedAt) {
+        await client.query("ROLLBACK");
+        return { result: "already_revoked" };
+      }
+      if (current.expiresAt <= input.revokedAt) {
+        await this.insertExpiration(
+          client,
+          current,
+          current.expiresAt,
+          input.correlationId,
+        );
+        await client.query("COMMIT");
+        return { result: "expired" };
+      }
+      const updated = await client.query<SupportAccessGrantRow>(
+        `UPDATE support_access_grants
+         SET revoked_at = $3, revoked_by_actor_id = $4
+         WHERE id = $1 AND organization_id = $2
+         RETURNING *`,
+        [input.grantId, input.organizationId, input.revokedAt, input.actorId],
+      );
+      const grant = toSupportAccessGrant(updated.rows[0]!);
+      await insertSupportGrantAudit(client, {
+        id: input.auditEventId,
+        grant,
+        actorId: input.actorId,
+        eventType: "support_access_grant.revoked.v1",
+        correlationId: input.correlationId,
+        occurredAt: input.revokedAt,
+        payload: { reason: input.reason },
+      });
+      await client.query("COMMIT");
+      return { result: "revoked", grant };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async diagnoseAndAudit(input: {
+    organizationId: string;
+    actorId: string;
+    now: Date;
+    auditEventId: string;
+    correlationId: string;
+  }): Promise<OrganizationSupportDiagnostic | null> {
+    await this.recordExpired({
+      organizationId: input.organizationId,
+      now: input.now,
+      correlationId: input.correlationId,
+    });
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const found = await client.query<SupportAccessGrantRow>(
+        `${supportAccessGrantSelect}
+         WHERE organization_id = $1 AND support_actor_id = $2
+           AND approved_at IS NOT NULL AND revoked_at IS NULL
+           AND expires_at > $3
+         ORDER BY expires_at ASC, id ASC LIMIT 1 FOR UPDATE`,
+        [input.organizationId, input.actorId, input.now],
+      );
+      const row = found.rows[0];
+      if (!row) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const metrics = await client.query<SupportDiagnosticRow>(
+        `SELECT
+          (SELECT COUNT(*) FROM workspaces WHERE organization_id = $1 AND status = 'active') AS active_workspaces,
+          (SELECT COUNT(*) FROM workspaces WHERE organization_id = $1 AND status = 'archived') AS archived_workspaces,
+          (SELECT COUNT(*) FROM organization_memberships WHERE organization_id = $1 AND status = 'active') AS active_memberships,
+          (SELECT COUNT(*) FROM organization_memberships WHERE organization_id = $1 AND status = 'suspended') AS suspended_memberships,
+          (SELECT COUNT(*) FROM organization_memberships WHERE organization_id = $1 AND status = 'revoked') AS revoked_memberships,
+          (SELECT COUNT(*) FROM outbox_events WHERE organization_id = $1 AND status IN ('pending', 'processing')) AS pending_outbox_events,
+          (SELECT COUNT(*) FROM outbox_dead_letters WHERE organization_id = $1) AS dead_letters,
+          EXISTS (SELECT 1 FROM organization_policies WHERE organization_id = $1) AS policy_configured`,
+        [input.organizationId],
+      );
+      const grant = toSupportAccessGrant(row);
+      const diagnostic = toOrganizationSupportDiagnostic(
+        input.organizationId,
+        input.now,
+        metrics.rows[0]!,
+      );
+      await insertSupportGrantAudit(client, {
+        id: input.auditEventId,
+        grant,
+        actorId: input.actorId,
+        eventType: "support_access_grant.used.v1",
+        correlationId: input.correlationId,
+        occurredAt: input.now,
+        payload: { diagnostic: "organization_summary.v1" },
+      });
+      await client.query("COMMIT");
+      return diagnostic;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async recordExpired(input: {
+    organizationId: string;
+    now: Date;
+    correlationId: string;
+  }): Promise<number> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const expired = await client.query<SupportAccessGrantRow>(
+        `${supportAccessGrantSelect}
+         WHERE organization_id = $2 AND expires_at <= $1
+           AND revoked_at IS NULL
+           AND NOT EXISTS (
+             SELECT 1 FROM support_access_grant_audit_events audit
+             WHERE audit.grant_id = support_access_grants.id
+               AND audit.event_type = 'support_access_grant.expired.v1'
+           )
+         FOR UPDATE`,
+        [input.now, input.organizationId],
+      );
+      for (const row of expired.rows) {
+        const grant = toSupportAccessGrant(row);
+        await this.insertExpiration(
+          client,
+          grant,
+          grant.expiresAt,
+          input.correlationId,
+        );
+      }
+      await client.query("COMMIT");
+      return expired.rows.length;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  private async insertExpiration(
+    client: PoolClient,
+    grant: SupportAccessGrant,
+    occurredAt: Date,
+    correlationId: string,
+  ): Promise<void> {
+    await client.query(
+      `INSERT INTO support_access_grant_audit_events
+       (id, grant_id, organization_id, actor_id, event_type, correlation_id,
+        occurred_at, payload)
+       VALUES ($1,$2,$3,'system:expiration','support_access_grant.expired.v1',$4,$5,'{}'::jsonb)
+       ON CONFLICT (grant_id, event_type)
+       WHERE event_type = 'support_access_grant.expired.v1' DO NOTHING`,
+      [
+        crypto.randomUUID(),
+        grant.id,
+        grant.organizationId,
+        correlationId,
+        occurredAt,
+      ],
+    );
+  }
+}
+
 type TeamRow = {
   id: string;
   organization_id: string;
@@ -1745,6 +2101,29 @@ type TeamRow = {
   name: string;
   version: number;
   member_actor_ids: string[];
+};
+type SupportAccessGrantRow = {
+  id: string;
+  organization_id: string;
+  support_actor_id: string;
+  requested_by_actor_id: string;
+  approved_by_actor_id: string | null;
+  reason: string;
+  created_at: Date;
+  expires_at: Date;
+  approved_at: Date | null;
+  revoked_at: Date | null;
+  revoked_by_actor_id: string | null;
+};
+type SupportDiagnosticRow = {
+  active_workspaces: string;
+  archived_workspaces: string;
+  active_memberships: string;
+  suspended_memberships: string;
+  revoked_memberships: string;
+  pending_outbox_events: string;
+  dead_letters: string;
+  policy_configured: boolean;
 };
 type OrganizationPolicyRow = {
   organization_id: string;
@@ -3752,6 +4131,50 @@ const temporaryAccessGrantSelect = `SELECT id, organization_id, workspace_id,
   approved_by_actor_id, reason, created_at, expires_at, approved_at, revoked_at,
   revoked_by_actor_id FROM temporary_access_grants`;
 const temporaryAccessGrantUpdatePrefix = "UPDATE temporary_access_grants";
+const supportAccessGrantSelect = `SELECT id, organization_id, support_actor_id,
+  requested_by_actor_id, approved_by_actor_id, reason, created_at, expires_at,
+  approved_at, revoked_at, revoked_by_actor_id FROM support_access_grants`;
+
+function toSupportAccessGrant(row: SupportAccessGrantRow): SupportAccessGrant {
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    supportActorId: row.support_actor_id,
+    requestedByActorId: row.requested_by_actor_id,
+    approvedByActorId: row.approved_by_actor_id,
+    reason: row.reason,
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
+    approvedAt: row.approved_at,
+    revokedAt: row.revoked_at,
+    revokedByActorId: row.revoked_by_actor_id,
+  };
+}
+
+function toOrganizationSupportDiagnostic(
+  organizationId: string,
+  generatedAt: Date,
+  row: SupportDiagnosticRow,
+): OrganizationSupportDiagnostic {
+  return {
+    organizationId,
+    generatedAt,
+    workspaces: {
+      active: numberValue(row.active_workspaces),
+      archived: numberValue(row.archived_workspaces),
+    },
+    memberships: {
+      active: numberValue(row.active_memberships),
+      suspended: numberValue(row.suspended_memberships),
+      revoked: numberValue(row.revoked_memberships),
+    },
+    delivery: {
+      pendingOutboxEvents: numberValue(row.pending_outbox_events),
+      deadLetters: numberValue(row.dead_letters),
+    },
+    policyConfigured: row.policy_configured,
+  };
+}
 
 async function insertTemporaryGrantAudit(
   client: PoolClient,
@@ -3779,6 +4202,40 @@ async function insertTemporaryGrantAudit(
       input.grant.id,
       input.grant.organizationId,
       input.grant.workspaceId,
+      input.actorId,
+      input.eventType,
+      input.correlationId,
+      input.occurredAt,
+      asJson(input.payload),
+    ],
+  );
+}
+
+async function insertSupportGrantAudit(
+  client: PoolClient,
+  input: {
+    id: string;
+    grant: SupportAccessGrant;
+    actorId: string;
+    eventType:
+      | "support_access_grant.requested.v1"
+      | "support_access_grant.approved.v1"
+      | "support_access_grant.used.v1"
+      | "support_access_grant.revoked.v1";
+    correlationId: string;
+    occurredAt: Date;
+    payload: Readonly<Record<string, unknown>>;
+  },
+): Promise<void> {
+  await client.query(
+    `INSERT INTO support_access_grant_audit_events
+     (id, grant_id, organization_id, actor_id, event_type, correlation_id,
+      occurred_at, payload)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+    [
+      input.id,
+      input.grant.id,
+      input.grant.organizationId,
       input.actorId,
       input.eventType,
       input.correlationId,

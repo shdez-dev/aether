@@ -44,6 +44,8 @@ import {
   PolicyNotConfiguredError,
   TemporaryAccessGrantError,
   TemporaryAccessGrantService,
+  SupportAccessGrantError,
+  SupportAccessService,
 } from "@aether/application";
 import {
   CreateInvitationRequestSchema,
@@ -60,6 +62,9 @@ import {
   RequestTemporaryAccessGrantSchema,
   RevokeTemporaryAccessGrantSchema,
   ApproveTemporaryAccessGrantSchema,
+  RequestSupportAccessGrantSchema,
+  SupportAccessGrantContextSchema,
+  RevokeSupportAccessGrantSchema,
   DecideInitiativeRequestSchema,
   ActivateEvaluationStandardRequestSchema,
   AuditHistoryQuerySchema,
@@ -113,6 +118,7 @@ export async function buildServer(input: {
   auth: AuthService;
   tenants: TenantService;
   accessGrants?: TemporaryAccessGrantService;
+  supportAccess?: SupportAccessService;
   initiatives: InitiativeService;
   evaluations: EvaluationService;
   projects: ProjectService;
@@ -292,6 +298,12 @@ export async function buildServer(input: {
                       "GRANT_NOT_PENDING",
                       "GRANT_NOT_ACTIVE",
                       "GRANT_EXPIRED",
+                    ].includes(error.code)) ||
+                  (error instanceof SupportAccessGrantError &&
+                    [
+                      "SUPPORT_ACCESS_NOT_PENDING",
+                      "SUPPORT_ACCESS_NOT_ACTIVE",
+                      "SUPPORT_ACCESS_EXPIRED",
                     ].includes(error.code))
                 ? 409
                 : error instanceof CsrfError ||
@@ -304,7 +316,13 @@ export async function buildServer(input: {
                     (error instanceof MembershipStatusError &&
                       error.code === "actor_not_manager") ||
                     (error instanceof TemporaryAccessGrantError &&
-                      error.code === "GRANT_SEPARATION_OF_DUTIES")
+                      error.code === "GRANT_SEPARATION_OF_DUTIES") ||
+                    (error instanceof SupportAccessGrantError &&
+                      [
+                        "SUPPORT_OPERATOR_NOT_ELIGIBLE",
+                        "SUPPORT_ACCESS_SEPARATION_OF_DUTIES",
+                        "SUPPORT_ACCESS_DENIED",
+                      ].includes(error.code))
                   ? 403
                   : error instanceof ResourceNotFoundError ||
                       error instanceof DocumentNotFoundError ||
@@ -393,7 +411,13 @@ export async function buildServer(input: {
                               (error instanceof MembershipStatusError &&
                                 error.code === "actor_not_manager") ||
                               (error instanceof TemporaryAccessGrantError &&
-                                error.code === "GRANT_SEPARATION_OF_DUTIES")
+                                error.code === "GRANT_SEPARATION_OF_DUTIES") ||
+                              (error instanceof SupportAccessGrantError &&
+                                [
+                                  "SUPPORT_OPERATOR_NOT_ELIGIBLE",
+                                  "SUPPORT_ACCESS_SEPARATION_OF_DUTIES",
+                                  "SUPPORT_ACCESS_DENIED",
+                                ].includes(error.code))
                             ? "FORBIDDEN"
                             : error instanceof ResourceNotFoundError ||
                                 error instanceof DocumentNotFoundError ||
@@ -405,22 +429,27 @@ export async function buildServer(input: {
                               ? "NOT_FOUND"
                               : error instanceof TemporaryAccessGrantError
                                 ? error.code
-                                : error instanceof
-                                      InitiativeVersionConflictError ||
-                                    error instanceof ProjectVersionConflictError
-                                  ? "CONFLICT"
-                                  : error instanceof InitiativeDomainError ||
+                                : error instanceof SupportAccessGrantError
+                                  ? error.code
+                                  : error instanceof
+                                        InitiativeVersionConflictError ||
                                       error instanceof
-                                        DocumentValidationError ||
-                                      error instanceof ProjectDomainError
-                                    ? "PRECONDITION_FAILED"
-                                    : error instanceof InvitationError
-                                      ? "INVITATION_INVALID_OR_EXPIRED"
-                                      : error instanceof OwnershipTransferError
-                                        ? error.code
-                                        : error instanceof MembershipStatusError
-                                          ? error.code.toUpperCase()
-                                          : "VALIDATION_ERROR",
+                                        ProjectVersionConflictError
+                                    ? "CONFLICT"
+                                    : error instanceof InitiativeDomainError ||
+                                        error instanceof
+                                          DocumentValidationError ||
+                                        error instanceof ProjectDomainError
+                                      ? "PRECONDITION_FAILED"
+                                      : error instanceof InvitationError
+                                        ? "INVITATION_INVALID_OR_EXPIRED"
+                                        : error instanceof
+                                            OwnershipTransferError
+                                          ? error.code
+                                          : error instanceof
+                                              MembershipStatusError
+                                            ? error.code.toUpperCase()
+                                            : "VALIDATION_ERROR",
         correlationId: reply.getHeader("X-Correlation-ID"),
         instance: request.url,
       });
@@ -635,6 +664,130 @@ export async function buildServer(input: {
         ...body,
       });
       return toOrganizationPolicyResponse(policy);
+    },
+  );
+  app.post("/v1/admin/support-access-grants", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    assertRecentAuthentication(session, input.config);
+    if (!input.supportAccess)
+      throw new Error("Support access is not configured");
+    const body = RequestSupportAccessGrantSchema.parse(request.body);
+    return respondIdempotently({
+      request,
+      reply,
+      store: input.idempotency,
+      actorId: session.actorId,
+      operation: `support_access_grant.request:${body.organizationId}`,
+      requestPayload: body,
+      execute: async () => {
+        const grant = await input.supportAccess!.request({
+          actorId: session.actorId,
+          correlationId: correlationId(reply),
+          ...body,
+        });
+        return {
+          statusCode: 201,
+          body: toSupportAccessGrantResponse(input.supportAccess!, grant),
+        };
+      },
+    });
+  });
+  app.get("/v1/admin/support-access-grants", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    if (!input.supportAccess)
+      throw new Error("Support access is not configured");
+    const query = SupportAccessGrantContextSchema.parse(request.query);
+    const grants = await input.supportAccess.list({
+      actorId: session.actorId,
+      correlationId: correlationId(reply),
+      ...query,
+    });
+    return grants.map((grant) =>
+      toSupportAccessGrantResponse(input.supportAccess!, grant),
+    );
+  });
+  app.post(
+    "/v1/admin/support-access-grants/:grantId/approve",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      assertRecentAuthentication(session, input.config);
+      if (!input.supportAccess)
+        throw new Error("Support access is not configured");
+      const params = z
+        .object({ grantId: z.string().uuid() })
+        .parse(request.params);
+      const body = SupportAccessGrantContextSchema.parse(request.body);
+      const grant = await input.supportAccess.approve({
+        actorId: session.actorId,
+        correlationId: correlationId(reply),
+        ...params,
+        ...body,
+      });
+      return toSupportAccessGrantResponse(input.supportAccess, grant);
+    },
+  );
+  app.post(
+    "/v1/admin/support-access-grants/:grantId/revoke",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      assertRecentAuthentication(session, input.config);
+      if (!input.supportAccess)
+        throw new Error("Support access is not configured");
+      const params = z
+        .object({ grantId: z.string().uuid() })
+        .parse(request.params);
+      const body = RevokeSupportAccessGrantSchema.parse(request.body);
+      const grant = await input.supportAccess.revoke({
+        actorId: session.actorId,
+        correlationId: correlationId(reply),
+        ...params,
+        ...body,
+      });
+      return toSupportAccessGrantResponse(input.supportAccess, grant);
+    },
+  );
+  app.get(
+    "/v1/admin/support/organizations/:organizationId/diagnostics",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      assertRecentAuthentication(session, input.config);
+      if (!input.supportAccess)
+        throw new Error("Support access is not configured");
+      const params = SupportAccessGrantContextSchema.parse(request.params);
+      const diagnostic = await input.supportAccess.diagnose({
+        actorId: session.actorId,
+        correlationId: correlationId(reply),
+        ...params,
+      });
+      return {
+        ...diagnostic,
+        generatedAt: diagnostic.generatedAt.toISOString(),
+      };
     },
   );
   app.post(
@@ -2347,6 +2500,19 @@ function toEffectiveTenancyPolicyResponse(policy: {
 function toTemporaryAccessGrantResponse(
   service: TemporaryAccessGrantService,
   grant: Parameters<TemporaryAccessGrantService["status"]>[0],
+) {
+  return {
+    ...grant,
+    createdAt: grant.createdAt.toISOString(),
+    expiresAt: grant.expiresAt.toISOString(),
+    approvedAt: grant.approvedAt?.toISOString() ?? null,
+    revokedAt: grant.revokedAt?.toISOString() ?? null,
+    status: service.status(grant),
+  };
+}
+function toSupportAccessGrantResponse(
+  service: SupportAccessService,
+  grant: Parameters<SupportAccessService["status"]>[0],
 ) {
   return {
     ...grant,

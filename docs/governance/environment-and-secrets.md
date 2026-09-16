@@ -49,6 +49,7 @@ ficticio y sirve únicamente para desarrollo local.
 | `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`        | credenciales de mínimo privilegio                                  | Sí      | Plataforma     |
 | `S3_PRESIGN_TTL_SECONDS`                          | entero 60–900; `300`                                               | No      | Seguridad      |
 | `MAX_DOCUMENT_BYTES`                              | entero 1024–26214400; `10485760`                                   | No      | Backend        |
+| `SUPPORT_OPERATOR_ACTOR_IDS`                      | IDs OIDC separados por coma; vacío deshabilita solicitudes JIT     | No      | Seguridad      |
 | `WORKER_ID`, `OUTBOX_POLL_INTERVAL_MS`            | identificador y entero ms; `1000`                                  | No      | Plataforma     |
 | `CLAMAV_HOST`, `CLAMAV_PORT`, `CLAMAV_TIMEOUT_MS` | host, puerto y ms; `127.0.0.1`, `3310`, `30000`                    | No      | Plataforma     |
 

@@ -703,7 +703,9 @@ export class ResourceNotFoundError extends Error {
       | "INITIATIVE_NOT_FOUND"
       | "PROJECT_NOT_FOUND"
       | "EVIDENCE_SUBJECT_NOT_FOUND"
-      | "TEMPORARY_ACCESS_GRANT_NOT_FOUND",
+      | "TEMPORARY_ACCESS_GRANT_NOT_FOUND"
+      | "ORGANIZATION_NOT_FOUND"
+      | "SUPPORT_ACCESS_GRANT_NOT_FOUND",
   ) {
     super(code);
   }

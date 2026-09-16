@@ -100,3 +100,29 @@ exigen autenticación reciente. Los eventos `requested`, `approved`, `used`,
 `temporary_access_grant_audit_events`, que es append-only. La solicitud,
 aprobación y revocación se confirman en la misma transacción que su evento; cada
 uso autorizado registra el `correlationId` de la operación protegida.
+
+## Acceso JIT de soporte
+
+Una identidad incluida explícitamente en `SUPPORT_OPERATOR_ACTOR_IDS` puede
+solicitar acceso JIT para sí misma y una organización concreta. Esa
+elegibilidad no es un rol ni concede acceso permanente. La solicitud exige
+motivo, autenticación reciente y una duración de uno a 60 minutos contados
+desde su creación. Sólo un `owner` distinto del solicitante puede aprobarla;
+el owner o el operador pueden revocarla y retirar la identidad de la
+configuración bloquea inmediatamente nuevas consultas, incluso si existía un
+grant activo.
+
+El único uso privilegiado del MVP es
+`GET /v1/admin/support/organizations/{organizationId}/diagnostics`. Devuelve
+exclusivamente conteos agregados de workspaces y estados de membresía, salud de
+entrega mediante outbox/dead letters y presencia de política organizacional.
+No devuelve nombres, correos, documentos, archivos, comentarios, decisiones ni
+otro contenido institucional. No existe una ruta genérica para suplantar roles
+o leer recursos mediante el grant JIT.
+
+Cada consulta revalida elegibilidad, organización, aprobación, revocación y
+expiración contra PostgreSQL. Solicitud, aprobación, uso, expiración y
+revocación se conservan en `support_access_grant_audit_events`, append-only y
+correlacionado. Los endpoints administrativos están separados bajo
+`/v1/admin/support`; solicitud, aprobación, revocación y diagnóstico exigen
+autenticación reciente.
