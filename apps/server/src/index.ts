@@ -12,6 +12,7 @@ import {
   InitiativeService,
   ProjectService,
   TenantService,
+  TemporaryAccessGrantService,
 } from "@aether/application";
 import {
   AuthService,
@@ -41,6 +42,7 @@ import {
   PostgresProjectClosureStore,
   PostgresNotificationStore,
   PostgresCommentStore,
+  PostgresTemporaryAccessGrantStore,
 } from "@aether/database";
 import {
   createOperationalMetrics,
@@ -77,16 +79,26 @@ const auth = new AuthService({
   sessionTtlSeconds: config.sessionTtlSeconds,
   sessionRenewalWindowSeconds: config.sessionRenewalWindowSeconds,
 });
+const accessGrantStore = new PostgresTemporaryAccessGrantStore(pool);
+const accessGrants = new TemporaryAccessGrantService({
+  store: accessGrantStore,
+  resources: accessGrantStore,
+  tenancy: new PostgresTenantStore(pool),
+  ids: { next: randomUUID },
+  clock: { now: () => new Date() },
+});
 const tenants = new TenantService({
   store: new PostgresTenantStore(pool),
   ids: { next: randomUUID },
   tokens: { generate: randomOpaqueToken, hash: hashOpaqueToken },
   clock: { now: () => new Date() },
+  accessGrants,
 });
 const initiatives = new InitiativeService({
   store: new PostgresInitiativeStore(pool),
   audit: new PostgresInitiativeAuditStore(pool),
   tenancy: new PostgresTenantStore(pool),
+  accessGrants,
   ids: { next: randomUUID },
   clock: { now: () => new Date() },
 });
@@ -96,6 +108,7 @@ const evaluations = new EvaluationService({
   initiatives: new PostgresInitiativeStore(pool),
   audit: new PostgresInitiativeAuditStore(pool),
   tenancy: new PostgresTenantStore(pool),
+  accessGrants,
   ids: { next: randomUUID },
   clock: { now: () => new Date() },
 });
@@ -109,6 +122,7 @@ const projects = new ProjectService({
   decisions: new PostgresEvaluationStore(pool),
   initiatives: new PostgresInitiativeStore(pool),
   tenancy: new PostgresTenantStore(pool),
+  accessGrants,
   ids: { next: randomUUID },
   clock: { now: () => new Date() },
 });
@@ -123,6 +137,7 @@ const documents = new DocumentService({
     maxBytes: config.maxDocumentBytes,
   }),
   tenancy: new PostgresTenantStore(pool),
+  accessGrants,
   projectAccess: new PostgresDocumentProjectAccess(pool),
   ids: { next: randomUUID },
   clock: { now: () => new Date() },
@@ -172,6 +187,7 @@ const app = await buildServer({
   config,
   auth,
   tenants,
+  accessGrants,
   initiatives,
   evaluations,
   projects,

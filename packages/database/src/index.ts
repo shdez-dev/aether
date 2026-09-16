@@ -50,6 +50,10 @@ import type {
   OrganizationPolicy,
   EffectiveTenancyPolicy,
   WorkspacePolicyOverride,
+  TemporaryAccessGrant,
+  TemporaryAccessGrantResourceResolver,
+  TemporaryAccessGrantStore,
+  TemporaryGrantResourceType,
   Team,
   TenantStore,
   Workspace,
@@ -1346,6 +1350,394 @@ export class PostgresTenantStore implements TenantStore {
   }
 }
 
+/** Grants temporales exactos, con ciclo de vida y auditoría transaccional. */
+export class PostgresTemporaryAccessGrantStore
+  implements TemporaryAccessGrantStore, TemporaryAccessGrantResourceResolver
+{
+  constructor(private readonly pool: Pool) {}
+
+  async resolve(input: {
+    resourceType: TemporaryGrantResourceType;
+    resourceId: string;
+  }): Promise<{ organizationId: string; workspaceId: string } | null> {
+    const source: Record<TemporaryGrantResourceType, string> = {
+      workspace: "workspaces",
+      initiative: "initiatives",
+      evaluation: "initiative_evaluations",
+      decision: "initiative_decisions",
+      project: "projects",
+      document: "documents",
+    };
+    const result = await this.pool.query<{
+      organization_id: string;
+      workspace_id: string;
+    }>(
+      input.resourceType === "workspace"
+        ? "SELECT organization_id, id AS workspace_id FROM workspaces WHERE id = $1"
+        : `SELECT organization_id, workspace_id FROM ${source[input.resourceType]} WHERE id = $1`,
+      [input.resourceId],
+    );
+    const row = result.rows[0];
+    return row
+      ? {
+          organizationId: row.organization_id,
+          workspaceId: row.workspace_id,
+        }
+      : null;
+  }
+
+  async create(input: {
+    grant: TemporaryAccessGrant;
+    auditEventId: string;
+    correlationId: string;
+  }): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const grant = input.grant;
+      await client.query(
+        `INSERT INTO temporary_access_grants
+         (id, organization_id, workspace_id, resource_type, resource_id, action,
+          grantee_actor_id, requested_by_actor_id, approved_by_actor_id, reason,
+          created_at, expires_at, approved_at, revoked_at, revoked_by_actor_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NULL,$9,$10,$11,NULL,NULL,NULL)`,
+        [
+          grant.id,
+          grant.organizationId,
+          grant.workspaceId,
+          grant.resourceType,
+          grant.resourceId,
+          grant.action,
+          grant.granteeActorId,
+          grant.requestedByActorId,
+          grant.reason,
+          grant.createdAt,
+          grant.expiresAt,
+        ],
+      );
+      await insertTemporaryGrantAudit(client, {
+        id: input.auditEventId,
+        grant,
+        actorId: grant.requestedByActorId,
+        eventType: "temporary_access_grant.requested.v1",
+        correlationId: input.correlationId,
+        occurredAt: grant.createdAt,
+        payload: {
+          resourceType: grant.resourceType,
+          resourceId: grant.resourceId,
+          action: grant.action,
+          granteeActorId: grant.granteeActorId,
+          reason: grant.reason,
+          expiresAt: grant.expiresAt.toISOString(),
+        },
+      });
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async findById(grantId: string): Promise<TemporaryAccessGrant | null> {
+    const result = await this.pool.query<TemporaryAccessGrantRow>(
+      `${temporaryAccessGrantSelect} WHERE id = $1`,
+      [grantId],
+    );
+    return result.rows[0] ? toTemporaryAccessGrant(result.rows[0]) : null;
+  }
+
+  async list(input: {
+    organizationId: string;
+    actorId: string;
+    includeAll: boolean;
+  }): Promise<readonly TemporaryAccessGrant[]> {
+    const result = await this.pool.query<TemporaryAccessGrantRow>(
+      `${temporaryAccessGrantSelect}
+       WHERE organization_id = $1
+         AND ($3::boolean OR requested_by_actor_id = $2 OR grantee_actor_id = $2)
+       ORDER BY created_at DESC, id DESC`,
+      [input.organizationId, input.actorId, input.includeAll],
+    );
+    return result.rows.map(toTemporaryAccessGrant);
+  }
+
+  async approve(input: {
+    grantId: string;
+    organizationId: string;
+    actorId: string;
+    approvedAt: Date;
+    auditEventId: string;
+    correlationId: string;
+  }): Promise<
+    | { result: "approved"; grant: TemporaryAccessGrant }
+    | {
+        result: "not_found" | "not_pending" | "expired" | "actor_not_owner";
+      }
+  > {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const found = await client.query<TemporaryAccessGrantRow>(
+        `${temporaryAccessGrantSelect}
+         WHERE id = $1 AND organization_id = $2 FOR UPDATE`,
+        [input.grantId, input.organizationId],
+      );
+      const row = found.rows[0];
+      if (!row) {
+        await client.query("ROLLBACK");
+        return { result: "not_found" };
+      }
+      const current = toTemporaryAccessGrant(row);
+      if (current.approvedAt || current.revokedAt) {
+        await client.query("ROLLBACK");
+        return { result: "not_pending" };
+      }
+      if (current.expiresAt <= input.approvedAt) {
+        await this.insertExpiration(
+          client,
+          current,
+          current.expiresAt,
+          input.correlationId,
+        );
+        await client.query("COMMIT");
+        return { result: "expired" };
+      }
+      const owner = await client.query(
+        `SELECT 1 FROM organization_memberships
+         WHERE organization_id = $1 AND actor_id = $2
+           AND role = 'owner' AND status = 'active'`,
+        [input.organizationId, input.actorId],
+      );
+      if ((owner.rowCount ?? 0) !== 1) {
+        await client.query("ROLLBACK");
+        return { result: "actor_not_owner" };
+      }
+      const updated = await client.query<TemporaryAccessGrantRow>(
+        `${temporaryAccessGrantUpdatePrefix}
+         SET approved_by_actor_id = $3, approved_at = $4
+         WHERE id = $1 AND organization_id = $2
+         RETURNING *`,
+        [input.grantId, input.organizationId, input.actorId, input.approvedAt],
+      );
+      const grant = toTemporaryAccessGrant(updated.rows[0]!);
+      await insertTemporaryGrantAudit(client, {
+        id: input.auditEventId,
+        grant,
+        actorId: input.actorId,
+        eventType: "temporary_access_grant.approved.v1",
+        correlationId: input.correlationId,
+        occurredAt: input.approvedAt,
+        payload: {},
+      });
+      await client.query("COMMIT");
+      return { result: "approved", grant };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async revoke(input: {
+    grantId: string;
+    organizationId: string;
+    actorId: string;
+    reason: string;
+    revokedAt: Date;
+    auditEventId: string;
+    correlationId: string;
+  }): Promise<
+    | { result: "revoked"; grant: TemporaryAccessGrant }
+    | { result: "not_found" | "already_revoked" | "expired" }
+  > {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const found = await client.query<TemporaryAccessGrantRow>(
+        `${temporaryAccessGrantSelect}
+         WHERE id = $1 AND organization_id = $2 FOR UPDATE`,
+        [input.grantId, input.organizationId],
+      );
+      const row = found.rows[0];
+      if (!row) {
+        await client.query("ROLLBACK");
+        return { result: "not_found" };
+      }
+      const current = toTemporaryAccessGrant(row);
+      if (current.revokedAt) {
+        await client.query("ROLLBACK");
+        return { result: "already_revoked" };
+      }
+      if (current.expiresAt <= input.revokedAt) {
+        await this.insertExpiration(
+          client,
+          current,
+          current.expiresAt,
+          input.correlationId,
+        );
+        await client.query("COMMIT");
+        return { result: "expired" };
+      }
+      const updated = await client.query<TemporaryAccessGrantRow>(
+        `${temporaryAccessGrantUpdatePrefix}
+         SET revoked_at = $3, revoked_by_actor_id = $4
+         WHERE id = $1 AND organization_id = $2
+         RETURNING *`,
+        [input.grantId, input.organizationId, input.revokedAt, input.actorId],
+      );
+      const grant = toTemporaryAccessGrant(updated.rows[0]!);
+      await insertTemporaryGrantAudit(client, {
+        id: input.auditEventId,
+        grant,
+        actorId: input.actorId,
+        eventType: "temporary_access_grant.revoked.v1",
+        correlationId: input.correlationId,
+        occurredAt: input.revokedAt,
+        payload: { reason: input.reason },
+      });
+      await client.query("COMMIT");
+      return { result: "revoked", grant };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async authorizeAndAudit(input: {
+    actorId: string;
+    organizationId: string;
+    workspaceId: string;
+    resourceType: TemporaryGrantResourceType;
+    resourceId: string;
+    action: "read" | "contribute";
+    now: Date;
+    auditEventId: string;
+    expirationCorrelationId: string;
+    correlationId: string;
+  }): Promise<boolean> {
+    await this.recordExpired({
+      organizationId: input.organizationId,
+      now: input.now,
+      correlationId: input.expirationCorrelationId,
+    });
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const found = await client.query<TemporaryAccessGrantRow>(
+        `${temporaryAccessGrantSelect}
+         WHERE organization_id = $1 AND workspace_id = $2
+           AND resource_type = $3 AND resource_id = $4 AND action = $5
+           AND grantee_actor_id = $6 AND approved_at IS NOT NULL
+           AND revoked_at IS NULL AND expires_at > $7
+         ORDER BY expires_at ASC, id ASC LIMIT 1 FOR UPDATE`,
+        [
+          input.organizationId,
+          input.workspaceId,
+          input.resourceType,
+          input.resourceId,
+          input.action,
+          input.actorId,
+          input.now,
+        ],
+      );
+      const row = found.rows[0];
+      if (!row) {
+        await client.query("ROLLBACK");
+        return false;
+      }
+      const grant = toTemporaryAccessGrant(row);
+      await insertTemporaryGrantAudit(client, {
+        id: input.auditEventId,
+        grant,
+        actorId: input.actorId,
+        eventType: "temporary_access_grant.used.v1",
+        correlationId: input.correlationId,
+        occurredAt: input.now,
+        payload: {
+          resourceType: input.resourceType,
+          resourceId: input.resourceId,
+          action: input.action,
+        },
+      });
+      await client.query("COMMIT");
+      return true;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async recordExpired(input: {
+    organizationId: string;
+    now: Date;
+    correlationId: string;
+  }): Promise<number> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const expired = await client.query<TemporaryAccessGrantRow>(
+        `${temporaryAccessGrantSelect}
+         WHERE organization_id = $2 AND expires_at <= $1
+           AND revoked_at IS NULL
+           AND NOT EXISTS (
+             SELECT 1 FROM temporary_access_grant_audit_events audit
+             WHERE audit.grant_id = temporary_access_grants.id
+               AND audit.event_type = 'temporary_access_grant.expired.v1'
+           )
+         FOR UPDATE`,
+        [input.now, input.organizationId],
+      );
+      for (const row of expired.rows) {
+        const grant = toTemporaryAccessGrant(row);
+        await this.insertExpiration(
+          client,
+          grant,
+          grant.expiresAt,
+          input.correlationId,
+        );
+      }
+      await client.query("COMMIT");
+      return expired.rows.length;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  private async insertExpiration(
+    client: PoolClient,
+    grant: TemporaryAccessGrant,
+    occurredAt: Date,
+    correlationId: string,
+  ): Promise<void> {
+    await client.query(
+      `INSERT INTO temporary_access_grant_audit_events
+       (id, grant_id, organization_id, workspace_id, actor_id, event_type,
+        correlation_id, occurred_at, payload)
+       VALUES ($1,$2,$3,$4,'system:expiration','temporary_access_grant.expired.v1',$5,$6,'{}'::jsonb)
+       ON CONFLICT (grant_id, event_type)
+       WHERE event_type = 'temporary_access_grant.expired.v1' DO NOTHING`,
+      [
+        crypto.randomUUID(),
+        grant.id,
+        grant.organizationId,
+        grant.workspaceId,
+        correlationId,
+        occurredAt,
+      ],
+    );
+  }
+}
+
 type TeamRow = {
   id: string;
   organization_id: string;
@@ -1385,6 +1777,23 @@ type PolicyJoinRow = {
   override_version: number | null;
   override_updated_by_actor_id: string | null;
   override_updated_at: Date | null;
+};
+type TemporaryAccessGrantRow = {
+  id: string;
+  organization_id: string;
+  workspace_id: string;
+  resource_type: TemporaryGrantResourceType;
+  resource_id: string;
+  action: "read" | "contribute";
+  grantee_actor_id: string;
+  requested_by_actor_id: string;
+  approved_by_actor_id: string | null;
+  reason: string;
+  created_at: Date;
+  expires_at: Date;
+  approved_at: Date | null;
+  revoked_at: Date | null;
+  revoked_by_actor_id: string | null;
 };
 
 type WorkspaceRow = {
@@ -1440,6 +1849,27 @@ function toWorkspacePolicyOverride(
     version: Number(row.version),
     updatedByActorId: row.updated_by_actor_id,
     updatedAt: row.updated_at,
+  };
+}
+function toTemporaryAccessGrant(
+  row: TemporaryAccessGrantRow,
+): TemporaryAccessGrant {
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    workspaceId: row.workspace_id,
+    resourceType: row.resource_type,
+    resourceId: row.resource_id,
+    action: row.action,
+    granteeActorId: row.grantee_actor_id,
+    requestedByActorId: row.requested_by_actor_id,
+    approvedByActorId: row.approved_by_actor_id,
+    reason: row.reason,
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
+    approvedAt: row.approved_at,
+    revokedAt: row.revoked_at,
+    revokedByActorId: row.revoked_by_actor_id,
   };
 }
 function toInvitation(row: InvitationRow): Invitation {
@@ -3313,6 +3743,47 @@ async function insertOutboxEvent(
       event.causationId,
       event.schemaVersion,
       event.payload,
+    ],
+  );
+}
+
+const temporaryAccessGrantSelect = `SELECT id, organization_id, workspace_id,
+  resource_type, resource_id, action, grantee_actor_id, requested_by_actor_id,
+  approved_by_actor_id, reason, created_at, expires_at, approved_at, revoked_at,
+  revoked_by_actor_id FROM temporary_access_grants`;
+const temporaryAccessGrantUpdatePrefix = "UPDATE temporary_access_grants";
+
+async function insertTemporaryGrantAudit(
+  client: PoolClient,
+  input: {
+    id: string;
+    grant: TemporaryAccessGrant;
+    actorId: string;
+    eventType:
+      | "temporary_access_grant.requested.v1"
+      | "temporary_access_grant.approved.v1"
+      | "temporary_access_grant.used.v1"
+      | "temporary_access_grant.revoked.v1";
+    correlationId: string;
+    occurredAt: Date;
+    payload: Readonly<Record<string, unknown>>;
+  },
+): Promise<void> {
+  await client.query(
+    `INSERT INTO temporary_access_grant_audit_events
+     (id, grant_id, organization_id, workspace_id, actor_id, event_type,
+      correlation_id, occurred_at, payload)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+    [
+      input.id,
+      input.grant.id,
+      input.grant.organizationId,
+      input.grant.workspaceId,
+      input.actorId,
+      input.eventType,
+      input.correlationId,
+      input.occurredAt,
+      asJson(input.payload),
     ],
   );
 }

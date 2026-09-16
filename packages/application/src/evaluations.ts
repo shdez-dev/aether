@@ -18,6 +18,7 @@ import {
   ResourceNotFoundError,
   type TenantStore,
 } from "./tenancy.js";
+import type { TemporaryAccessGrantAuthorizer } from "./access-grants.js";
 
 export interface EvaluationStandardStore {
   create(standard: EvaluationStandard): Promise<void>;
@@ -51,6 +52,7 @@ export class EvaluationService {
       initiatives: InitiativeStore;
       audit: InitiativeAuditStore;
       tenancy: TenantStore;
+      accessGrants?: TemporaryAccessGrantAuthorizer;
       ids: EvaluationIdGenerator;
       clock: EvaluationClock;
     },
@@ -104,26 +106,42 @@ export class EvaluationService {
     actorId: string;
     organizationId: string;
     evaluationId: string;
+    correlationId?: string | undefined;
   }): Promise<InitiativeEvaluation> {
-    await this.assertOrganizationManager(input.actorId, input.organizationId);
     const evaluation = await this.dependencies.evaluations.findEvaluation(
       input.evaluationId,
     );
     if (!evaluation || evaluation.organizationId !== input.organizationId)
       throw new ResourceNotFoundError("INITIATIVE_NOT_FOUND");
+    await this.assertResourceRead({
+      actorId: input.actorId,
+      organizationId: evaluation.organizationId,
+      workspaceId: evaluation.workspaceId,
+      resourceType: "evaluation",
+      resourceId: evaluation.id,
+      correlationId: input.correlationId,
+    });
     return evaluation;
   }
   async getDecision(input: {
     actorId: string;
     organizationId: string;
     decisionId: string;
+    correlationId?: string | undefined;
   }): Promise<InitiativeDecision> {
-    await this.assertOrganizationManager(input.actorId, input.organizationId);
     const decision = await this.dependencies.evaluations.findDecision(
       input.decisionId,
     );
     if (!decision || decision.organizationId !== input.organizationId)
       throw new ResourceNotFoundError("INITIATIVE_NOT_FOUND");
+    await this.assertResourceRead({
+      actorId: input.actorId,
+      organizationId: decision.organizationId,
+      workspaceId: decision.workspaceId,
+      resourceType: "decision",
+      resourceId: decision.id,
+      correlationId: input.correlationId,
+    });
     return decision;
   }
 
@@ -306,6 +324,29 @@ export class EvaluationService {
       })) !== "owner"
     )
       throw new AccessDeniedError("organization:manage");
+  }
+  private async assertResourceRead(input: {
+    actorId: string;
+    organizationId: string;
+    workspaceId: string;
+    resourceType: "evaluation" | "decision";
+    resourceId: string;
+    correlationId?: string | undefined;
+  }): Promise<void> {
+    const role = await this.dependencies.tenancy.findOrganizationRole({
+      actorId: input.actorId,
+      organizationId: input.organizationId,
+    });
+    if (role === "owner" || role === "admin") return;
+    if (
+      await this.dependencies.accessGrants?.authorize({
+        ...input,
+        action: "read",
+        correlationId: input.correlationId ?? this.dependencies.ids.next(),
+      })
+    )
+      return;
+    throw new AccessDeniedError("organization:manage");
   }
   private async record(
     initiative: Awaited<ReturnType<InitiativeStore["findById"]>> & {},

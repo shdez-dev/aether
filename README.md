@@ -30,8 +30,10 @@ docs/runbooks/        Procedimientos operativos
 La rebanada F1 implementada cubre OIDC con PKCE, sesiones opacas revocables,
 organizaciones, workspaces, equipos, invitaciones, transferencia de propiedad,
 archivado y políticas explícitas de residencia/retención con herencia visible.
-Las concesiones temporales, el acceso JIT de soporte y F5 (documentos,
-evidencia y exportaciones) siguen fuera de alcance.
+También cubre concesiones temporales exactas por recurso y acción, con
+solicitud justificada, aprobación independiente de owner, duración máxima de
+ocho horas, revocación y auditoría de cada uso. El acceso JIT de soporte sigue
+fuera de alcance.
 
 Las políticas se gestionan mediante los endpoints documentados en
 [`tenancy-and-authorization.md`](docs/architecture/tenancy-and-authorization.md)
@@ -76,5 +78,8 @@ pnpm test
 La configuración local se toma de los `.env` de cada aplicación; los secretos
 no deben escribirse en el repositorio. PostgreSQL es la autoridad transaccional,
 Redis sólo se usa para funciones no durables y Keycloak provee la identidad
-OIDC. La migración de políticas es aditiva y se encuentra en
-[`0028_tenancy_policies_and_access_grants.sql`](packages/database/migrations/0028_tenancy_policies_and_access_grants.sql).
+OIDC. Las migraciones de tenencia y concesiones son aditivas: la estructura
+base está en
+[`0028_tenancy_policies_and_access_grants.sql`](packages/database/migrations/0028_tenancy_policies_and_access_grants.sql)
+y el ciclo de vida auditable en
+[`0029_temporary_access_grant_lifecycle.sql`](packages/database/migrations/0029_temporary_access_grant_lifecycle.sql).

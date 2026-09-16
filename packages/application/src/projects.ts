@@ -21,6 +21,7 @@ import {
 import type { InitiativeStore } from "./initiatives.js";
 import type { DurableDomainEvent } from "./outbox.js";
 import { DocumentNotFoundError, type DocumentStore } from "./documents.js";
+import type { TemporaryAccessGrantAuthorizer } from "./access-grants.js";
 
 export type ProjectAuditEvent = Readonly<{
   id: string;
@@ -89,6 +90,7 @@ export class ProjectService {
       decisions: ProjectDecisionLookup;
       initiatives: InitiativeStore;
       tenancy: TenantStore;
+      accessGrants?: TemporaryAccessGrantAuthorizer;
       ids: ProjectIdGenerator;
       clock: ProjectClock;
     },
@@ -182,7 +184,11 @@ export class ProjectService {
       input.projectId,
       input.organizationId,
     );
-    await this.assertExecutionAccess(input.actorId, project);
+    await this.assertExecutionAccess(
+      input.actorId,
+      project,
+      input.correlationId,
+    );
     if (project.version !== input.expectedVersion)
       throw new ProjectVersionConflictError();
     const updated = transitionProject(
@@ -228,7 +234,11 @@ export class ProjectService {
       input.projectId,
       input.organizationId,
     );
-    await this.assertExecutionAccess(input.actorId, project);
+    await this.assertExecutionAccess(
+      input.actorId,
+      project,
+      input.correlationId,
+    );
     const milestone: ProjectMilestone = {
       id: this.dependencies.ids.next(),
       projectId: project.id,
@@ -261,7 +271,11 @@ export class ProjectService {
       input.projectId,
       input.organizationId,
     );
-    await this.assertExecutionAccess(input.actorId, project);
+    await this.assertExecutionAccess(
+      input.actorId,
+      project,
+      input.correlationId,
+    );
     await this.assertMember(input.ownerActorId, project.organizationId);
     const action: ProjectNextAction = {
       id: this.dependencies.ids.next(),
@@ -296,7 +310,11 @@ export class ProjectService {
       input.projectId,
       input.organizationId,
     );
-    await this.assertExecutionAccess(input.actorId, project);
+    await this.assertExecutionAccess(
+      input.actorId,
+      project,
+      input.correlationId,
+    );
     const document = await this.dependencies.documents.findVersion({
       documentId: input.documentId,
       versionId: input.documentVersionId,
@@ -346,7 +364,11 @@ export class ProjectService {
       input.projectId,
       input.organizationId,
     );
-    await this.assertExecutionAccess(input.actorId, project);
+    await this.assertExecutionAccess(
+      input.actorId,
+      project,
+      input.correlationId,
+    );
     if (project.status !== "completed")
       throw new ProjectDomainError("INVALID_PROJECT_TRANSITION");
     if (await this.dependencies.closures.findClosure(project.id))
@@ -379,12 +401,13 @@ export class ProjectService {
     actorId: string;
     organizationId: string;
     projectId: string;
+    correlationId?: string;
   }): Promise<readonly ProjectAuditEvent[]> {
     const project = await this.requireProject(
       input.projectId,
       input.organizationId,
     );
-    await this.assertMember(input.actorId, project.organizationId);
+    await this.assertProjectRead(input.actorId, project, input.correlationId);
     return this.dependencies.audit.list({
       organizationId: input.organizationId,
       projectId: input.projectId,
@@ -402,12 +425,13 @@ export class ProjectService {
     actorId: string;
     organizationId: string;
     projectId: string;
+    correlationId?: string;
   }): Promise<Project> {
     const project = await this.requireProject(
       input.projectId,
       input.organizationId,
     );
-    await this.assertMember(input.actorId, input.organizationId);
+    await this.assertProjectRead(input.actorId, project, input.correlationId);
     return project;
   }
   private async requireProject(
@@ -446,6 +470,7 @@ export class ProjectService {
   private async assertExecutionAccess(
     actorId: string,
     project: Project,
+    correlationId: string,
   ): Promise<void> {
     await assertWorkspaceWritable(
       this.dependencies.tenancy,
@@ -455,8 +480,47 @@ export class ProjectService {
       actorId,
       organizationId: project.organizationId,
     });
-    if (actorId !== project.leadActorId && role !== "owner" && role !== "admin")
-      throw new AccessDeniedError("workspace:manage");
+    if (actorId === project.leadActorId || role === "owner" || role === "admin")
+      return;
+    if (
+      await this.dependencies.accessGrants?.authorize({
+        actorId,
+        organizationId: project.organizationId,
+        workspaceId: project.workspaceId,
+        resourceType: "project",
+        resourceId: project.id,
+        action: "contribute",
+        correlationId,
+      })
+    )
+      return;
+    throw new AccessDeniedError("workspace:manage");
+  }
+  private async assertProjectRead(
+    actorId: string,
+    project: Project,
+    correlationId?: string,
+  ): Promise<void> {
+    if (
+      await this.dependencies.tenancy.findOrganizationRole({
+        actorId,
+        organizationId: project.organizationId,
+      })
+    )
+      return;
+    if (
+      await this.dependencies.accessGrants?.authorize({
+        actorId,
+        organizationId: project.organizationId,
+        workspaceId: project.workspaceId,
+        resourceType: "project",
+        resourceId: project.id,
+        action: "read",
+        correlationId: correlationId ?? this.dependencies.ids.next(),
+      })
+    )
+      return;
+    throw new AccessDeniedError("organization:read");
   }
   private async record(
     project: Project,

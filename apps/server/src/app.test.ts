@@ -19,6 +19,7 @@ import {
   ProductMetricsService,
   type SecurityAuditStore,
   OutboxAdministrationService,
+  TemporaryAccessGrantService,
   TenantService,
 } from "@aether/application";
 import {
@@ -30,6 +31,7 @@ import {
   InMemoryIdempotencyStore,
   InMemoryTenantStore,
   InMemoryProductMetricsStore,
+  InMemoryTemporaryAccessGrantStore,
 } from "@aether/testkit";
 
 import { buildServer } from "./app.js";
@@ -1421,6 +1423,158 @@ describe("HTTP authentication boundary", () => {
         ]),
       );
     }
+    await app.close();
+  });
+
+  it("aprueba, revalida y revoca por HTTP un acceso temporal exacto", async () => {
+    const authStore = new InMemoryAuthStore();
+    const tenantStore = new InMemoryTenantStore();
+    const grantStore = new InMemoryTemporaryAccessGrantStore();
+    const ids = { next: () => crypto.randomUUID() };
+    const clock = { now: () => new Date() };
+    const accessGrants = new TemporaryAccessGrantService({
+      store: grantStore,
+      resources: grantStore,
+      tenancy: tenantStore,
+      ids,
+      clock,
+    });
+    const tenants = new TenantService({
+      store: tenantStore,
+      ids,
+      tokens: {
+        generate: () => crypto.randomUUID().replaceAll("-", "").padEnd(43, "x"),
+        hash: (value) => `grant-test:${value}`,
+      },
+      clock,
+      accessGrants,
+    });
+    const auth = new AuthService({
+      store: authStore,
+      cipher: createAesGcmCipher(config.sessionEncryptionKey),
+      oidc,
+      issuer: config.oidcIssuerUrl,
+      sessionTtlSeconds: config.sessionTtlSeconds,
+      sessionRenewalWindowSeconds: config.sessionRenewalWindowSeconds,
+    });
+    const app = await buildServer({
+      config,
+      auth,
+      tenants,
+      accessGrants,
+      initiatives: {} as InitiativeService,
+      evaluations: {} as EvaluationService,
+      projects: {} as ProjectService,
+      idempotency: new InMemoryIdempotencyStore(),
+    });
+    const organization = await tenants.createOrganization({
+      actorId: "grant-owner",
+      actorEmail: "grant-owner@example.test",
+      name: "Accesos temporales",
+      timezone: "UTC",
+      locale: "es-CL",
+    });
+    const workspace = await tenants.createWorkspace({
+      actorId: "grant-owner",
+      organizationId: organization.id,
+      name: "Revisión externa",
+      mode: "institutional",
+    });
+    grantStore.addResource({
+      resourceType: "workspace",
+      resourceId: workspace.id,
+      organizationId: organization.id,
+      workspaceId: workspace.id,
+    });
+    const invitation = await tenants.invite({
+      actorId: "grant-owner",
+      organizationId: organization.id,
+      email: "requester@example.test",
+      organizationRole: "member",
+      workspaceIds: [workspace.id],
+      workspaceRole: "viewer",
+      expiresInDays: 1,
+    });
+    await tenants.acceptInvitation({
+      token: invitation.deliveryToken,
+      actorId: "grant-requester",
+      actorEmail: "requester@example.test",
+    });
+    for (const identity of [
+      ["owner-token", "grant-owner", "grant-owner@example.test"],
+      ["requester-token", "grant-requester", "requester@example.test"],
+      ["reviewer-token", "grant-reviewer", "reviewer@example.test"],
+    ] as const)
+      await createAuthenticatedSession(authStore, {
+        token: identity[0],
+        actorId: identity[1],
+        actorEmail: identity[2],
+      });
+    const csrf = "temporary-access-csrf";
+    const mutationHeaders = (token: string) => ({
+      origin: config.webOrigin,
+      "x-csrf-token": csrf,
+      cookie: `aether_session=${token}; aether_csrf=${csrf}`,
+    });
+    const deniedBeforeApproval = await app.inject({
+      method: "GET",
+      url: `/v1/workspaces/${workspace.id}?organizationId=${organization.id}`,
+      headers: { cookie: "aether_session=reviewer-token" },
+    });
+    expect(deniedBeforeApproval.statusCode).toBe(403);
+    const requested = await app.inject({
+      method: "POST",
+      url: `/v1/organizations/${organization.id}/temporary-access-grants`,
+      headers: {
+        ...mutationHeaders("requester-token"),
+        "idempotency-key": "temporary-workspace-read",
+      },
+      payload: {
+        workspaceId: workspace.id,
+        resourceType: "workspace",
+        resourceId: workspace.id,
+        action: "read",
+        granteeActorId: "grant-reviewer",
+        reason: "Revisión independiente acotada",
+        expiresInMinutes: 60,
+      },
+    });
+    expect(requested.statusCode).toBe(201);
+    expect(requested.json()).toMatchObject({ status: "pending" });
+    const approved = await app.inject({
+      method: "POST",
+      url: `/v1/organizations/${organization.id}/temporary-access-grants/${requested.json().id}/approve`,
+      headers: mutationHeaders("owner-token"),
+      payload: {},
+    });
+    expect(approved.statusCode).toBe(200);
+    expect(approved.json()).toMatchObject({ status: "active" });
+    const allowed = await app.inject({
+      method: "GET",
+      url: `/v1/workspaces/${workspace.id}?organizationId=${organization.id}`,
+      headers: { cookie: "aether_session=reviewer-token" },
+    });
+    expect(allowed.statusCode).toBe(200);
+    const revoked = await app.inject({
+      method: "POST",
+      url: `/v1/organizations/${organization.id}/temporary-access-grants/${requested.json().id}/revoke`,
+      headers: mutationHeaders("owner-token"),
+      payload: { reason: "Revisión finalizada" },
+    });
+    expect(revoked.statusCode).toBe(200);
+    expect(revoked.json()).toMatchObject({ status: "revoked" });
+    const deniedAfterRevocation = await app.inject({
+      method: "GET",
+      url: `/v1/workspaces/${workspace.id}?organizationId=${organization.id}`,
+      headers: { cookie: "aether_session=reviewer-token" },
+    });
+    expect(deniedAfterRevocation.statusCode).toBe(403);
+    expect(grantStore.auditEvents.map((event) => event.eventType)).toEqual([
+      "temporary_access_grant.requested.v1",
+      "temporary_access_grant.approved.v1",
+      "temporary_access_grant.used.v1",
+      "temporary_access_grant.revoked.v1",
+    ]);
     await app.close();
   });
 });

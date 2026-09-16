@@ -19,6 +19,7 @@ import {
   assertWorkspaceWritable,
   ResourceNotFoundError,
 } from "./tenancy.js";
+import type { TemporaryAccessGrantAuthorizer } from "./access-grants.js";
 
 export type InitiativeAuditEvent = Readonly<{
   id: string;
@@ -71,6 +72,7 @@ export class InitiativeService {
       store: InitiativeStore;
       audit: InitiativeAuditStore;
       tenancy: TenantStore;
+      accessGrants?: TemporaryAccessGrantAuthorizer;
       ids: InitiativeIdGenerator;
       clock: InitiativeClock;
     },
@@ -91,6 +93,7 @@ export class InitiativeService {
       input.actorId,
       input.organizationId,
       input.workspaceId,
+      input.correlationId,
     );
     const now = this.dependencies.clock.now();
     const initiative = createInitiative({
@@ -137,7 +140,12 @@ export class InitiativeService {
       this.dependencies.tenancy,
       current.workspaceId,
     );
-    await this.assertInitiativeAction(input.actorId, current, "edit");
+    await this.assertInitiativeAction(
+      input.actorId,
+      current,
+      "edit",
+      input.correlationId,
+    );
     this.assertVersion(current, input.expectedVersion);
     const updated = editInitiative(
       current,
@@ -173,6 +181,7 @@ export class InitiativeService {
     actorId: string;
     organizationId: string;
     initiativeId: string;
+    correlationId?: string;
   }): Promise<InitiativeAccess> {
     const initiative = await this.requireInitiative(
       input.initiativeId,
@@ -182,6 +191,9 @@ export class InitiativeService {
       input.actorId,
       initiative.organizationId,
       initiative.workspaceId,
+      "initiative",
+      initiative.id,
+      input.correlationId,
     );
     return {
       initiative,
@@ -193,11 +205,15 @@ export class InitiativeService {
     actorId: string;
     organizationId: string;
     workspaceId: string;
+    correlationId?: string;
   }): Promise<readonly InitiativeAccess[]> {
     await this.assertReadAllowed(
       input.actorId,
       input.organizationId,
       input.workspaceId,
+      "workspace",
+      input.workspaceId,
+      input.correlationId,
     );
     const initiatives = await this.dependencies.store.list({
       organizationId: input.organizationId,
@@ -259,6 +275,7 @@ export class InitiativeService {
     actorId: string;
     organizationId: string;
     initiativeId: string;
+    correlationId?: string;
   }): Promise<readonly InitiativeAuditEvent[]> {
     const initiative = await this.requireInitiative(
       input.initiativeId,
@@ -268,6 +285,9 @@ export class InitiativeService {
       input.actorId,
       initiative.organizationId,
       initiative.workspaceId,
+      "initiative",
+      initiative.id,
+      input.correlationId,
     );
     return this.dependencies.audit.list({
       organizationId: input.organizationId,
@@ -295,7 +315,12 @@ export class InitiativeService {
       this.dependencies.tenancy,
       current.workspaceId,
     );
-    await this.assertInitiativeAction(input.actorId, current, action);
+    await this.assertInitiativeAction(
+      input.actorId,
+      current,
+      action,
+      input.correlationId,
+    );
     this.assertVersion(current, input.expectedVersion);
     const updated = transitionInitiative(
       current,
@@ -328,19 +353,35 @@ export class InitiativeService {
     actorId: string,
     organizationId: string,
     workspaceId: string,
+    correlationId: string,
   ): Promise<void> {
     const { organizationRole, workspaceRole } = await this.rolesFor(
       actorId,
       organizationId,
       workspaceId,
     );
-    if (!canCreateInitiative({ organizationRole, workspaceRole }))
-      throw new AccessDeniedError("workspace:manage");
+    if (canCreateInitiative({ organizationRole, workspaceRole })) return;
+    if (
+      await this.dependencies.accessGrants?.authorize({
+        actorId,
+        organizationId,
+        workspaceId,
+        resourceType: "workspace",
+        resourceId: workspaceId,
+        action: "contribute",
+        correlationId,
+      })
+    )
+      return;
+    throw new AccessDeniedError("workspace:manage");
   }
   private async assertReadAllowed(
     actorId: string,
     organizationId: string,
     workspaceId: string,
+    resourceType: "workspace" | "initiative",
+    resourceId: string,
+    correlationId?: string,
   ): Promise<void> {
     const { organizationRole, workspaceRole } = await this.rolesFor(
       actorId,
@@ -348,21 +389,49 @@ export class InitiativeService {
       workspaceId,
     );
     if (
-      !isActionAllowed(
+      isActionAllowed(
         "workspace:read",
         calculateCapabilities({ organizationRole, workspaceRole }),
       )
     )
-      throw new AccessDeniedError("workspace:read");
+      return;
+    if (
+      await this.dependencies.accessGrants?.authorize({
+        actorId,
+        organizationId,
+        workspaceId,
+        resourceType,
+        resourceId,
+        action: "read",
+        correlationId: correlationId ?? this.dependencies.ids.next(),
+      })
+    )
+      return;
+    throw new AccessDeniedError("workspace:read");
   }
   private async assertInitiativeAction(
     actorId: string,
     initiative: Initiative,
     action: InitiativeAction,
+    correlationId: string,
   ): Promise<void> {
     const actions = await this.actionsFor(actorId, initiative);
-    if (!actions.includes(action))
-      throw new AccessDeniedError("workspace:manage");
+    if (actions.includes(action)) return;
+    if (
+      (action === "edit" || action === "present") &&
+      (initiative.status === "draft" || initiative.status === "returned") &&
+      (await this.dependencies.accessGrants?.authorize({
+        actorId,
+        organizationId: initiative.organizationId,
+        workspaceId: initiative.workspaceId,
+        resourceType: "initiative",
+        resourceId: initiative.id,
+        action: "contribute",
+        correlationId,
+      }))
+    )
+      return;
+    throw new AccessDeniedError("workspace:manage");
   }
   private async actionsFor(
     actorId: string,

@@ -8,6 +8,10 @@ import {
 import type { DurableDomainEvent, DurableEventHandler } from "./outbox.js";
 
 import { assertWorkspaceWritable, type TenantStore } from "./tenancy.js";
+import type {
+  TemporaryAccessGrantAuthorizer,
+  TemporaryGrantResourceType,
+} from "./access-grants.js";
 
 export type DocumentResource = Readonly<{
   organizationId: string;
@@ -146,6 +150,7 @@ export class DocumentService {
       audit: DocumentAuditStore;
       objects: DocumentObjectStore;
       tenancy: TenantStore;
+      accessGrants?: TemporaryAccessGrantAuthorizer;
       ids: DocumentIdGenerator;
       clock: DocumentClock;
       projectAccess?: DocumentProjectAccess;
@@ -172,6 +177,7 @@ export class DocumentService {
       input.actorId,
       input.resourceType,
       input.resourceId,
+      input.correlationId,
     );
     const now = this.dependencies.clock.now();
     const document: InstitutionalDocument = {
@@ -248,6 +254,9 @@ export class DocumentService {
       input.actorId,
       current.document.organizationId,
       current.document.workspaceId,
+      "document",
+      current.document.id,
+      input.correlationId,
     );
     if (current.version.status !== "quarantined")
       throw new DocumentValidationError("DOCUMENT_NOT_QUARANTINED");
@@ -331,7 +340,13 @@ export class DocumentService {
       input.documentId,
       input.versionId,
     );
-    await this.assertRead(input.actorId, current.document);
+    await this.assertRead(
+      input.actorId,
+      current.document,
+      "document",
+      current.document.id,
+      input.correlationId,
+    );
     if (current.version.status !== "published" || !current.version.objectKey)
       throw new DocumentNotFoundError();
     const now = this.dependencies.clock.now();
@@ -360,11 +375,13 @@ export class DocumentService {
     actorId: string;
     resourceType: DocumentResourceType;
     resourceId: string;
+    correlationId?: string;
   }): Promise<readonly DocumentVersionAccess[]> {
     const resource = await this.requireReadableResource(
       input.actorId,
       input.resourceType,
       input.resourceId,
+      input.correlationId,
     );
     return this.dependencies.store.listByResource({
       organizationId: resource.organizationId,
@@ -388,6 +405,9 @@ export class DocumentService {
       input.actorId,
       current.document.organizationId,
       current.document.workspaceId,
+      "document",
+      current.document.id,
+      input.correlationId,
     );
     if (current.version.status !== "published")
       throw new DocumentValidationError("DOCUMENT_NOT_PUBLISHED");
@@ -433,6 +453,9 @@ export class DocumentService {
       input.actorId,
       current.document.organizationId,
       current.document.workspaceId,
+      "document",
+      current.document.id,
+      input.correlationId,
     );
     if (
       current.version.status !== "published" &&
@@ -499,6 +522,9 @@ export class DocumentService {
       input.actorId,
       source.document.organizationId,
       source.document.workspaceId,
+      "document",
+      source.document.id,
+      input.correlationId,
     );
     if (!source.version.objectKey || source.version.status === "purged")
       throw new DocumentValidationError("DOCUMENT_NOT_RESTORABLE");
@@ -594,6 +620,7 @@ export class DocumentService {
     actorId: string,
     resourceType: DocumentResourceType,
     resourceId: string,
+    correlationId: string,
   ) {
     const resource = await this.requireResource(resourceType, resourceId);
     await assertWorkspaceWritable(
@@ -604,6 +631,9 @@ export class DocumentService {
       actorId,
       resource.organizationId,
       resource.workspaceId,
+      resourceType,
+      resourceId,
+      correlationId,
     );
     return resource;
   }
@@ -611,14 +641,21 @@ export class DocumentService {
     actorId: string,
     resourceType: DocumentResourceType,
     resourceId: string,
+    correlationId?: string,
   ) {
     const resource = await this.requireResource(resourceType, resourceId);
-    await this.assertRead(actorId, {
-      organizationId: resource.organizationId,
-      workspaceId: resource.workspaceId,
+    await this.assertRead(
+      actorId,
+      {
+        organizationId: resource.organizationId,
+        workspaceId: resource.workspaceId,
+        resourceType,
+        resourceId,
+      },
       resourceType,
       resourceId,
-    });
+      correlationId,
+    );
     return resource;
   }
   private async requireResource(
@@ -652,14 +689,30 @@ export class DocumentService {
     actorId: string,
     organizationId: string,
     workspaceId: string,
+    resourceType: TemporaryGrantResourceType,
+    resourceId: string,
+    correlationId: string,
   ) {
     await assertWorkspaceWritable(this.dependencies.tenancy, workspaceId);
     if (
-      !canCreateInitiative(
+      canCreateInitiative(
         await this.roles(actorId, organizationId, workspaceId),
       )
     )
-      throw new DocumentAccessDeniedError();
+      return;
+    if (
+      await this.dependencies.accessGrants?.authorize({
+        actorId,
+        organizationId,
+        workspaceId,
+        resourceType,
+        resourceId,
+        action: "contribute",
+        correlationId,
+      })
+    )
+      return;
+    throw new DocumentAccessDeniedError();
   }
   private async assertRead(
     actorId: string,
@@ -667,6 +720,9 @@ export class DocumentService {
       InstitutionalDocument,
       "organizationId" | "workspaceId" | "resourceType" | "resourceId"
     >,
+    grantResourceType: TemporaryGrantResourceType,
+    grantResourceId: string,
+    correlationId?: string,
   ) {
     const roles = await this.roles(
       actorId,
@@ -675,17 +731,29 @@ export class DocumentService {
     );
     const organizationManager =
       roles.organizationRole === "owner" || roles.organizationRole === "admin";
-    if (!organizationManager && !roles.workspaceRole)
-      throw new DocumentAccessDeniedError();
-    if (
-      !organizationManager &&
-      resource.resourceType === "project" &&
-      !(await this.dependencies.projectAccess?.isParticipant({
+    const hasWorkspaceAccess =
+      organizationManager || Boolean(roles.workspaceRole);
+    const hasProjectAccess =
+      resource.resourceType !== "project" ||
+      organizationManager ||
+      (await this.dependencies.projectAccess?.isParticipant({
         actorId,
         projectId: resource.resourceId,
-      }))
+      })) === true;
+    if (hasWorkspaceAccess && hasProjectAccess) return;
+    if (
+      await this.dependencies.accessGrants?.authorize({
+        actorId,
+        organizationId: resource.organizationId,
+        workspaceId: resource.workspaceId,
+        resourceType: grantResourceType,
+        resourceId: grantResourceId,
+        action: "read",
+        correlationId: correlationId ?? this.dependencies.ids.next(),
+      })
     )
-      throw new DocumentAccessDeniedError();
+      return;
+    throw new DocumentAccessDeniedError();
   }
   private event(
     eventType: DocumentAuditEvent["eventType"],

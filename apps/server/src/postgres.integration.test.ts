@@ -12,6 +12,7 @@ import {
   OutboxWorker,
   ProjectAlreadyExistsError,
   ProjectService,
+  TemporaryAccessGrantService,
   TenantService,
 } from "@aether/application";
 import {
@@ -34,6 +35,7 @@ import {
   PostgresProjectStore,
   PostgresDocumentStore,
   PostgresProductMetricsStore,
+  PostgresTemporaryAccessGrantStore,
   PostgresTenantStore,
   migratePool,
 } from "@aether/database";
@@ -85,6 +87,162 @@ describe.sequential("PostgreSQL integration", () => {
         "SELECT name FROM schema_migrations ORDER BY name",
       );
       expect(reapplied.rows.map((row) => row.name)).toEqual(expected);
+    },
+    120_000,
+  );
+
+  runPostgresIntegration(
+    "persists the complete temporary access lifecycle and its append-only audit",
+    async () => {
+      let now = new Date("2026-09-15T15:00:00.000Z");
+      const ids = { next: randomUUID };
+      const clock = { now: () => now };
+      const tenantStore = new PostgresTenantStore(pool);
+      const grantStore = new PostgresTemporaryAccessGrantStore(pool);
+      const tenants = new TenantService({
+        store: tenantStore,
+        ids,
+        tokens: {
+          generate: () => randomUUID().replaceAll("-", "").padEnd(43, "x"),
+          hash: (value) => `temporary-access:${value}`,
+        },
+        clock,
+      });
+      const accessGrants = new TemporaryAccessGrantService({
+        store: grantStore,
+        resources: grantStore,
+        tenancy: tenantStore,
+        ids,
+        clock,
+      });
+      const organization = await tenants.createOrganization({
+        actorId: "temporary-owner",
+        actorEmail: "temporary-owner@example.test",
+        name: "Temporary access persistence",
+        timezone: "UTC",
+        locale: "es-CL",
+      });
+      const workspace = await tenants.createWorkspace({
+        actorId: "temporary-owner",
+        organizationId: organization.id,
+        name: "External review",
+        mode: "institutional",
+      });
+      const invitation = await tenants.invite({
+        actorId: "temporary-owner",
+        organizationId: organization.id,
+        email: "temporary-requester@example.test",
+        organizationRole: "member",
+        workspaceIds: [workspace.id],
+        workspaceRole: "viewer",
+        expiresInDays: 1,
+      });
+      await tenants.acceptInvitation({
+        token: invitation.deliveryToken,
+        actorId: "temporary-requester",
+        actorEmail: "temporary-requester@example.test",
+      });
+
+      const requested = await accessGrants.request({
+        actorId: "temporary-requester",
+        organizationId: organization.id,
+        workspaceId: workspace.id,
+        resourceType: "workspace",
+        resourceId: workspace.id,
+        action: "read",
+        granteeActorId: "temporary-reviewer",
+        reason: "Independent review",
+        expiresInMinutes: 60,
+        correlationId: randomUUID(),
+      });
+      await accessGrants.approve({
+        actorId: "temporary-owner",
+        organizationId: organization.id,
+        grantId: requested.id,
+        correlationId: randomUUID(),
+      });
+      await expect(
+        accessGrants.authorize({
+          actorId: "temporary-reviewer",
+          organizationId: organization.id,
+          workspaceId: workspace.id,
+          resourceType: "workspace",
+          resourceId: workspace.id,
+          action: "read",
+          correlationId: randomUUID(),
+        }),
+      ).resolves.toBe(true);
+      await accessGrants.revoke({
+        actorId: "temporary-reviewer",
+        organizationId: organization.id,
+        grantId: requested.id,
+        reason: "Review completed",
+        correlationId: randomUUID(),
+      });
+      await expect(
+        accessGrants.authorize({
+          actorId: "temporary-reviewer",
+          organizationId: organization.id,
+          workspaceId: workspace.id,
+          resourceType: "workspace",
+          resourceId: workspace.id,
+          action: "read",
+          correlationId: randomUUID(),
+        }),
+      ).resolves.toBe(false);
+
+      const expiring = await accessGrants.request({
+        actorId: "temporary-requester",
+        organizationId: organization.id,
+        workspaceId: workspace.id,
+        resourceType: "workspace",
+        resourceId: workspace.id,
+        action: "read",
+        granteeActorId: "temporary-reviewer",
+        reason: "Short review",
+        expiresInMinutes: 1,
+        correlationId: randomUUID(),
+      });
+      await accessGrants.approve({
+        actorId: "temporary-owner",
+        organizationId: organization.id,
+        grantId: expiring.id,
+        correlationId: randomUUID(),
+      });
+      now = new Date("2026-09-15T15:02:00.000Z");
+      await expect(
+        accessGrants.authorize({
+          actorId: "temporary-reviewer",
+          organizationId: organization.id,
+          workspaceId: workspace.id,
+          resourceType: "workspace",
+          resourceId: workspace.id,
+          action: "read",
+          correlationId: randomUUID(),
+        }),
+      ).resolves.toBe(false);
+      const events = await pool.query<{ event_type: string }>(
+        `SELECT event_type
+         FROM temporary_access_grant_audit_events
+         WHERE organization_id = $1
+         ORDER BY occurred_at, id`,
+        [organization.id],
+      );
+      expect(events.rows.map((event) => event.event_type)).toEqual(
+        expect.arrayContaining([
+          "temporary_access_grant.requested.v1",
+          "temporary_access_grant.approved.v1",
+          "temporary_access_grant.used.v1",
+          "temporary_access_grant.revoked.v1",
+          "temporary_access_grant.expired.v1",
+        ]),
+      );
+      await expect(
+        pool.query(
+          `DELETE FROM temporary_access_grant_audit_events WHERE grant_id = $1`,
+          [requested.id],
+        ),
+      ).rejects.toThrow();
     },
     120_000,
   );

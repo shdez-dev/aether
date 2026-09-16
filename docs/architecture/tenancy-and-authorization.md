@@ -74,3 +74,29 @@ actualizar y retirar políticas escribe un evento append-only correlacionado en
 Las organizaciones creadas antes de la migración de políticas pueden carecer de
 configuración hasta que un owner o admin la establezca; la consulta devuelve un
 problema seguro de recurso no disponible y nunca inventa valores por defecto.
+
+## Concesiones temporales
+
+Una concesión temporal identifica de forma inseparable organización, workspace,
+tipo e identificador de recurso, acción (`read` o `contribute`) y persona
+beneficiaria. La solicitud exige motivo y una duración entre uno y 480 minutos.
+Sólo un `owner` distinto del solicitante puede aprobarla; solicitante,
+beneficiario u owner pueden revocarla antes del vencimiento.
+
+El grant pendiente no concede permisos. Una vez aprobado, cada operación
+protegida vuelve a consultar PostgreSQL con el actor y el alcance exactos; no se
+crean roles ni membresías implícitas y una revocación o expiración se observa en
+la siguiente operación. `read` habilita únicamente la lectura del recurso
+concreto. `contribute` habilita las mutaciones ordinarias del recurso, pero no
+acciones de gobierno como administrar miembros, archivar workspaces, evaluar o
+decidir iniciativas. Las consultas de colecciones requieren el grant del
+workspace correspondiente y un grant individual no revela recursos vecinos.
+
+Los endpoints bajo
+`/v1/organizations/{organizationId}/temporary-access-grants` permiten solicitar,
+listar, aprobar y revocar. La solicitud es idempotente; aprobación y revocación
+exigen autenticación reciente. Los eventos `requested`, `approved`, `used`,
+`expired` y `revoked` se escriben en
+`temporary_access_grant_audit_events`, que es append-only. La solicitud,
+aprobación y revocación se confirman en la misma transacción que su evento; cada
+uso autorizado registra el `correlationId` de la operación protegida.

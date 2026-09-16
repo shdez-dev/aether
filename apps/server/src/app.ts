@@ -42,6 +42,8 @@ import {
   OutboxDeadLetterNotFoundError,
   WorkspaceArchivedError,
   PolicyNotConfiguredError,
+  TemporaryAccessGrantError,
+  TemporaryAccessGrantService,
 } from "@aether/application";
 import {
   CreateInvitationRequestSchema,
@@ -55,6 +57,9 @@ import {
   ReplaceTeamMembersRequestSchema,
   TenancyPolicyValuesSchema,
   WorkspacePolicyOverrideRequestSchema,
+  RequestTemporaryAccessGrantSchema,
+  RevokeTemporaryAccessGrantSchema,
+  ApproveTemporaryAccessGrantSchema,
   DecideInitiativeRequestSchema,
   ActivateEvaluationStandardRequestSchema,
   AuditHistoryQuerySchema,
@@ -107,6 +112,7 @@ export async function buildServer(input: {
   config: ServerConfig;
   auth: AuthService;
   tenants: TenantService;
+  accessGrants?: TemporaryAccessGrantService;
   initiatives: InitiativeService;
   evaluations: EvaluationService;
   projects: ProjectService;
@@ -280,7 +286,13 @@ export async function buildServer(input: {
                 error instanceof IdempotencyRequestInProgressError ||
                 error instanceof ProjectAlreadyExistsError
               ? 409
-              : error instanceof WorkspaceArchivedError
+              : error instanceof WorkspaceArchivedError ||
+                  (error instanceof TemporaryAccessGrantError &&
+                    [
+                      "GRANT_NOT_PENDING",
+                      "GRANT_NOT_ACTIVE",
+                      "GRANT_EXPIRED",
+                    ].includes(error.code))
                 ? 409
                 : error instanceof CsrfError ||
                     error instanceof RecentAuthenticationRequiredError ||
@@ -290,11 +302,16 @@ export async function buildServer(input: {
                     (error instanceof OwnershipTransferError &&
                       error.code === "ACTOR_MUST_BE_OWNER") ||
                     (error instanceof MembershipStatusError &&
-                      error.code === "actor_not_manager")
+                      error.code === "actor_not_manager") ||
+                    (error instanceof TemporaryAccessGrantError &&
+                      error.code === "GRANT_SEPARATION_OF_DUTIES")
                   ? 403
                   : error instanceof ResourceNotFoundError ||
                       error instanceof DocumentNotFoundError ||
-                      error instanceof OutboxDeadLetterNotFoundError
+                      error instanceof OutboxDeadLetterNotFoundError ||
+                      error instanceof PolicyNotConfiguredError ||
+                      (error instanceof TemporaryAccessGrantError &&
+                        error.code === "GRANT_RESOURCE_NOT_FOUND")
                     ? 404
                     : error instanceof InitiativeVersionConflictError ||
                         error instanceof ProjectVersionConflictError
@@ -374,14 +391,20 @@ export async function buildServer(input: {
                               (error instanceof OwnershipTransferError &&
                                 error.code === "ACTOR_MUST_BE_OWNER") ||
                               (error instanceof MembershipStatusError &&
-                                error.code === "actor_not_manager")
+                                error.code === "actor_not_manager") ||
+                              (error instanceof TemporaryAccessGrantError &&
+                                error.code === "GRANT_SEPARATION_OF_DUTIES")
                             ? "FORBIDDEN"
                             : error instanceof ResourceNotFoundError ||
                                 error instanceof DocumentNotFoundError ||
-                                error instanceof OutboxDeadLetterNotFoundError
+                                error instanceof
+                                  OutboxDeadLetterNotFoundError ||
+                                error instanceof PolicyNotConfiguredError ||
+                                (error instanceof TemporaryAccessGrantError &&
+                                  error.code === "GRANT_RESOURCE_NOT_FOUND")
                               ? "NOT_FOUND"
-                              : error instanceof PolicyNotConfiguredError
-                                ? "NOT_FOUND"
+                              : error instanceof TemporaryAccessGrantError
+                                ? error.code
                                 : error instanceof
                                       InitiativeVersionConflictError ||
                                     error instanceof ProjectVersionConflictError
@@ -614,6 +637,122 @@ export async function buildServer(input: {
       return toOrganizationPolicyResponse(policy);
     },
   );
+  app.post(
+    "/v1/organizations/:organizationId/temporary-access-grants",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      if (!input.accessGrants)
+        throw new Error("Temporary access grants are not configured");
+      const params = z
+        .object({ organizationId: z.string().uuid() })
+        .parse(request.params);
+      const body = RequestTemporaryAccessGrantSchema.parse(request.body);
+      return respondIdempotently({
+        request,
+        reply,
+        store: input.idempotency,
+        actorId: session.actorId,
+        operation: `temporary_access_grant.request:${params.organizationId}`,
+        requestPayload: body,
+        execute: async () => {
+          const grant = await input.accessGrants!.request({
+            actorId: session.actorId,
+            correlationId: correlationId(reply),
+            ...params,
+            ...body,
+          });
+          return {
+            statusCode: 201,
+            body: toTemporaryAccessGrantResponse(input.accessGrants!, grant),
+          };
+        },
+      });
+    },
+  );
+  app.get(
+    "/v1/organizations/:organizationId/temporary-access-grants",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      if (!input.accessGrants)
+        throw new Error("Temporary access grants are not configured");
+      const params = z
+        .object({ organizationId: z.string().uuid() })
+        .parse(request.params);
+      const grants = await input.accessGrants.list({
+        actorId: session.actorId,
+        correlationId: correlationId(reply),
+        ...params,
+      });
+      return grants.map((grant) =>
+        toTemporaryAccessGrantResponse(input.accessGrants!, grant),
+      );
+    },
+  );
+  app.post(
+    "/v1/organizations/:organizationId/temporary-access-grants/:grantId/approve",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      assertRecentAuthentication(session, input.config);
+      if (!input.accessGrants)
+        throw new Error("Temporary access grants are not configured");
+      const params = z
+        .object({
+          organizationId: z.string().uuid(),
+          grantId: z.string().uuid(),
+        })
+        .parse(request.params);
+      ApproveTemporaryAccessGrantSchema.parse(request.body ?? {});
+      const grant = await input.accessGrants.approve({
+        actorId: session.actorId,
+        correlationId: correlationId(reply),
+        ...params,
+      });
+      return toTemporaryAccessGrantResponse(input.accessGrants, grant);
+    },
+  );
+  app.post(
+    "/v1/organizations/:organizationId/temporary-access-grants/:grantId/revoke",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      assertRecentAuthentication(session, input.config);
+      if (!input.accessGrants)
+        throw new Error("Temporary access grants are not configured");
+      const params = z
+        .object({
+          organizationId: z.string().uuid(),
+          grantId: z.string().uuid(),
+        })
+        .parse(request.params);
+      const body = RevokeTemporaryAccessGrantSchema.parse(request.body);
+      const grant = await input.accessGrants.revoke({
+        actorId: session.actorId,
+        correlationId: correlationId(reply),
+        ...params,
+        ...body,
+      });
+      return toTemporaryAccessGrantResponse(input.accessGrants, grant);
+    },
+  );
   app.get(
     "/v1/organizations/:organizationId/workspaces",
     async (request, reply) => {
@@ -661,6 +800,7 @@ export async function buildServer(input: {
       .parse(request.query);
     return input.tenants.getWorkspace({
       actorId: session.actorId,
+      correlationId: correlationId(reply),
       ...params,
       ...query,
     });
@@ -1109,6 +1249,7 @@ export async function buildServer(input: {
           body: await toInitiativeResponse(
             await input.initiatives.detail({
               actorId: session.actorId,
+              correlationId: correlationId(reply),
               organizationId: initiative.organizationId,
               initiativeId: initiative.id,
             }),
@@ -1167,6 +1308,7 @@ export async function buildServer(input: {
       .parse(request.query);
     const evaluation = await input.evaluations.getEvaluation({
       actorId: session.actorId,
+      correlationId: correlationId(reply),
       organizationId,
       evaluationId,
     });
@@ -1187,6 +1329,7 @@ export async function buildServer(input: {
       .parse(request.query);
     const decision = await input.evaluations.getDecision({
       actorId: session.actorId,
+      correlationId: correlationId(reply),
       organizationId,
       decisionId,
     });
@@ -1250,6 +1393,7 @@ export async function buildServer(input: {
     return toProjectResponse(
       await input.projects.detail({
         actorId: session.actorId,
+        correlationId: correlationId(reply),
         organizationId,
         projectId,
       }),
@@ -1622,6 +1766,7 @@ export async function buildServer(input: {
       .parse(request.query);
     const events = await input.projects.auditTrail({
       actorId: session.actorId,
+      correlationId: correlationId(reply),
       projectId: params.projectId,
       ...query,
     });
@@ -1666,6 +1811,7 @@ export async function buildServer(input: {
       .parse(request.query);
     const initiatives = await input.initiatives.list({
       actorId: session.actorId,
+      correlationId: correlationId(reply),
       ...query,
     });
     return Promise.all(initiatives.map(toInitiativeResponse));
@@ -1686,6 +1832,7 @@ export async function buildServer(input: {
     return toInitiativeResponse(
       await input.initiatives.detail({
         actorId: session.actorId,
+        correlationId: correlationId(reply),
         ...params,
         ...query,
       }),
@@ -1725,6 +1872,7 @@ export async function buildServer(input: {
           body: await toInitiativeResponse(
             await input.initiatives.detail({
               actorId: session.actorId,
+              correlationId: correlationId(reply),
               organizationId: initiative.organizationId,
               initiativeId: initiative.id,
             }),
@@ -1767,6 +1915,7 @@ export async function buildServer(input: {
           body: await toInitiativeResponse(
             await input.initiatives.detail({
               actorId: session.actorId,
+              correlationId: correlationId(reply),
               organizationId: initiative.organizationId,
               initiativeId: initiative.id,
             }),
@@ -1811,6 +1960,7 @@ export async function buildServer(input: {
             initiative: await toInitiativeResponse(
               await input.initiatives.detail({
                 actorId: session.actorId,
+                correlationId: correlationId(reply),
                 organizationId: query.organizationId,
                 initiativeId: params.initiativeId,
               }),
@@ -1856,6 +2006,7 @@ export async function buildServer(input: {
             initiative: await toInitiativeResponse(
               await input.initiatives.detail({
                 actorId: session.actorId,
+                correlationId: correlationId(reply),
                 organizationId: query.organizationId,
                 initiativeId: params.initiativeId,
               }),
@@ -1882,6 +2033,7 @@ export async function buildServer(input: {
         .parse(request.query);
       const events = await input.initiatives.auditTrail({
         actorId: session.actorId,
+        correlationId: correlationId(reply),
         ...params,
         ...query,
       });
@@ -2061,7 +2213,11 @@ export async function buildServer(input: {
     if (!input.documents) throw new Error("Document service is not configured");
     const query = DocumentListQuerySchema.parse(request.query);
     return (
-      await input.documents.list({ actorId: session.actorId, ...query })
+      await input.documents.list({
+        actorId: session.actorId,
+        correlationId: correlationId(reply),
+        ...query,
+      })
     ).map(toDocumentVersionResponse);
   });
   app.get(
@@ -2186,6 +2342,19 @@ function toEffectiveTenancyPolicyResponse(policy: {
     workspaceOverride: toWorkspacePolicyOverrideResponse(
       policy.workspaceOverride,
     ),
+  };
+}
+function toTemporaryAccessGrantResponse(
+  service: TemporaryAccessGrantService,
+  grant: Parameters<TemporaryAccessGrantService["status"]>[0],
+) {
+  return {
+    ...grant,
+    createdAt: grant.createdAt.toISOString(),
+    expiresAt: grant.expiresAt.toISOString(),
+    approvedAt: grant.approvedAt?.toISOString() ?? null,
+    revokedAt: grant.revokedAt?.toISOString() ?? null,
+    status: service.status(grant),
   };
 }
 function toDocumentVersionResponse(value: {

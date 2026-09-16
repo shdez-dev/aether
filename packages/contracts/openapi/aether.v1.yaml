@@ -22,6 +22,8 @@ tags:
     description: Contexto organizacional institucional.
   - name: Workspaces
     description: Espacios de trabajo con alcance explícito.
+  - name: Temporary access
+    description: Grants acotados por recurso y acción, con aprobación separada, caducidad y revocación.
   - name: Initiatives
     description: Ciclo de vida de iniciativas antes de convertirse en proyectos.
   - name: Projects
@@ -295,6 +297,111 @@ paths:
               schema: { $ref: "#/components/schemas/OrganizationPolicy" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
+  /v1/organizations/{organizationId}/temporary-access-grants:
+    get:
+      tags: [Temporary access]
+      operationId: listTemporaryAccessGrants
+      summary: Listar grants temporales visibles para la persona autenticada
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationId"
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: Grants propios o, para administradores, todos los grants de la organización.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/TemporaryAccessGrant" }
+        "401": { $ref: "#/components/responses/Problem" }
+    post:
+      tags: [Temporary access]
+      operationId: requestTemporaryAccessGrant
+      summary: Solicitar acceso temporal a un recurso y una acción exactos
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationId"
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RequestTemporaryAccessGrant" }
+      responses:
+        "201":
+          description: Grant pendiente de aprobación independiente.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TemporaryAccessGrant" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+  /v1/organizations/{organizationId}/temporary-access-grants/{grantId}/approve:
+    post:
+      tags: [Temporary access]
+      operationId: approveTemporaryAccessGrant
+      summary: Aprobar un grant pendiente como owner distinto del solicitante
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationId"
+        - name: grantId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        "200":
+          description: Grant activo hasta su expiración o revocación.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TemporaryAccessGrant" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+  /v1/organizations/{organizationId}/temporary-access-grants/{grantId}/revoke:
+    post:
+      tags: [Temporary access]
+      operationId: revokeTemporaryAccessGrant
+      summary: Revocar anticipadamente un grant temporal
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationId"
+        - name: grantId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RevokeTemporaryAccessGrant" }
+      responses:
+        "200":
+          description: Grant revocado y no utilizable.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TemporaryAccessGrant" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
   /v1/organizations/{organizationId}/workspaces/{workspaceId}/policy-override:
     put:
       tags: [Workspaces]
@@ -310,7 +417,8 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/WorkspacePolicyOverrideRequest" }
+            schema:
+              { $ref: "#/components/schemas/WorkspacePolicyOverrideRequest" }
       responses:
         "200":
           description: Excepción configurada y auditada.
@@ -1615,6 +1723,76 @@ components:
         timezone: { type: string }
         locale: { type: string }
         version: { type: integer, minimum: 0 }
+    RequestTemporaryAccessGrant:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          workspaceId,
+          resourceType,
+          resourceId,
+          action,
+          granteeActorId,
+          reason,
+          expiresInMinutes,
+        ]
+      properties:
+        workspaceId: { type: string, format: uuid }
+        resourceType:
+          type: string
+          enum: [workspace, initiative, evaluation, decision, project, document]
+        resourceId: { type: string, format: uuid }
+        action: { type: string, enum: [read, contribute] }
+        granteeActorId: { type: string, minLength: 1, maxLength: 255 }
+        reason: { type: string, minLength: 1, maxLength: 2000 }
+        expiresInMinutes: { type: integer, minimum: 1, maximum: 480 }
+    RevokeTemporaryAccessGrant:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 1, maxLength: 2000 }
+    TemporaryAccessGrant:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          id,
+          organizationId,
+          workspaceId,
+          resourceType,
+          resourceId,
+          action,
+          granteeActorId,
+          requestedByActorId,
+          approvedByActorId,
+          reason,
+          createdAt,
+          expiresAt,
+          approvedAt,
+          revokedAt,
+          revokedByActorId,
+          status,
+        ]
+      properties:
+        id: { type: string, format: uuid }
+        organizationId: { type: string, format: uuid }
+        workspaceId: { type: string, format: uuid }
+        resourceType:
+          type: string
+          enum: [workspace, initiative, evaluation, decision, project, document]
+        resourceId: { type: string, format: uuid }
+        action: { type: string, enum: [read, contribute] }
+        granteeActorId: { type: string }
+        requestedByActorId: { type: string }
+        approvedByActorId: { type: [string, "null"] }
+        reason: { type: string }
+        createdAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        approvedAt: { type: [string, "null"], format: date-time }
+        revokedAt: { type: [string, "null"], format: date-time }
+        revokedByActorId: { type: [string, "null"] }
+        status: { type: string, enum: [pending, active, expired, revoked] }
     CreateWorkspaceRequest:
       type: object
       additionalProperties: false
@@ -1770,7 +1948,14 @@ components:
       type: object
       additionalProperties: false
       required:
-        [organizationId, dataResidencyRegion, retentionDays, version, updatedByActorId, updatedAt]
+        [
+          organizationId,
+          dataResidencyRegion,
+          retentionDays,
+          version,
+          updatedByActorId,
+          updatedAt,
+        ]
       properties:
         organizationId: { type: string, format: uuid }
         dataResidencyRegion: { type: string }
@@ -1784,13 +1969,22 @@ components:
       minProperties: 1
       required: [dataResidencyRegion, retentionDays]
       properties:
-        dataResidencyRegion: { type: [string, "null"], minLength: 2, maxLength: 64 }
+        dataResidencyRegion:
+          { type: [string, "null"], minLength: 2, maxLength: 64 }
         retentionDays: { type: [integer, "null"], minimum: 1, maximum: 3650 }
     WorkspacePolicyOverride:
       type: object
       additionalProperties: false
       required:
-        [organizationId, workspaceId, dataResidencyRegion, retentionDays, version, updatedByActorId, updatedAt]
+        [
+          organizationId,
+          workspaceId,
+          dataResidencyRegion,
+          retentionDays,
+          version,
+          updatedByActorId,
+          updatedAt,
+        ]
       properties:
         organizationId: { type: string, format: uuid }
         workspaceId: { type: string, format: uuid }
@@ -1803,7 +1997,14 @@ components:
       type: object
       additionalProperties: false
       required:
-        [organizationId, workspaceId, dataResidencyRegion, retentionDays, organizationPolicy, workspaceOverride]
+        [
+          organizationId,
+          workspaceId,
+          dataResidencyRegion,
+          retentionDays,
+          organizationPolicy,
+          workspaceOverride,
+        ]
       properties:
         organizationId: { type: string, format: uuid }
         workspaceId: { type: [string, "null"], format: uuid }

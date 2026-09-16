@@ -10,4 +10,5 @@ export * from "./evidence.js";
 export * from "./notifications.js";
 export * from "./comments.js";
 export * from "./metrics.js";
+export * from "./access-grants.js";
 export * from "./outbox.js";

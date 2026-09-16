@@ -217,6 +217,18 @@ export interface TenantClock {
   now(): Date;
 }
 
+export interface TemporaryWorkspaceAccessAuthorizer {
+  authorize(input: {
+    actorId: string;
+    organizationId: string;
+    workspaceId: string;
+    resourceType: "workspace";
+    resourceId: string;
+    action: "read";
+    correlationId: string;
+  }): Promise<boolean>;
+}
+
 export class TenantService {
   constructor(
     private readonly dependencies: {
@@ -224,6 +236,7 @@ export class TenantService {
       ids: TenantIdGenerator;
       tokens: InvitationTokenService;
       clock: TenantClock;
+      accessGrants?: TemporaryWorkspaceAccessAuthorizer;
     },
   ) {}
 
@@ -292,18 +305,26 @@ export class TenantService {
     actorId: string;
     organizationId: string;
     workspaceId: string;
+    correlationId?: string;
   }): Promise<Workspace> {
     const workspace = await this.dependencies.store.findWorkspace(
       input.workspaceId,
     );
     if (!workspace || workspace.organizationId !== input.organizationId)
       throw new ResourceNotFoundError("WORKSPACE_NOT_FOUND");
-    await this.assertAllowed(
-      input.actorId,
-      input.organizationId,
-      workspace.id,
-      "workspace:read",
-    );
+    const capabilities = await this.capabilities(input);
+    if (!isActionAllowed("workspace:read", capabilities)) {
+      const authorized = await this.dependencies.accessGrants?.authorize({
+        actorId: input.actorId,
+        organizationId: input.organizationId,
+        workspaceId: workspace.id,
+        resourceType: "workspace",
+        resourceId: workspace.id,
+        action: "read",
+        correlationId: input.correlationId ?? this.dependencies.ids.next(),
+      });
+      if (!authorized) throw new AccessDeniedError("workspace:read");
+    }
     return workspace;
   }
   async archiveWorkspace(input: {
@@ -681,7 +702,8 @@ export class ResourceNotFoundError extends Error {
       | "WORKSPACE_NOT_FOUND"
       | "INITIATIVE_NOT_FOUND"
       | "PROJECT_NOT_FOUND"
-      | "EVIDENCE_SUBJECT_NOT_FOUND",
+      | "EVIDENCE_SUBJECT_NOT_FOUND"
+      | "TEMPORARY_ACCESS_GRANT_NOT_FOUND",
   ) {
     super(code);
   }
