@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   AccessDeniedError,
+  BusinessHoursPolicyError,
   ResourceNotFoundError,
   TenantService,
   WorkspaceArchivedError,
@@ -741,6 +742,10 @@ describe("TenantService", () => {
     ).resolves.toMatchObject({
       dataResidencyRegion: { value: "cl", origin: "organization" },
       retentionDays: { value: 365, origin: "organization" },
+      businessHours: {
+        value: { mode: "disabled", timezone: "UTC", windows: [] },
+        origin: "organization",
+      },
       workspaceOverride: null,
     });
     await service.setWorkspacePolicyOverride({
@@ -760,6 +765,10 @@ describe("TenantService", () => {
     ).resolves.toMatchObject({
       dataResidencyRegion: { value: "eu", origin: "workspace" },
       retentionDays: { value: 365, origin: "organization" },
+      businessHours: {
+        value: { mode: "disabled", timezone: "UTC", windows: [] },
+        origin: "organization",
+      },
       workspaceOverride: { dataResidencyRegion: "eu", retentionDays: null },
     });
     const memberInvitation = await service.invite({
@@ -796,5 +805,68 @@ describe("TenantService", () => {
       "workspace.policy_override_set.v1",
       "workspace.policy_override_cleared.v1",
     ]);
+  });
+
+  it("audita o bloquea mutaciones de tenancy fuera de la ventana efectiva", async () => {
+    const { service, store } = createTenantService(
+      new Date("2026-09-08T12:00:00.000Z"),
+    );
+    const organization = await service.createOrganization({
+      actorId: "owner",
+      actorEmail: "owner@example.test",
+      name: "Horario",
+      timezone: "UTC",
+      locale: "es-CL",
+      policy: {
+        dataResidencyRegion: "cl",
+        retentionDays: 365,
+        businessHours: {
+          mode: "audit",
+          timezone: "UTC",
+          windows: [{ dayOfWeek: 1, startMinute: 540, endMinute: 1_020 }],
+        },
+      },
+    });
+    await expect(
+      service.createWorkspace({
+        actorId: "owner",
+        organizationId: organization.id,
+        name: "Auditable",
+        mode: "team",
+      }),
+    ).resolves.toMatchObject({ name: "Auditable" });
+    expect(store.policyAuditEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          eventType: "organization.business_hours_outside_window.v1",
+          payload: { action: "workspace:create", mode: "audit" },
+        }),
+      ]),
+    );
+    await service.updateOrganizationPolicy({
+      actorId: "owner",
+      organizationId: organization.id,
+      dataResidencyRegion: "cl",
+      retentionDays: 365,
+      businessHours: {
+        mode: "enforce",
+        timezone: "UTC",
+        windows: [{ dayOfWeek: 1, startMinute: 540, endMinute: 1_020 }],
+      },
+      correlationId: "00000000-0000-4000-8000-000000000107",
+    });
+    await expect(
+      service.createWorkspace({
+        actorId: "owner",
+        organizationId: organization.id,
+        name: "Bloqueado",
+        mode: "team",
+      }),
+    ).rejects.toBeInstanceOf(BusinessHoursPolicyError);
+    expect(store.workspaces.size).toBe(1);
+    expect(store.policyAuditEvents.at(-1)).toMatchObject({
+      eventType: "organization.business_hours_outside_window.v1",
+      payload: { action: "workspace:create", mode: "enforce" },
+    });
   });
 });

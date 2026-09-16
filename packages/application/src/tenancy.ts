@@ -2,8 +2,10 @@ import {
   calculateCapabilities,
   isActionAllowed,
   isRoleAllowed,
+  isWithinBusinessHours,
   type AccessCapabilities,
   type AuthorizationAction,
+  type BusinessHoursPolicy,
   type OrganizationRole,
   type WorkspaceRole,
 } from "@aether/domain";
@@ -19,6 +21,7 @@ export type OrganizationPolicy = Readonly<{
   organizationId: string;
   dataResidencyRegion: string;
   retentionDays: number;
+  businessHours: BusinessHoursPolicy | null;
   version: number;
   updatedByActorId: string;
   updatedAt: Date;
@@ -28,6 +31,7 @@ export type WorkspacePolicyOverride = Readonly<{
   workspaceId: string;
   dataResidencyRegion: string | null;
   retentionDays: number | null;
+  businessHours: BusinessHoursPolicy | null;
   version: number;
   updatedByActorId: string;
   updatedAt: Date;
@@ -43,9 +47,19 @@ export type EffectiveTenancyPolicy = Readonly<{
     value: number;
     origin: "organization" | "workspace";
   }>;
+  businessHours: Readonly<{
+    value: BusinessHoursPolicy;
+    origin: "default" | "organization" | "workspace";
+  }>;
   organizationPolicy: OrganizationPolicy;
   workspaceOverride: WorkspacePolicyOverride | null;
 }>;
+type OrganizationPolicyInput = Pick<
+  OrganizationPolicy,
+  "dataResidencyRegion" | "retentionDays"
+> & {
+  businessHours?: BusinessHoursPolicy | null | undefined;
+};
 export type Workspace = Readonly<{
   id: string;
   organizationId: string;
@@ -85,10 +99,7 @@ export interface TenantStore {
     ownerActorId: string;
     ownerEmail: string;
     audit: LifecycleAudit;
-    policy?: Pick<
-      OrganizationPolicy,
-      "dataResidencyRegion" | "retentionDays"
-    > & {
+    policy?: OrganizationPolicyInput & {
       auditEventId?: string;
       correlationId?: string;
       occurredAt?: Date;
@@ -213,6 +224,7 @@ export interface TenantStore {
     actorId: string;
     dataResidencyRegion: string;
     retentionDays: number;
+    businessHours?: BusinessHoursPolicy | undefined;
     auditEventId: string;
     correlationId: string;
     occurredAt: Date;
@@ -223,6 +235,7 @@ export interface TenantStore {
     actorId: string;
     dataResidencyRegion: string | null;
     retentionDays: number | null;
+    businessHours?: BusinessHoursPolicy | undefined;
     auditEventId: string;
     correlationId: string;
     occurredAt: Date;
@@ -235,6 +248,33 @@ export interface TenantStore {
     correlationId: string;
     occurredAt: Date;
   }): Promise<"cleared" | "not_found">;
+  recordBusinessHoursEvaluation(input: {
+    auditEventId: string;
+    organizationId: string;
+    workspaceId: string | null;
+    actorId: string;
+    action: TenantBusinessMutation;
+    mode: "audit" | "enforce";
+    correlationId: string;
+    occurredAt: Date;
+  }): Promise<void>;
+}
+
+export type TenantBusinessMutation =
+  | "workspace:create"
+  | "workspace:archive"
+  | "team:create"
+  | "team:manage-members"
+  | "member:invite"
+  | "organization:ownership-transfer"
+  | "membership:manage";
+
+export class BusinessHoursPolicyError extends Error {
+  readonly code = "BUSINESS_HOURS_ENFORCED";
+
+  constructor() {
+    super("BUSINESS_HOURS_ENFORCED");
+  }
 }
 
 export interface TenantIdGenerator {
@@ -277,7 +317,7 @@ export class TenantService {
     name: string;
     timezone: string;
     locale: string;
-    policy?: Pick<OrganizationPolicy, "dataResidencyRegion" | "retentionDays">;
+    policy?: OrganizationPolicyInput;
     correlationId?: string;
   }): Promise<Organization> {
     const occurredAt = this.dependencies.clock.now();
@@ -302,6 +342,11 @@ export class TenantService {
         ? {
             policy: {
               ...input.policy,
+              businessHours: input.policy.businessHours ?? {
+                mode: "disabled",
+                timezone: input.timezone,
+                windows: [],
+              },
               auditEventId: this.dependencies.ids.next(),
               correlationId,
               occurredAt,
@@ -325,6 +370,13 @@ export class TenantService {
       null,
       "workspace:create",
     );
+    await this.assertBusinessHours({
+      actorId: input.actorId,
+      organizationId: input.organizationId,
+      workspaceId: null,
+      action: "workspace:create",
+      correlationId: input.correlationId,
+    });
     const workspace: Workspace = {
       id: this.dependencies.ids.next(),
       organizationId: input.organizationId,
@@ -390,6 +442,13 @@ export class TenantService {
       input.workspaceId,
       "workspace:archive",
     );
+    await this.assertBusinessHours({
+      actorId: input.actorId,
+      organizationId: input.organizationId,
+      workspaceId: input.workspaceId,
+      action: "workspace:archive",
+      correlationId: input.correlationId,
+    });
     const result = await this.dependencies.store.archiveWorkspace({
       ...input,
       auditEventId: this.dependencies.ids.next(),
@@ -412,6 +471,13 @@ export class TenantService {
       input.workspaceId,
       "team:create",
     );
+    await this.assertBusinessHours({
+      actorId: input.actorId,
+      organizationId: input.organizationId,
+      workspaceId: input.workspaceId,
+      action: "team:create",
+      correlationId: input.correlationId,
+    });
     await assertWorkspaceWritable(this.dependencies.store, input.workspaceId);
     const memberActorIds = [...new Set(input.memberActorIds)];
     const team: Team = {
@@ -461,6 +527,13 @@ export class TenantService {
       input.workspaceId,
       "team:manage-members",
     );
+    await this.assertBusinessHours({
+      actorId: input.actorId,
+      organizationId: input.organizationId,
+      workspaceId: input.workspaceId,
+      action: "team:manage-members",
+      correlationId: input.correlationId,
+    });
     await assertWorkspaceWritable(this.dependencies.store, input.workspaceId);
     const result = await this.dependencies.store.replaceTeamMembers({
       ...input,
@@ -503,6 +576,13 @@ export class TenantService {
       null,
       "member:invite",
     );
+    await this.assertBusinessHours({
+      actorId: input.actorId,
+      organizationId: input.organizationId,
+      workspaceId: null,
+      action: "member:invite",
+      correlationId: input.correlationId,
+    });
     if (input.organizationRole === "owner")
       throw new InvitationError("INVITATION_INVALID_OR_EXPIRED");
     for (const workspaceId of input.workspaceIds) {
@@ -583,6 +663,13 @@ export class TenantService {
       null,
       "member:invite",
     );
+    await this.assertBusinessHours({
+      actorId: input.actorId,
+      organizationId: input.organizationId,
+      workspaceId: null,
+      action: "member:invite",
+      correlationId: input.correlationId,
+    });
     const result = await this.dependencies.store.revokeInvitation({
       ...input,
       now: this.dependencies.clock.now(),
@@ -611,6 +698,13 @@ export class TenantService {
       ))
     )
       throw new OwnershipTransferError("ACTOR_MUST_BE_OWNER");
+    await this.assertBusinessHours({
+      actorId: input.actorId,
+      organizationId: input.organizationId,
+      workspaceId: null,
+      action: "organization:ownership-transfer",
+      correlationId: input.correlationId,
+    });
     const result = await this.dependencies.store.transferOwnership({
       ...input,
       auditEventId: this.dependencies.ids.next(),
@@ -640,6 +734,13 @@ export class TenantService {
       ))
     )
       throw new MembershipStatusError("actor_not_manager");
+    await this.assertBusinessHours({
+      actorId: input.actorId,
+      organizationId: input.organizationId,
+      workspaceId: null,
+      action: "membership:manage",
+      correlationId: input.correlationId,
+    });
     const result = await this.dependencies.store.changeMembershipStatus({
       ...input,
       auditEventId: this.dependencies.ids.next(),
@@ -666,6 +767,13 @@ export class TenantService {
       ))
     )
       throw new MembershipStatusError("actor_not_manager");
+    await this.assertBusinessHours({
+      actorId: input.actorId,
+      organizationId: input.organizationId,
+      workspaceId: null,
+      action: "membership:manage",
+      correlationId: input.correlationId,
+    });
     const result = await this.dependencies.store.reassignMemberResponsibilities(
       {
         ...input,
@@ -738,6 +846,7 @@ export class TenantService {
     organizationId: string;
     dataResidencyRegion: string;
     retentionDays: number;
+    businessHours?: BusinessHoursPolicy | undefined;
     correlationId: string;
   }): Promise<OrganizationPolicy> {
     await this.assertAllowed(
@@ -759,6 +868,7 @@ export class TenantService {
     workspaceId: string;
     dataResidencyRegion: string | null;
     retentionDays: number | null;
+    businessHours?: BusinessHoursPolicy | undefined;
     correlationId: string;
   }): Promise<WorkspacePolicyOverride | null> {
     await this.assertAllowed(
@@ -808,6 +918,38 @@ export class TenantService {
   ): Promise<void> {
     if (!(await this.isAllowed(actorId, organizationId, workspaceId, action)))
       throw new AccessDeniedError(action);
+  }
+
+  private async assertBusinessHours(input: {
+    actorId: string;
+    organizationId: string;
+    workspaceId: string | null;
+    action: TenantBusinessMutation;
+    correlationId: string | undefined;
+  }): Promise<void> {
+    const effectivePolicy = await this.dependencies.store.findEffectivePolicy({
+      organizationId: input.organizationId,
+      ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
+    });
+    if (!effectivePolicy) return;
+    const now = this.dependencies.clock.now();
+    const businessHours = effectivePolicy.businessHours.value;
+    if (
+      businessHours.mode === "disabled" ||
+      isWithinBusinessHours(businessHours, now)
+    )
+      return;
+    await this.dependencies.store.recordBusinessHoursEvaluation({
+      auditEventId: this.dependencies.ids.next(),
+      organizationId: input.organizationId,
+      workspaceId: input.workspaceId,
+      actorId: input.actorId,
+      action: input.action,
+      mode: businessHours.mode,
+      correlationId: input.correlationId ?? this.dependencies.ids.next(),
+      occurredAt: now,
+    });
+    if (businessHours.mode === "enforce") throw new BusinessHoursPolicyError();
   }
 
   private async isAllowed(

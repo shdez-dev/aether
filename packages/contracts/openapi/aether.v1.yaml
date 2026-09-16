@@ -2243,6 +2243,26 @@ components:
       properties:
         dataResidencyRegion: { type: string, minLength: 2, maxLength: 64 }
         retentionDays: { type: integer, minimum: 1, maximum: 3650 }
+        businessHours: { $ref: "#/components/schemas/BusinessHoursPolicy" }
+    BusinessHoursWindow:
+      type: object
+      additionalProperties: false
+      required: [dayOfWeek, startMinute, endMinute]
+      properties:
+        dayOfWeek: { type: integer, minimum: 1, maximum: 7 }
+        startMinute: { type: integer, minimum: 0, maximum: 1439 }
+        endMinute: { type: integer, minimum: 1, maximum: 1440 }
+    BusinessHoursPolicy:
+      type: object
+      additionalProperties: false
+      required: [mode, timezone, windows]
+      properties:
+        mode: { type: string, enum: [disabled, audit, enforce] }
+        timezone: { type: string, minLength: 1, maxLength: 64 }
+        windows:
+          type: array
+          maxItems: 21
+          items: { $ref: "#/components/schemas/BusinessHoursWindow" }
     OrganizationPolicy:
       type: object
       additionalProperties: false
@@ -2251,6 +2271,7 @@ components:
           organizationId,
           dataResidencyRegion,
           retentionDays,
+          businessHours,
           version,
           updatedByActorId,
           updatedAt,
@@ -2259,6 +2280,9 @@ components:
         organizationId: { type: string, format: uuid }
         dataResidencyRegion: { type: string }
         retentionDays: { type: integer, minimum: 1, maximum: 3650 }
+        businessHours:
+          allOf: [{ $ref: "#/components/schemas/BusinessHoursPolicy" }]
+          nullable: true
         version: { type: integer, minimum: 0 }
         updatedByActorId: { type: string }
         updatedAt: { type: string, format: date-time }
@@ -2271,6 +2295,7 @@ components:
         dataResidencyRegion:
           { type: [string, "null"], minLength: 2, maxLength: 64 }
         retentionDays: { type: [integer, "null"], minimum: 1, maximum: 3650 }
+        businessHours: { $ref: "#/components/schemas/BusinessHoursPolicy" }
     WorkspacePolicyOverride:
       type: object
       additionalProperties: false
@@ -2280,6 +2305,7 @@ components:
           workspaceId,
           dataResidencyRegion,
           retentionDays,
+          businessHours,
           version,
           updatedByActorId,
           updatedAt,
@@ -2289,6 +2315,9 @@ components:
         workspaceId: { type: string, format: uuid }
         dataResidencyRegion: { type: [string, "null"] }
         retentionDays: { type: [integer, "null"] }
+        businessHours:
+          allOf: [{ $ref: "#/components/schemas/BusinessHoursPolicy" }]
+          nullable: true
         version: { type: integer, minimum: 0 }
         updatedByActorId: { type: string }
         updatedAt: { type: string, format: date-time }
@@ -2301,6 +2330,7 @@ components:
           workspaceId,
           dataResidencyRegion,
           retentionDays,
+          businessHours,
           organizationPolicy,
           workspaceOverride,
         ]
@@ -2313,6 +2343,12 @@ components:
           properties:
             value: { type: string }
             origin: { type: string, enum: [organization, workspace] }
+        businessHours:
+          type: object
+          required: [value, origin]
+          properties:
+            value: { $ref: "#/components/schemas/BusinessHoursPolicy" }
+            origin: { type: string, enum: [default, organization, workspace] }
         retentionDays:
           type: object
           required: [value, origin]

@@ -848,6 +848,11 @@ describe.sequential("PostgreSQL integration", () => {
         organizationId: organization.id,
         dataResidencyRegion: "cl-south",
         retentionDays: 180,
+        businessHours: {
+          mode: "audit",
+          timezone: "UTC",
+          windows: [{ dayOfWeek: 1, startMinute: 540, endMinute: 1020 }],
+        },
         correlationId: randomUUID(),
       });
       await expect(
@@ -859,6 +864,14 @@ describe.sequential("PostgreSQL integration", () => {
       ).resolves.toMatchObject({
         dataResidencyRegion: { value: "eu", origin: "workspace" },
         retentionDays: { value: 180, origin: "organization" },
+        businessHours: {
+          value: {
+            mode: "audit",
+            timezone: "UTC",
+            windows: [{ dayOfWeek: 1, startMinute: 540, endMinute: 1020 }],
+          },
+          origin: "organization",
+        },
         organizationPolicy: { version: 1, dataResidencyRegion: "cl-south" },
       });
       await expect(

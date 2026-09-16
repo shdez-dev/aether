@@ -42,6 +42,7 @@ import {
   OutboxAdministrationService,
   OutboxDeadLetterNotFoundError,
   WorkspaceArchivedError,
+  BusinessHoursPolicyError,
   PolicyNotConfiguredError,
   TemporaryAccessGrantError,
   TemporaryAccessGrantService,
@@ -326,7 +327,8 @@ export async function buildServer(input: {
                         "SUPPORT_OPERATOR_NOT_ELIGIBLE",
                         "SUPPORT_ACCESS_SEPARATION_OF_DUTIES",
                         "SUPPORT_ACCESS_DENIED",
-                      ].includes(error.code))
+                      ].includes(error.code)) ||
+                    error instanceof BusinessHoursPolicyError
                   ? 403
                   : error instanceof ResourceNotFoundError ||
                       (error instanceof InvitationLifecycleError &&
@@ -411,61 +413,66 @@ export async function buildServer(input: {
                           ? "RECENT_AUTH_REQUIRED"
                           : error instanceof AccountManagementUnavailableError
                             ? "ACCOUNT_MANAGEMENT_UNAVAILABLE"
-                            : error instanceof CsrfError ||
-                                error instanceof AccessDeniedError ||
-                                error instanceof DocumentAccessDeniedError ||
-                                error instanceof IdentityEmailRequiredError ||
-                                (error instanceof OwnershipTransferError &&
-                                  error.code === "ACTOR_MUST_BE_OWNER") ||
-                                (error instanceof MembershipStatusError &&
-                                  error.code === "actor_not_manager") ||
-                                (error instanceof TemporaryAccessGrantError &&
-                                  error.code ===
-                                    "GRANT_SEPARATION_OF_DUTIES") ||
-                                (error instanceof SupportAccessGrantError &&
-                                  [
-                                    "SUPPORT_OPERATOR_NOT_ELIGIBLE",
-                                    "SUPPORT_ACCESS_SEPARATION_OF_DUTIES",
-                                    "SUPPORT_ACCESS_DENIED",
-                                  ].includes(error.code))
-                              ? "FORBIDDEN"
-                              : error instanceof ResourceNotFoundError ||
-                                  (error instanceof InvitationLifecycleError &&
-                                    error.code === "INVITATION_NOT_FOUND") ||
-                                  error instanceof DocumentNotFoundError ||
-                                  error instanceof
-                                    OutboxDeadLetterNotFoundError ||
-                                  error instanceof PolicyNotConfiguredError ||
+                            : error instanceof BusinessHoursPolicyError
+                              ? "BUSINESS_HOURS_ENFORCED"
+                              : error instanceof CsrfError ||
+                                  error instanceof AccessDeniedError ||
+                                  error instanceof DocumentAccessDeniedError ||
+                                  error instanceof IdentityEmailRequiredError ||
+                                  (error instanceof OwnershipTransferError &&
+                                    error.code === "ACTOR_MUST_BE_OWNER") ||
+                                  (error instanceof MembershipStatusError &&
+                                    error.code === "actor_not_manager") ||
                                   (error instanceof TemporaryAccessGrantError &&
-                                    error.code === "GRANT_RESOURCE_NOT_FOUND")
-                                ? "NOT_FOUND"
-                                : error instanceof TemporaryAccessGrantError
-                                  ? error.code
-                                  : error instanceof SupportAccessGrantError
+                                    error.code ===
+                                      "GRANT_SEPARATION_OF_DUTIES") ||
+                                  (error instanceof SupportAccessGrantError &&
+                                    [
+                                      "SUPPORT_OPERATOR_NOT_ELIGIBLE",
+                                      "SUPPORT_ACCESS_SEPARATION_OF_DUTIES",
+                                      "SUPPORT_ACCESS_DENIED",
+                                    ].includes(error.code)) ||
+                                  error instanceof BusinessHoursPolicyError
+                                ? "FORBIDDEN"
+                                : error instanceof ResourceNotFoundError ||
+                                    (error instanceof
+                                      InvitationLifecycleError &&
+                                      error.code === "INVITATION_NOT_FOUND") ||
+                                    error instanceof DocumentNotFoundError ||
+                                    error instanceof
+                                      OutboxDeadLetterNotFoundError ||
+                                    error instanceof PolicyNotConfiguredError ||
+                                    (error instanceof
+                                      TemporaryAccessGrantError &&
+                                      error.code === "GRANT_RESOURCE_NOT_FOUND")
+                                  ? "NOT_FOUND"
+                                  : error instanceof TemporaryAccessGrantError
                                     ? error.code
-                                    : error instanceof
-                                          InitiativeVersionConflictError ||
-                                        error instanceof
-                                          ProjectVersionConflictError
-                                      ? "CONFLICT"
+                                    : error instanceof SupportAccessGrantError
+                                      ? error.code
                                       : error instanceof
-                                            InitiativeDomainError ||
+                                            InitiativeVersionConflictError ||
                                           error instanceof
-                                            DocumentValidationError ||
-                                          error instanceof ProjectDomainError
-                                        ? "PRECONDITION_FAILED"
-                                        : error instanceof InvitationError
-                                          ? "INVITATION_INVALID_OR_EXPIRED"
-                                          : error instanceof
-                                              InvitationLifecycleError
-                                            ? error.code
+                                            ProjectVersionConflictError
+                                        ? "CONFLICT"
+                                        : error instanceof
+                                              InitiativeDomainError ||
+                                            error instanceof
+                                              DocumentValidationError ||
+                                            error instanceof ProjectDomainError
+                                          ? "PRECONDITION_FAILED"
+                                          : error instanceof InvitationError
+                                            ? "INVITATION_INVALID_OR_EXPIRED"
                                             : error instanceof
-                                                OwnershipTransferError
+                                                InvitationLifecycleError
                                               ? error.code
                                               : error instanceof
-                                                  MembershipStatusError
-                                                ? error.code.toUpperCase()
-                                                : "VALIDATION_ERROR",
+                                                  OwnershipTransferError
+                                                ? error.code
+                                                : error instanceof
+                                                    MembershipStatusError
+                                                  ? error.code.toUpperCase()
+                                                  : "VALIDATION_ERROR",
         correlationId: reply.getHeader("X-Correlation-ID"),
         instance: request.url,
       });
@@ -2517,6 +2524,15 @@ function toOrganizationPolicyResponse(policy: {
   organizationId: string;
   dataResidencyRegion: string;
   retentionDays: number;
+  businessHours: {
+    mode: "disabled" | "audit" | "enforce";
+    timezone: string;
+    windows: readonly {
+      dayOfWeek: number;
+      startMinute: number;
+      endMinute: number;
+    }[];
+  } | null;
   version: number;
   updatedByActorId: string;
   updatedAt: Date;
@@ -2532,6 +2548,15 @@ function toWorkspacePolicyOverrideResponse(
     workspaceId: string;
     dataResidencyRegion: string | null;
     retentionDays: number | null;
+    businessHours: {
+      mode: "disabled" | "audit" | "enforce";
+      timezone: string;
+      windows: readonly {
+        dayOfWeek: number;
+        startMinute: number;
+        endMinute: number;
+      }[];
+    } | null;
     version: number;
     updatedByActorId: string;
     updatedAt: Date;
@@ -2548,6 +2573,18 @@ function toEffectiveTenancyPolicyResponse(policy: {
   workspaceId: string | null;
   dataResidencyRegion: { value: string; origin: "organization" | "workspace" };
   retentionDays: { value: number; origin: "organization" | "workspace" };
+  businessHours: {
+    value: {
+      mode: "disabled" | "audit" | "enforce";
+      timezone: string;
+      windows: readonly {
+        dayOfWeek: number;
+        startMinute: number;
+        endMinute: number;
+      }[];
+    };
+    origin: "default" | "organization" | "workspace";
+  };
   organizationPolicy: Parameters<typeof toOrganizationPolicyResponse>[0];
   workspaceOverride: Parameters<typeof toWorkspacePolicyOverrideResponse>[0];
 }) {
@@ -2556,6 +2593,7 @@ function toEffectiveTenancyPolicyResponse(policy: {
     workspaceId: policy.workspaceId,
     dataResidencyRegion: policy.dataResidencyRegion,
     retentionDays: policy.retentionDays,
+    businessHours: policy.businessHours,
     organizationPolicy: toOrganizationPolicyResponse(policy.organizationPolicy),
     workspaceOverride: toWorkspacePolicyOverrideResponse(
       policy.workspaceOverride,

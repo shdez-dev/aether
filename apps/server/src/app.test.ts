@@ -320,7 +320,7 @@ describe("HTTP authentication boundary", () => {
         generate: () => "x".repeat(43),
         hash: (value) => `hash:${value}`,
       },
-      clock: { now: () => new Date() },
+      clock: { now: () => new Date("2026-09-08T12:00:00.000Z") },
     });
     const auth = new AuthService({
       store: authStore,
@@ -677,7 +677,7 @@ describe("HTTP authentication boundary", () => {
         generate: () => "x".repeat(43),
         hash: (value) => `hash:${value}`,
       },
-      clock: { now: () => new Date() },
+      clock: { now: () => new Date("2026-09-08T12:00:00.000Z") },
     });
     const app = await buildServer({
       config,
@@ -786,6 +786,10 @@ describe("HTTP authentication boundary", () => {
     expect(effectivePolicy.json()).toMatchObject({
       dataResidencyRegion: { value: "cl", origin: "organization" },
       retentionDays: { value: 365, origin: "organization" },
+      businessHours: {
+        value: { mode: "disabled", timezone: "UTC", windows: [] },
+        origin: "organization",
+      },
       workspaceOverride: null,
     });
     const override = await app.inject({
@@ -967,6 +971,48 @@ describe("HTTP authentication boundary", () => {
         organizationId: organization.json().id,
       }),
     ).resolves.toMatchObject({ canReadOrganization: false });
+    const enforcedOrganization = await app.inject({
+      method: "POST",
+      url: "/v1/organizations",
+      headers: {
+        origin: config.webOrigin,
+        "x-csrf-token": csrf,
+        cookie: `aether_session=${session}; aether_csrf=${csrf}`,
+      },
+      payload: {
+        name: "Horario exigido",
+        timezone: "UTC",
+        locale: "es-CL",
+        policy: {
+          dataResidencyRegion: "cl",
+          retentionDays: 365,
+          businessHours: {
+            mode: "enforce",
+            timezone: "UTC",
+            windows: [{ dayOfWeek: 1, startMinute: 540, endMinute: 1020 }],
+          },
+        },
+      },
+    });
+    expect(enforcedOrganization.statusCode).toBe(201);
+    const blockedWorkspace = await app.inject({
+      method: "POST",
+      url: "/v1/workspaces",
+      headers: {
+        origin: config.webOrigin,
+        "x-csrf-token": csrf,
+        cookie: `aether_session=${session}; aether_csrf=${csrf}`,
+      },
+      payload: {
+        organizationId: enforcedOrganization.json().id,
+        name: "Fuera de ventana",
+        mode: "team",
+      },
+    });
+    expect(blockedWorkspace.statusCode).toBe(403);
+    expect(blockedWorkspace.json()).toMatchObject({
+      code: "BUSINESS_HOURS_ENFORCED",
+    });
     const rejected = await app.inject({
       method: "POST",
       url: "/auth/logout",

@@ -51,6 +51,7 @@ import type {
   OrganizationPolicy,
   EffectiveTenancyPolicy,
   WorkspacePolicyOverride,
+  TenantBusinessMutation,
   TemporaryAccessGrant,
   TemporaryAccessGrantResourceResolver,
   TemporaryAccessGrantStore,
@@ -81,6 +82,7 @@ import type {
   EvidenceReferenceSubjectType,
   ProjectClosure,
   ProjectDeliverableAcceptance,
+  BusinessHoursPolicy,
 } from "@aether/domain";
 import type { Pool, PoolClient } from "pg";
 
@@ -416,6 +418,7 @@ export class PostgresTenantStore implements TenantStore {
       OrganizationPolicy,
       "dataResidencyRegion" | "retentionDays"
     > & {
+      businessHours?: BusinessHoursPolicy | null | undefined;
       auditEventId?: string;
       correlationId?: string;
       occurredAt?: Date;
@@ -459,12 +462,15 @@ export class PostgresTenantStore implements TenantStore {
         const occurredAt = input.policy.occurredAt ?? new Date();
         await client.query(
           `INSERT INTO organization_policies
-           (organization_id, data_residency_region, retention_days, version, updated_by_actor_id, updated_at)
-           VALUES ($1, $2, $3, 0, $4, $5)`,
+           (organization_id, data_residency_region, retention_days, business_hours, version, updated_by_actor_id, updated_at)
+           VALUES ($1, $2, $3, $4, 0, $5, $6)`,
           [
             input.organization.id,
             input.policy.dataResidencyRegion,
             input.policy.retentionDays,
+            input.policy.businessHours
+              ? asJson(input.policy.businessHours)
+              : null,
             input.ownerActorId,
             occurredAt,
           ],
@@ -482,6 +488,9 @@ export class PostgresTenantStore implements TenantStore {
             asJson({
               dataResidencyRegion: input.policy.dataResidencyRegion,
               retentionDays: input.policy.retentionDays,
+              ...(input.policy.businessHours
+                ? { businessHours: input.policy.businessHours }
+                : {}),
             }),
           ],
         );
@@ -1378,8 +1387,10 @@ export class PostgresTenantStore implements TenantStore {
     const result = await this.pool.query<PolicyJoinRow>(
       `SELECT
          organization_policies.organization_id,
+         organizations.timezone AS organization_timezone,
          organization_policies.data_residency_region AS organization_region,
          organization_policies.retention_days AS organization_retention_days,
+         organization_policies.business_hours AS organization_business_hours,
          organization_policies.version AS organization_version,
          organization_policies.updated_by_actor_id AS organization_updated_by_actor_id,
          organization_policies.updated_at AS organization_updated_at,
@@ -1387,10 +1398,12 @@ export class PostgresTenantStore implements TenantStore {
          workspace_policy_overrides.organization_id AS override_organization_id,
          workspace_policy_overrides.data_residency_region AS override_region,
          workspace_policy_overrides.retention_days AS override_retention_days,
+         workspace_policy_overrides.business_hours AS override_business_hours,
          workspace_policy_overrides.version AS override_version,
          workspace_policy_overrides.updated_by_actor_id AS override_updated_by_actor_id,
          workspace_policy_overrides.updated_at AS override_updated_at
        FROM organization_policies
+       JOIN organizations ON organizations.id = organization_policies.organization_id
        LEFT JOIN workspace_policy_overrides
          ON workspace_policy_overrides.organization_id = organization_policies.organization_id
         AND workspace_policy_overrides.workspace_id = $2
@@ -1409,6 +1422,7 @@ export class PostgresTenantStore implements TenantStore {
           workspaceId: row.workspace_id,
           dataResidencyRegion: row.override_region,
           retentionDays: row.override_retention_days,
+          businessHours: row.override_business_hours,
           version: row.override_version!,
           updatedByActorId: row.override_updated_by_actor_id!,
           updatedAt: row.override_updated_at!,
@@ -1418,6 +1432,7 @@ export class PostgresTenantStore implements TenantStore {
       organizationId: row.organization_id,
       dataResidencyRegion: row.organization_region,
       retentionDays: row.organization_retention_days,
+      businessHours: row.organization_business_hours,
       version: row.organization_version,
       updatedByActorId: row.organization_updated_by_actor_id,
       updatedAt: row.organization_updated_at,
@@ -1442,6 +1457,19 @@ export class PostgresTenantStore implements TenantStore {
             ? "organization"
             : "workspace",
       },
+      businessHours: {
+        value: workspaceOverride?.businessHours ??
+          organizationPolicy.businessHours ?? {
+            mode: "disabled",
+            timezone: row.organization_timezone,
+            windows: [],
+          },
+        origin: workspaceOverride?.businessHours
+          ? "workspace"
+          : organizationPolicy.businessHours
+            ? "organization"
+            : "default",
+      },
       organizationPolicy,
       workspaceOverride,
     };
@@ -1452,6 +1480,7 @@ export class PostgresTenantStore implements TenantStore {
     actorId: string;
     dataResidencyRegion: string;
     retentionDays: number;
+    businessHours?: BusinessHoursPolicy | undefined;
     auditEventId: string;
     correlationId: string;
     occurredAt: Date;
@@ -1461,19 +1490,21 @@ export class PostgresTenantStore implements TenantStore {
       await client.query("BEGIN");
       const result = await client.query<OrganizationPolicyRow>(
         `INSERT INTO organization_policies
-         (organization_id, data_residency_region, retention_days, version, updated_by_actor_id, updated_at)
-         VALUES ($1, $2, $3, 0, $4, $5)
+         (organization_id, data_residency_region, retention_days, business_hours, version, updated_by_actor_id, updated_at)
+         VALUES ($1, $2, $3, $4, 0, $5, $6)
          ON CONFLICT (organization_id) DO UPDATE SET
            data_residency_region = EXCLUDED.data_residency_region,
            retention_days = EXCLUDED.retention_days,
+           business_hours = COALESCE(EXCLUDED.business_hours, organization_policies.business_hours),
            version = organization_policies.version + 1,
            updated_by_actor_id = EXCLUDED.updated_by_actor_id,
            updated_at = EXCLUDED.updated_at
-         RETURNING organization_id, data_residency_region, retention_days, version, updated_by_actor_id, updated_at`,
+         RETURNING organization_id, data_residency_region, retention_days, business_hours, version, updated_by_actor_id, updated_at`,
         [
           input.organizationId,
           input.dataResidencyRegion,
           input.retentionDays,
+          input.businessHours ? asJson(input.businessHours) : null,
           input.actorId,
           input.occurredAt,
         ],
@@ -1494,6 +1525,9 @@ export class PostgresTenantStore implements TenantStore {
           asJson({
             dataResidencyRegion: input.dataResidencyRegion,
             retentionDays: input.retentionDays,
+            ...(input.businessHours
+              ? { businessHours: input.businessHours }
+              : {}),
           }),
         ],
       );
@@ -1513,6 +1547,7 @@ export class PostgresTenantStore implements TenantStore {
     actorId: string;
     dataResidencyRegion: string | null;
     retentionDays: number | null;
+    businessHours?: BusinessHoursPolicy | undefined;
     auditEventId: string;
     correlationId: string;
     occurredAt: Date;
@@ -1522,21 +1557,23 @@ export class PostgresTenantStore implements TenantStore {
       await client.query("BEGIN");
       const result = await client.query<WorkspacePolicyOverrideRow>(
         `INSERT INTO workspace_policy_overrides
-         (workspace_id, organization_id, data_residency_region, retention_days, version, updated_by_actor_id, updated_at)
-         SELECT $1, organization_id, $3, $4, 0, $5, $6
+         (workspace_id, organization_id, data_residency_region, retention_days, business_hours, version, updated_by_actor_id, updated_at)
+         SELECT $1, organization_id, $3, $4, $5, 0, $6, $7
          FROM workspaces WHERE id = $1 AND organization_id = $2
          ON CONFLICT (workspace_id) DO UPDATE SET
            data_residency_region = EXCLUDED.data_residency_region,
            retention_days = EXCLUDED.retention_days,
+           business_hours = COALESCE(EXCLUDED.business_hours, workspace_policy_overrides.business_hours),
            version = workspace_policy_overrides.version + 1,
            updated_by_actor_id = EXCLUDED.updated_by_actor_id,
            updated_at = EXCLUDED.updated_at
-         RETURNING workspace_id, organization_id, data_residency_region, retention_days, version, updated_by_actor_id, updated_at`,
+         RETURNING workspace_id, organization_id, data_residency_region, retention_days, business_hours, version, updated_by_actor_id, updated_at`,
         [
           input.workspaceId,
           input.organizationId,
           input.dataResidencyRegion,
           input.retentionDays,
+          input.businessHours ? asJson(input.businessHours) : null,
           input.actorId,
           input.occurredAt,
         ],
@@ -1559,6 +1596,9 @@ export class PostgresTenantStore implements TenantStore {
           asJson({
             dataResidencyRegion: input.dataResidencyRegion,
             retentionDays: input.retentionDays,
+            ...(input.businessHours
+              ? { businessHours: input.businessHours }
+              : {}),
           }),
         ],
       );
@@ -1614,6 +1654,32 @@ export class PostgresTenantStore implements TenantStore {
     } finally {
       client.release();
     }
+  }
+
+  async recordBusinessHoursEvaluation(input: {
+    auditEventId: string;
+    organizationId: string;
+    workspaceId: string | null;
+    actorId: string;
+    action: TenantBusinessMutation;
+    mode: "audit" | "enforce";
+    correlationId: string;
+    occurredAt: Date;
+  }): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO tenancy_policy_audit_events
+       (id, organization_id, workspace_id, actor_id, event_type, correlation_id, occurred_at, payload)
+       VALUES ($1, $2, $3, $4, 'organization.business_hours_outside_window.v1', $5, $6, $7)`,
+      [
+        input.auditEventId,
+        input.organizationId,
+        input.workspaceId,
+        input.actorId,
+        input.correlationId,
+        input.occurredAt,
+        asJson({ action: input.action, mode: input.mode }),
+      ],
+    );
   }
 }
 
@@ -2393,6 +2459,7 @@ type OrganizationPolicyRow = {
   organization_id: string;
   data_residency_region: string;
   retention_days: number;
+  business_hours: BusinessHoursPolicy | null;
   version: number;
   updated_by_actor_id: string;
   updated_at: Date;
@@ -2402,6 +2469,7 @@ type WorkspacePolicyOverrideRow = {
   organization_id: string;
   data_residency_region: string | null;
   retention_days: number | null;
+  business_hours: BusinessHoursPolicy | null;
   version: number;
   updated_by_actor_id: string;
   updated_at: Date;
@@ -2410,6 +2478,8 @@ type PolicyJoinRow = {
   organization_id: string;
   organization_region: string;
   organization_retention_days: number;
+  organization_business_hours: BusinessHoursPolicy | null;
+  organization_timezone: string;
   organization_version: number;
   organization_updated_by_actor_id: string;
   organization_updated_at: Date;
@@ -2417,6 +2487,7 @@ type PolicyJoinRow = {
   override_organization_id: string | null;
   override_region: string | null;
   override_retention_days: number | null;
+  override_business_hours: BusinessHoursPolicy | null;
   override_version: number | null;
   override_updated_by_actor_id: string | null;
   override_updated_at: Date | null;
@@ -2480,6 +2551,7 @@ function toOrganizationPolicy(row: OrganizationPolicyRow): OrganizationPolicy {
     organizationId: row.organization_id,
     dataResidencyRegion: row.data_residency_region,
     retentionDays: Number(row.retention_days),
+    businessHours: row.business_hours,
     version: Number(row.version),
     updatedByActorId: row.updated_by_actor_id,
     updatedAt: row.updated_at,
@@ -2494,6 +2566,7 @@ function toWorkspacePolicyOverride(
     dataResidencyRegion: row.data_residency_region,
     retentionDays:
       row.retention_days === null ? null : Number(row.retention_days),
+    businessHours: row.business_hours,
     version: Number(row.version),
     updatedByActorId: row.updated_by_actor_id,
     updatedAt: row.updated_at,

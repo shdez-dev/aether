@@ -2,9 +2,63 @@ import { z } from "zod";
 
 import { NonEmptyTextSchema, UuidSchema } from "./common.js";
 
+const IanaTimezoneSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(64)
+  .refine(
+    (timezone) => {
+      try {
+        new Intl.DateTimeFormat("en-US", { timeZone: timezone });
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    { message: "Debe ser una zona horaria IANA válida." },
+  );
+
+export const BusinessHoursPolicySchema = z
+  .object({
+    mode: z.enum(["disabled", "audit", "enforce"]),
+    timezone: IanaTimezoneSchema,
+    windows: z
+      .array(
+        z
+          .object({
+            dayOfWeek: z.number().int().min(1).max(7),
+            startMinute: z.number().int().min(0).max(1439),
+            endMinute: z.number().int().min(1).max(1440),
+          })
+          .refine((window) => window.startMinute < window.endMinute, {
+            message: "La franja debe terminar después de comenzar.",
+          }),
+      )
+      .max(21),
+  })
+  .superRefine((policy, context) => {
+    for (const [index, window] of policy.windows.entries()) {
+      const overlaps = policy.windows.some(
+        (candidate, candidateIndex) =>
+          candidateIndex !== index &&
+          candidate.dayOfWeek === window.dayOfWeek &&
+          candidate.startMinute < window.endMinute &&
+          window.startMinute < candidate.endMinute,
+      );
+      if (overlaps)
+        context.addIssue({
+          code: "custom",
+          path: ["windows", index],
+          message: "Las franjas del mismo día no pueden solaparse.",
+        });
+    }
+  });
+
 export const TenancyPolicyValuesSchema = z.object({
   dataResidencyRegion: z.string().trim().min(2).max(64),
   retentionDays: z.number().int().min(1).max(3650),
+  businessHours: BusinessHoursPolicySchema.optional(),
 });
 
 export const CreateOrganizationRequestSchema = z.object({
@@ -106,10 +160,13 @@ export const WorkspacePolicyOverrideRequestSchema = z
   .object({
     dataResidencyRegion: z.string().trim().min(2).max(64).nullable(),
     retentionDays: z.number().int().min(1).max(3650).nullable(),
+    businessHours: BusinessHoursPolicySchema.optional(),
   })
   .refine(
     (value) =>
-      value.dataResidencyRegion !== null || value.retentionDays !== null,
+      value.dataResidencyRegion !== null ||
+      value.retentionDays !== null ||
+      value.businessHours !== undefined,
     { message: "Debe configurar al menos una excepción de política." },
   );
 
@@ -117,16 +174,22 @@ const PolicyValueSchema = z.object({
   value: z.union([z.string(), z.number()]),
   origin: z.enum(["organization", "workspace"]),
 });
+const BusinessHoursPolicyValueSchema = z.object({
+  value: BusinessHoursPolicySchema,
+  origin: z.enum(["default", "organization", "workspace"]),
+});
 
 export const EffectiveTenancyPolicyResponseSchema = z.object({
   organizationId: UuidSchema,
   workspaceId: UuidSchema.nullable(),
   dataResidencyRegion: PolicyValueSchema.extend({ value: z.string() }),
   retentionDays: PolicyValueSchema.extend({ value: z.number().int() }),
+  businessHours: BusinessHoursPolicyValueSchema,
   organizationPolicy: z.object({
     organizationId: UuidSchema,
     dataResidencyRegion: z.string(),
     retentionDays: z.number().int(),
+    businessHours: BusinessHoursPolicySchema.nullable(),
     version: z.number().int().nonnegative(),
     updatedByActorId: z.string(),
     updatedAt: z.string().datetime(),
@@ -137,6 +200,7 @@ export const EffectiveTenancyPolicyResponseSchema = z.object({
       workspaceId: UuidSchema,
       dataResidencyRegion: z.string().nullable(),
       retentionDays: z.number().int().nullable(),
+      businessHours: BusinessHoursPolicySchema.nullable(),
       version: z.number().int().nonnegative(),
       updatedByActorId: z.string(),
       updatedAt: z.string().datetime(),
@@ -177,6 +241,7 @@ export type AccessCapabilitiesResponse = z.infer<
   typeof AccessCapabilitiesResponseSchema
 >;
 export type TenancyPolicyValues = z.infer<typeof TenancyPolicyValuesSchema>;
+export type BusinessHoursPolicy = z.infer<typeof BusinessHoursPolicySchema>;
 export type WorkspacePolicyOverrideRequest = z.infer<
   typeof WorkspacePolicyOverrideRequestSchema
 >;

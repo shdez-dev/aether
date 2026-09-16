@@ -5,11 +5,13 @@ import type {
   OrganizationPolicy,
   EffectiveTenancyPolicy,
   WorkspacePolicyOverride,
+  TenantBusinessMutation,
   Team,
   TenantStore,
   Workspace,
 } from "@aether/application";
 import type { OrganizationRole, WorkspaceRole } from "@aether/domain";
+import type { BusinessHoursPolicy } from "@aether/domain";
 
 /** Store determinista para pruebas de autorización y aislamiento multi-tenant. */
 export class InMemoryTenantStore implements TenantStore {
@@ -81,6 +83,7 @@ export class InMemoryTenantStore implements TenantStore {
       OrganizationPolicy,
       "dataResidencyRegion" | "retentionDays"
     > & {
+      businessHours?: BusinessHoursPolicy | null | undefined;
       auditEventId?: string;
       correlationId?: string;
       occurredAt?: Date;
@@ -116,6 +119,7 @@ export class InMemoryTenantStore implements TenantStore {
         organizationId: input.organization.id,
         dataResidencyRegion: input.policy.dataResidencyRegion,
         retentionDays: input.policy.retentionDays,
+        businessHours: input.policy.businessHours ?? null,
         version: 0,
         updatedByActorId: input.ownerActorId,
         updatedAt: occurredAt,
@@ -132,6 +136,9 @@ export class InMemoryTenantStore implements TenantStore {
         payload: {
           dataResidencyRegion: input.policy.dataResidencyRegion,
           retentionDays: input.policy.retentionDays,
+          ...(input.policy.businessHours
+            ? { businessHours: input.policy.businessHours }
+            : {}),
         },
       });
     }
@@ -636,6 +643,20 @@ export class InMemoryTenantStore implements TenantStore {
             ? "organization"
             : "workspace",
       },
+      businessHours: {
+        value: workspaceOverride?.businessHours ??
+          organizationPolicy.businessHours ?? {
+            mode: "disabled",
+            timezone:
+              this.organizations.get(input.organizationId)?.timezone ?? "UTC",
+            windows: [],
+          },
+        origin: workspaceOverride?.businessHours
+          ? "workspace"
+          : organizationPolicy.businessHours
+            ? "organization"
+            : "default",
+      },
       organizationPolicy,
       workspaceOverride,
     };
@@ -646,6 +667,7 @@ export class InMemoryTenantStore implements TenantStore {
     actorId: string;
     dataResidencyRegion: string;
     retentionDays: number;
+    businessHours?: BusinessHoursPolicy | undefined;
     auditEventId: string;
     correlationId: string;
     occurredAt: Date;
@@ -655,6 +677,7 @@ export class InMemoryTenantStore implements TenantStore {
       organizationId: input.organizationId,
       dataResidencyRegion: input.dataResidencyRegion,
       retentionDays: input.retentionDays,
+      businessHours: input.businessHours ?? previous?.businessHours ?? null,
       version: (previous?.version ?? -1) + 1,
       updatedByActorId: input.actorId,
       updatedAt: input.occurredAt,
@@ -673,6 +696,7 @@ export class InMemoryTenantStore implements TenantStore {
       payload: {
         dataResidencyRegion: input.dataResidencyRegion,
         retentionDays: input.retentionDays,
+        ...(input.businessHours ? { businessHours: input.businessHours } : {}),
       },
     });
     return policy;
@@ -684,6 +708,7 @@ export class InMemoryTenantStore implements TenantStore {
     actorId: string;
     dataResidencyRegion: string | null;
     retentionDays: number | null;
+    businessHours?: BusinessHoursPolicy | undefined;
     auditEventId: string;
     correlationId: string;
     occurredAt: Date;
@@ -697,6 +722,7 @@ export class InMemoryTenantStore implements TenantStore {
       workspaceId: input.workspaceId,
       dataResidencyRegion: input.dataResidencyRegion,
       retentionDays: input.retentionDays,
+      businessHours: input.businessHours ?? previous?.businessHours ?? null,
       version: (previous?.version ?? -1) + 1,
       updatedByActorId: input.actorId,
       updatedAt: input.occurredAt,
@@ -713,6 +739,7 @@ export class InMemoryTenantStore implements TenantStore {
       payload: {
         dataResidencyRegion: input.dataResidencyRegion,
         retentionDays: input.retentionDays,
+        ...(input.businessHours ? { businessHours: input.businessHours } : {}),
       },
     });
     return override;
@@ -745,6 +772,28 @@ export class InMemoryTenantStore implements TenantStore {
       payload: {},
     });
     return "cleared";
+  }
+
+  async recordBusinessHoursEvaluation(input: {
+    auditEventId: string;
+    organizationId: string;
+    workspaceId: string | null;
+    actorId: string;
+    action: TenantBusinessMutation;
+    mode: "audit" | "enforce";
+    correlationId: string;
+    occurredAt: Date;
+  }): Promise<void> {
+    this.policyAuditEvents.push({
+      id: input.auditEventId,
+      organizationId: input.organizationId,
+      workspaceId: input.workspaceId,
+      actorId: input.actorId,
+      eventType: "organization.business_hours_outside_window.v1",
+      correlationId: input.correlationId,
+      occurredAt: input.occurredAt,
+      payload: { action: input.action, mode: input.mode },
+    });
   }
 
   private organizationKey(actorId: string, organizationId: string): string {
