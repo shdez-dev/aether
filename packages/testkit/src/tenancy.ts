@@ -1,5 +1,6 @@
 import type {
   Invitation,
+  LifecycleAudit,
   Organization,
   OrganizationPolicy,
   EffectiveTenancyPolicy,
@@ -31,6 +32,26 @@ export class InMemoryTenantStore implements TenantStore {
     occurredAt: Date;
     payload: Readonly<Record<string, unknown>>;
   }> = [];
+  readonly organizationMembershipAuditEvents: Array<{
+    id: string;
+    organizationId: string;
+    actorId: string;
+    targetActorId: string;
+    eventType: string;
+    correlationId: string;
+    occurredAt: Date;
+    payload: Readonly<Record<string, unknown>>;
+  }> = [];
+  readonly workspaceAuditEvents: Array<{
+    id: string;
+    workspaceId: string;
+    organizationId: string;
+    actorId: string;
+    eventType: string;
+    correlationId: string;
+    occurredAt: Date;
+    payload: Readonly<Record<string, unknown>>;
+  }> = [];
   readonly ownershipTransfers: Array<{
     organizationId: string;
     actorId: string;
@@ -48,6 +69,7 @@ export class InMemoryTenantStore implements TenantStore {
     organization: Organization;
     ownerActorId: string;
     ownerEmail: string;
+    audit?: LifecycleAudit;
     policy?: Pick<
       OrganizationPolicy,
       "dataResidencyRegion" | "retentionDays"
@@ -66,6 +88,21 @@ export class InMemoryTenantStore implements TenantStore {
       this.organizationKey(input.ownerActorId, input.organization.id),
       "active",
     );
+    const audit = input.audit ?? {
+      auditEventId: `organization:${input.organization.id}:created`,
+      correlationId: `organization:${input.organization.id}`,
+      occurredAt: new Date(),
+    };
+    this.organizationMembershipAuditEvents.push({
+      id: audit.auditEventId,
+      organizationId: input.organization.id,
+      actorId: input.ownerActorId,
+      targetActorId: input.ownerActorId,
+      eventType: "organization.created.v1",
+      correlationId: audit.correlationId,
+      occurredAt: audit.occurredAt,
+      payload: { ownerRole: "owner" },
+    });
     if (input.policy) {
       const occurredAt = input.policy.occurredAt ?? new Date();
       this.organizationPolicies.set(input.organization.id, {
@@ -92,8 +129,25 @@ export class InMemoryTenantStore implements TenantStore {
       });
     }
   }
-  async createWorkspace(workspace: Workspace): Promise<void> {
-    this.workspaces.set(workspace.id, workspace);
+  async createWorkspace(
+    input: Workspace & { actorId?: string; audit?: LifecycleAudit },
+  ): Promise<void> {
+    const audit = input.audit ?? {
+      auditEventId: `workspace:${input.id}:created`,
+      correlationId: `workspace:${input.id}`,
+      occurredAt: new Date(),
+    };
+    this.workspaces.set(input.id, input);
+    this.workspaceAuditEvents.push({
+      id: audit.auditEventId,
+      workspaceId: input.id,
+      organizationId: input.organizationId,
+      actorId: input.actorId ?? "system",
+      eventType: "workspace.created.v1",
+      correlationId: audit.correlationId,
+      occurredAt: audit.occurredAt,
+      payload: { mode: input.mode },
+    });
   }
   async findWorkspace(workspaceId: string): Promise<Workspace | null> {
     return this.workspaces.get(workspaceId) ?? null;
@@ -152,9 +206,32 @@ export class InMemoryTenantStore implements TenantStore {
       : null;
   }
   async createInvitation(
-    input: Invitation & { tokenHash: string },
+    input: Invitation & {
+      tokenHash: string;
+      actorId?: string;
+      audit?: LifecycleAudit;
+    },
   ): Promise<void> {
+    const audit = input.audit ?? {
+      auditEventId: `invitation:${input.id}:issued`,
+      correlationId: `invitation:${input.id}`,
+      occurredAt: new Date(),
+    };
     this.invitations.set(input.tokenHash, input);
+    this.organizationMembershipAuditEvents.push({
+      id: audit.auditEventId,
+      organizationId: input.organizationId,
+      actorId: input.actorId ?? "system",
+      targetActorId: input.actorId ?? "system",
+      eventType: "organization.invitation_issued.v1",
+      correlationId: audit.correlationId,
+      occurredAt: audit.occurredAt,
+      payload: {
+        invitationId: input.id,
+        organizationRole: input.organizationRole,
+        workspaceCount: input.workspaceIds.length,
+      },
+    });
   }
   async acceptInvitation(input: {
     tokenHash: string;
@@ -185,6 +262,16 @@ export class InMemoryTenantStore implements TenantStore {
         this.workspaceKey(input.actorId, workspaceId),
         invitation.workspaceRole,
       );
+    this.organizationMembershipAuditEvents.push({
+      id: input.auditEventId,
+      organizationId: invitation.organizationId,
+      actorId: input.actorId,
+      targetActorId: input.actorId,
+      eventType: "organization.membership_activated.v1",
+      correlationId: input.correlationId,
+      occurredAt: input.now,
+      payload: { invitationId: invitation.id },
+    });
     return invitation;
   }
   async transferOwnership(input: {

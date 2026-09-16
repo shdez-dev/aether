@@ -29,6 +29,71 @@ function createTenantService(now = new Date("2026-09-08T12:00:00.000Z")) {
 }
 
 describe("TenantService", () => {
+  it("audita el inicio del ciclo de vida sin exponer correo ni token de invitación", async () => {
+    const { service, store } = createTenantService();
+    const organization = await service.createOrganization({
+      actorId: "owner",
+      actorEmail: "owner@example.test",
+      name: "Auditoría",
+      timezone: "UTC",
+      locale: "es-CL",
+      correlationId: "00000000-0000-4000-8000-000000000110",
+    });
+    const workspace = await service.createWorkspace({
+      actorId: "owner",
+      organizationId: organization.id,
+      name: "Equipo",
+      mode: "institutional",
+      correlationId: "00000000-0000-4000-8000-000000000111",
+    });
+    const invitation = await service.invite({
+      actorId: "owner",
+      organizationId: organization.id,
+      email: "member@example.test",
+      organizationRole: "member",
+      workspaceIds: [workspace.id],
+      workspaceRole: "viewer",
+      expiresInDays: 7,
+      correlationId: "00000000-0000-4000-8000-000000000112",
+    });
+    await service.acceptInvitation({
+      token: invitation.deliveryToken,
+      actorId: "member",
+      actorEmail: "member@example.test",
+      correlationId: "00000000-0000-4000-8000-000000000113",
+    });
+
+    expect(store.organizationMembershipAuditEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ eventType: "organization.created.v1" }),
+        expect.objectContaining({
+          eventType: "organization.invitation_issued.v1",
+          payload: {
+            invitationId: invitation.invitation.id,
+            organizationRole: "member",
+            workspaceCount: 1,
+          },
+        }),
+        expect.objectContaining({
+          eventType: "organization.membership_activated.v1",
+        }),
+      ]),
+    );
+    expect(store.workspaceAuditEvents).toEqual([
+      expect.objectContaining({
+        workspaceId: workspace.id,
+        eventType: "workspace.created.v1",
+        payload: { mode: "institutional" },
+      }),
+    ]);
+    expect(JSON.stringify(store.organizationMembershipAuditEvents)).not.toContain(
+      "member@example.test",
+    );
+    expect(JSON.stringify(store.organizationMembershipAuditEvents)).not.toContain(
+      invitation.deliveryToken,
+    );
+  });
+
   it("gestiona equipos dentro de un workspace sin convertirlos en permisos implícitos", async () => {
     const { service } = createTenantService();
     const organization = await service.createOrganization({

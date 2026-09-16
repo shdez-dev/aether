@@ -46,6 +46,7 @@ import type {
   EvidenceSubjectLookup,
   ProjectClosureStore,
   Invitation,
+  LifecycleAudit,
   Organization,
   OrganizationPolicy,
   EffectiveTenancyPolicy,
@@ -410,6 +411,7 @@ export class PostgresTenantStore implements TenantStore {
     organization: Organization;
     ownerActorId: string;
     ownerEmail: string;
+    audit: LifecycleAudit;
     policy?: Pick<
       OrganizationPolicy,
       "dataResidencyRegion" | "retentionDays"
@@ -438,6 +440,19 @@ export class PostgresTenantStore implements TenantStore {
           input.organization.id,
           input.ownerActorId,
           input.ownerEmail.toLowerCase(),
+        ],
+      );
+      await client.query(
+        `INSERT INTO organization_membership_audit_events
+         (id, organization_id, actor_id, target_actor_id, event_type, correlation_id, occurred_at, payload)
+         VALUES ($1, $2, $3, $3, 'organization.created.v1', $4, $5, $6)`,
+        [
+          input.audit.auditEventId,
+          input.organization.id,
+          input.ownerActorId,
+          input.audit.correlationId,
+          input.audit.occurredAt,
+          asJson({ ownerRole: "owner" }),
         ],
       );
       if (input.policy) {
@@ -480,17 +495,43 @@ export class PostgresTenantStore implements TenantStore {
     }
   }
 
-  async createWorkspace(workspace: Workspace): Promise<void> {
-    await this.pool.query(
-      "INSERT INTO workspaces (id, organization_id, name, mode, version) VALUES ($1, $2, $3, $4, $5)",
-      [
-        workspace.id,
-        workspace.organizationId,
-        workspace.name,
-        workspace.mode,
-        workspace.version,
-      ],
-    );
+  async createWorkspace(
+    input: Workspace & { actorId: string; audit: LifecycleAudit },
+  ): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        "INSERT INTO workspaces (id, organization_id, name, mode, version) VALUES ($1, $2, $3, $4, $5)",
+        [
+          input.id,
+          input.organizationId,
+          input.name,
+          input.mode,
+          input.version,
+        ],
+      );
+      await client.query(
+        `INSERT INTO workspace_audit_events
+         (id, workspace_id, organization_id, actor_id, event_type, correlation_id, occurred_at, payload)
+         VALUES ($1, $2, $3, $4, 'workspace.created.v1', $5, $6, $7)`,
+        [
+          input.audit.auditEventId,
+          input.id,
+          input.organizationId,
+          input.actorId,
+          input.audit.correlationId,
+          input.audit.occurredAt,
+          asJson({ mode: input.mode }),
+        ],
+      );
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async findWorkspace(workspaceId: string): Promise<Workspace | null> {
@@ -544,22 +585,49 @@ export class PostgresTenantStore implements TenantStore {
   }
 
   async createInvitation(
-    input: Invitation & { tokenHash: string },
+    input: Invitation & { tokenHash: string; actorId: string; audit: LifecycleAudit },
   ): Promise<void> {
-    await this.pool.query(
-      `INSERT INTO invitations (id, organization_id, email, organization_role, workspace_ids, workspace_role, token_hash, expires_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [
-        input.id,
-        input.organizationId,
-        input.email,
-        input.organizationRole,
-        input.workspaceIds,
-        input.workspaceRole,
-        input.tokenHash,
-        input.expiresAt,
-      ],
-    );
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        `INSERT INTO invitations (id, organization_id, email, organization_role, workspace_ids, workspace_role, token_hash, expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [
+          input.id,
+          input.organizationId,
+          input.email,
+          input.organizationRole,
+          input.workspaceIds,
+          input.workspaceRole,
+          input.tokenHash,
+          input.expiresAt,
+        ],
+      );
+      await client.query(
+        `INSERT INTO organization_membership_audit_events
+         (id, organization_id, actor_id, target_actor_id, event_type, correlation_id, occurred_at, payload)
+         VALUES ($1, $2, $3, $3, 'organization.invitation_issued.v1', $4, $5, $6)`,
+        [
+          input.audit.auditEventId,
+          input.organizationId,
+          input.actorId,
+          input.audit.correlationId,
+          input.audit.occurredAt,
+          asJson({
+            invitationId: input.id,
+            organizationRole: input.organizationRole,
+            workspaceCount: input.workspaceIds.length,
+          }),
+        ],
+      );
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async acceptInvitation(input: {
@@ -605,7 +673,7 @@ export class PostgresTenantStore implements TenantStore {
           input.actorId,
           input.correlationId,
           input.now,
-          { invitationId: invitation.id },
+          asJson({ invitationId: invitation.id }),
         ],
       );
       for (const workspaceId of invitation.workspaceIds) {

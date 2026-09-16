@@ -948,6 +948,7 @@ export async function buildServer(input: {
     const body = CreateWorkspaceRequestSchema.parse(request.body);
     const workspace = await input.tenants.createWorkspace({
       actorId: session.actorId,
+      correlationId: correlationId(reply),
       ...body,
     });
     return reply.code(201).send(workspace);
@@ -1153,6 +1154,7 @@ export async function buildServer(input: {
       const body = CreateInvitationRequestSchema.parse(request.body);
       const result = await input.tenants.invite({
         actorId: session.actorId,
+        correlationId: correlationId(reply),
         ...params,
         ...body,
       });

@@ -73,12 +73,18 @@ export type Invitation = Readonly<{
   workspaceRole: WorkspaceRole;
   expiresAt: Date;
 }>;
+export type LifecycleAudit = Readonly<{
+  auditEventId: string;
+  correlationId: string;
+  occurredAt: Date;
+}>;
 
 export interface TenantStore {
   bootstrapOrganization(input: {
     organization: Organization;
     ownerActorId: string;
     ownerEmail: string;
+    audit: LifecycleAudit;
     policy?: Pick<
       OrganizationPolicy,
       "dataResidencyRegion" | "retentionDays"
@@ -88,7 +94,7 @@ export interface TenantStore {
       occurredAt?: Date;
     };
   }): Promise<void>;
-  createWorkspace(workspace: Workspace): Promise<void>;
+  createWorkspace(input: Workspace & { actorId: string; audit: LifecycleAudit }): Promise<void>;
   findWorkspace(workspaceId: string): Promise<Workspace | null>;
   listOrganizations(actorId: string): Promise<readonly Organization[]>;
   listWorkspaces(input: {
@@ -103,7 +109,9 @@ export interface TenantStore {
     actorId: string;
     workspaceId: string;
   }): Promise<WorkspaceRole | null>;
-  createInvitation(input: Invitation & { tokenHash: string }): Promise<void>;
+  createInvitation(
+    input: Invitation & { tokenHash: string; actorId: string; audit: LifecycleAudit },
+  ): Promise<void>;
   acceptInvitation(input: {
     tokenHash: string;
     actorId: string;
@@ -250,6 +258,8 @@ export class TenantService {
     policy?: Pick<OrganizationPolicy, "dataResidencyRegion" | "retentionDays">;
     correlationId?: string;
   }): Promise<Organization> {
+    const occurredAt = this.dependencies.clock.now();
+    const correlationId = input.correlationId ?? this.dependencies.ids.next();
     const organization: Organization = {
       id: this.dependencies.ids.next(),
       name: input.name,
@@ -261,14 +271,18 @@ export class TenantService {
       organization,
       ownerActorId: input.actorId,
       ownerEmail: input.actorEmail,
+      audit: {
+        auditEventId: this.dependencies.ids.next(),
+        correlationId,
+        occurredAt,
+      },
       ...(input.policy
         ? {
             policy: {
               ...input.policy,
               auditEventId: this.dependencies.ids.next(),
-              correlationId:
-                input.correlationId ?? this.dependencies.ids.next(),
-              occurredAt: this.dependencies.clock.now(),
+              correlationId,
+              occurredAt,
             },
           }
         : {}),
@@ -281,6 +295,7 @@ export class TenantService {
     organizationId: string;
     name: string;
     mode: Workspace["mode"];
+    correlationId?: string;
   }): Promise<Workspace> {
     await this.assertAllowed(
       input.actorId,
@@ -298,7 +313,15 @@ export class TenantService {
       archivedAt: null,
       archivedByActorId: null,
     };
-    await this.dependencies.store.createWorkspace(workspace);
+    await this.dependencies.store.createWorkspace({
+      ...workspace,
+      actorId: input.actorId,
+      audit: {
+        auditEventId: this.dependencies.ids.next(),
+        correlationId: input.correlationId ?? this.dependencies.ids.next(),
+        occurredAt: this.dependencies.clock.now(),
+      },
+    });
     return workspace;
   }
 
@@ -450,6 +473,7 @@ export class TenantService {
     workspaceIds: readonly string[];
     workspaceRole: WorkspaceRole;
     expiresInDays: number;
+    correlationId?: string;
   }): Promise<{ invitation: Invitation; deliveryToken: string }> {
     await this.assertAllowed(
       input.actorId,
@@ -479,6 +503,12 @@ export class TenantService {
     await this.dependencies.store.createInvitation({
       ...invitation,
       tokenHash: this.dependencies.tokens.hash(token),
+      actorId: input.actorId,
+      audit: {
+        auditEventId: this.dependencies.ids.next(),
+        correlationId: input.correlationId ?? this.dependencies.ids.next(),
+        occurredAt: now,
+      },
     });
     return { invitation, deliveryToken: token };
   }

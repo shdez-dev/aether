@@ -37,6 +37,15 @@ La invitación almacena sólo el hash de su token, el correo normalizado, roles 
 
 El token de aceptación se reserva para el adaptador de correo/outbox; la API no lo devuelve. El envío de correo será una integración posterior, sin cambiar este modelo ni exponer el token en logs o URL.
 
+## Auditoría de ciclo de vida
+
+La creación de organización, workspace, emisión de invitación y activación de
+membresía escriben eventos append-only en la misma transacción que su cambio de
+estado. Los eventos conservan actor, fecha y `correlationId`; la invitación
+auditada sólo incluye su identificador, el rol y el número de workspaces, nunca
+el correo destinatario, el token ni su hash. Los eventos de workspace también
+son append-only e incluyen `workspace.created.v1` y `workspace.archived.v1`.
+
 ## Transferencia de propiedad
 
 Sólo la persona propietaria vigente puede transferir la propiedad a una

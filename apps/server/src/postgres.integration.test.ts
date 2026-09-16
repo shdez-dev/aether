@@ -94,6 +94,102 @@ describe.sequential("PostgreSQL integration", () => {
   );
 
   runPostgresIntegration(
+    "audits the tenancy lifecycle atomically without invitation secrets",
+    async () => {
+      const tenants = new TenantService({
+        store: new PostgresTenantStore(pool),
+        ids: { next: randomUUID },
+        tokens: {
+          generate: () => "lifecycle-token",
+          hash: (value) => `lifecycle:${value}`,
+        },
+        clock: { now: () => new Date("2026-09-16T02:00:00.000Z") },
+      });
+      const organization = await tenants.createOrganization({
+        actorId: "lifecycle-owner",
+        actorEmail: "lifecycle-owner@example.test",
+        name: "Lifecycle audit",
+        timezone: "UTC",
+        locale: "es-CL",
+        correlationId: randomUUID(),
+      });
+      const workspace = await tenants.createWorkspace({
+        actorId: "lifecycle-owner",
+        organizationId: organization.id,
+        name: "Lifecycle workspace",
+        mode: "institutional",
+        correlationId: randomUUID(),
+      });
+      const invitation = await tenants.invite({
+        actorId: "lifecycle-owner",
+        organizationId: organization.id,
+        email: "lifecycle-member@example.test",
+        organizationRole: "member",
+        workspaceIds: [workspace.id],
+        workspaceRole: "viewer",
+        expiresInDays: 7,
+        correlationId: randomUUID(),
+      });
+      await tenants.acceptInvitation({
+        token: invitation.deliveryToken,
+        actorId: "lifecycle-member",
+        actorEmail: "lifecycle-member@example.test",
+        correlationId: randomUUID(),
+      });
+
+      const organizationAudit = await pool.query<{
+        event_type: string;
+        payload: Record<string, unknown>;
+      }>(
+        `SELECT event_type, payload
+         FROM organization_membership_audit_events
+         WHERE organization_id = $1
+           AND event_type IN (
+             'organization.created.v1',
+             'organization.invitation_issued.v1',
+             'organization.membership_activated.v1'
+           )
+         ORDER BY event_type`,
+        [organization.id],
+      );
+      expect(organizationAudit.rows.map((row) => row.event_type)).toEqual([
+        "organization.created.v1",
+        "organization.invitation_issued.v1",
+        "organization.membership_activated.v1",
+      ]);
+      const issued = organizationAudit.rows.find(
+        (row) => row.event_type === "organization.invitation_issued.v1",
+      );
+      expect(issued?.payload).toEqual({
+        invitationId: invitation.invitation.id,
+        organizationRole: "member",
+        workspaceCount: 1,
+      });
+      expect(JSON.stringify(organizationAudit.rows)).not.toContain(
+        "lifecycle-member@example.test",
+      );
+      expect(JSON.stringify(organizationAudit.rows)).not.toContain(
+        invitation.deliveryToken,
+      );
+      const workspaceAudit = await pool.query<{ event_type: string }>(
+        `SELECT event_type FROM workspace_audit_events
+         WHERE workspace_id = $1`,
+        [workspace.id],
+      );
+      expect(workspaceAudit.rows).toEqual([
+        { event_type: "workspace.created.v1" },
+      ]);
+      await expect(
+        pool.query(
+          "DELETE FROM workspace_audit_events WHERE workspace_id = $1",
+          [workspace.id],
+        ),
+      ).rejects.toThrow("Audit events are append-only");
+    },
+    120_000,
+  );
+
+  runPostgresIntegration(
     "makes organization and workspace scope immutable in PostgreSQL",
     async () => {
       const ids = { next: randomUUID };
