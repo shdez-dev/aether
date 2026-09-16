@@ -247,6 +247,67 @@ describe("HTTP authentication boundary", () => {
     await app.close();
   });
 
+  it("publica la capacidad y redirige sólo al portal de cuenta OIDC configurado", async () => {
+    const auth = new AuthService({
+      store: new InMemoryAuthStore(),
+      cipher: createAesGcmCipher(config.sessionEncryptionKey),
+      oidc,
+      issuer: config.oidcIssuerUrl,
+      sessionTtlSeconds: config.sessionTtlSeconds,
+      sessionRenewalWindowSeconds: config.sessionRenewalWindowSeconds,
+    });
+    const dependencies = {
+      auth,
+      tenants: {} as TenantService,
+      initiatives: {} as InitiativeService,
+      evaluations: {} as EvaluationService,
+      projects: {} as ProjectService,
+      idempotency: new InMemoryIdempotencyStore(),
+    };
+    const unavailableApp = await buildServer({ config, ...dependencies });
+
+    const unavailableStatus = await unavailableApp.inject({
+      method: "GET",
+      url: "/auth/account-management/status",
+    });
+    expect(unavailableStatus.statusCode).toBe(200);
+    expect(unavailableStatus.json()).toEqual({
+      available: false,
+      authority: "oidc-provider",
+    });
+    const unavailableRedirect = await unavailableApp.inject({
+      method: "GET",
+      url: "/auth/account-management",
+    });
+    expect(unavailableRedirect.statusCode).toBe(404);
+    expect(unavailableRedirect.json()).toMatchObject({
+      code: "ACCOUNT_MANAGEMENT_UNAVAILABLE",
+    });
+    await unavailableApp.close();
+
+    const accountManagementUrl = "https://identity.example/realms/test/account";
+    const availableApp = await buildServer({
+      config: { ...config, oidcAccountManagementUrl: accountManagementUrl },
+      ...dependencies,
+    });
+    const availableStatus = await availableApp.inject({
+      method: "GET",
+      url: "/auth/account-management/status",
+    });
+    expect(availableStatus.statusCode).toBe(200);
+    expect(availableStatus.json()).toEqual({
+      available: true,
+      authority: "oidc-provider",
+    });
+    const redirect = await availableApp.inject({
+      method: "GET",
+      url: "/auth/account-management",
+    });
+    expect(redirect.statusCode).toBe(302);
+    expect(redirect.headers.location).toBe(accountManagementUrl);
+    await availableApp.close();
+  });
+
   it("aplica autorización contextual y aislamiento de organizaciones en los endpoints de tenencia", async () => {
     const authStore = new InMemoryAuthStore();
     const securityAuditEvents: Array<

@@ -12,4 +12,5 @@ export * from "./comments.js";
 export * from "./metrics.js";
 export * from "./access-grants.js";
 export * from "./support-access.js";
+export * from "./account-management.js";
 export * from "./outbox.js";

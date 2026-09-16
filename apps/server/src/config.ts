@@ -12,6 +12,12 @@ const configSchema = z.object({
   OIDC_CLIENT_ID: z.string().min(1),
   OIDC_CLIENT_SECRET: z.string().min(1),
   OIDC_REDIRECT_URI: z.string().url(),
+  OIDC_ACCOUNT_MANAGEMENT_URL: z
+    .string()
+    .url()
+    .or(z.literal(""))
+    .optional()
+    .transform((value) => value || undefined),
   SESSION_ENCRYPTION_KEY: z.string().min(1),
   SESSION_TTL_SECONDS: z.coerce
     .number()
@@ -88,6 +94,7 @@ export type ServerConfig = Readonly<{
   oidcClientId: string;
   oidcClientSecret: string;
   oidcRedirectUri: string;
+  oidcAccountManagementUrl?: string;
   sessionEncryptionKey: string;
   sessionTtlSeconds: number;
   sessionRenewalWindowSeconds: number;
@@ -118,6 +125,26 @@ export function readServerConfig(
   ) {
     throw new Error("OIDC_REDIRECT_URI must use SERVER_PUBLIC_URL origin");
   }
+  if (value.OIDC_ACCOUNT_MANAGEMENT_URL) {
+    const accountUrl = new URL(value.OIDC_ACCOUNT_MANAGEMENT_URL);
+    if (accountUrl.origin !== new URL(value.OIDC_ISSUER_URL).origin)
+      throw new Error(
+        "OIDC_ACCOUNT_MANAGEMENT_URL must use OIDC_ISSUER_URL origin",
+      );
+    if (
+      accountUrl.username ||
+      accountUrl.password ||
+      accountUrl.search ||
+      accountUrl.hash
+    )
+      throw new Error(
+        "OIDC_ACCOUNT_MANAGEMENT_URL must not contain credentials, query, or fragment",
+      );
+    if (value.NODE_ENV === "production" && accountUrl.protocol !== "https:")
+      throw new Error(
+        "OIDC_ACCOUNT_MANAGEMENT_URL must use HTTPS in production",
+      );
+  }
   if (value.NODE_ENV === "production" && !value.METRICS_TOKEN)
     throw new Error("METRICS_TOKEN is required in production");
   return {
@@ -130,6 +157,9 @@ export function readServerConfig(
     oidcClientId: value.OIDC_CLIENT_ID,
     oidcClientSecret: value.OIDC_CLIENT_SECRET,
     oidcRedirectUri: value.OIDC_REDIRECT_URI,
+    ...(value.OIDC_ACCOUNT_MANAGEMENT_URL
+      ? { oidcAccountManagementUrl: value.OIDC_ACCOUNT_MANAGEMENT_URL }
+      : {}),
     sessionEncryptionKey: value.SESSION_ENCRYPTION_KEY,
     sessionTtlSeconds: value.SESSION_TTL_SECONDS,
     sessionRenewalWindowSeconds: value.SESSION_RENEWAL_WINDOW_SECONDS,

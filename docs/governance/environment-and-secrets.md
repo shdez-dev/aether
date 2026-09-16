@@ -36,6 +36,7 @@ ficticio y sirve únicamente para desarrollo local.
 | `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`               | URL y ID registrados por entorno                                   | No      | Seguridad      |
 | `OIDC_CLIENT_SECRET`                              | credencial del cliente OIDC                                        | Sí      | Seguridad      |
 | `OIDC_REDIRECT_URI`                               | URL bajo `SERVER_PUBLIC_URL`                                       | No      | Seguridad      |
+| `OIDC_ACCOUNT_MANAGEMENT_URL`                     | URL opcional del portal de cuenta bajo el origen del emisor OIDC   | No      | Seguridad      |
 | `SESSION_ENCRYPTION_KEY`                          | clave aleatoria base64 de 32 bytes                                 | Sí      | Seguridad      |
 | `SESSION_TTL_SECONDS`                             | entero 300–86400; `28800`                                          | No      | Seguridad      |
 | `SESSION_RENEWAL_WINDOW_SECONDS`                  | entero 60–43200; `1800`                                            | No      | Seguridad      |

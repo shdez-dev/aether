@@ -13,6 +13,21 @@ El proveedor OIDC es **Keycloak**. Se despliega bajo administración institucion
 
 Un callback duplicado, un `state` incorrecto o una transacción vencida no puede volver a canjear un código. Los verificadores PKCE y nonces se cifran con AES-256-GCM antes de persistirse.
 
+## Administración de cuenta delegada
+
+Keycloak es la autoridad para recuperación de cuenta, cambio de correo y
+vinculación segura de identidades. `GET /auth/account-management/status`
+permite al cliente saber si el portal está configurado y `GET
+/auth/account-management` redirige a la URL fija declarada en
+`OIDC_ACCOUNT_MANAGEMENT_URL`. Ambas rutas son públicas para que la recuperación
+sea accesible antes de iniciar sesión.
+
+El servidor acepta esa URL sólo si comparte origen con `OIDC_ISSUER_URL`, no
+incluye credenciales, query ni fragmento y usa HTTPS en producción. No se
+aceptan destinos proporcionados por el usuario. La autenticación y
+reautenticación de operaciones sensibles ocurren en el proveedor; Aether no
+almacena contraseñas, códigos de recuperación ni tokens de esos flujos.
+
 ## Sesión y cookies
 
 `auth_sessions` conserva solamente el hash SHA-256 del identificador aleatorio de sesión, sujeto, emisor, caducidad, revocación y última actividad. La cookie nunca contiene JWT, access token ni refresh token.
@@ -55,6 +70,6 @@ No se utiliza `localStorage`, `sessionStorage` ni cookies legibles para tokens O
 
 ## Entornos
 
-`apps/server/.env.example` enumera las variables obligatorias. `OIDC_ISSUER_URL`, client ID, secreto, redirect URI y clave de cifrado cambian por entorno. La clave `SESSION_ENCRYPTION_KEY` debe ser única por entorno, codificar exactamente 32 bytes y rotarse con un plan que invalide de manera controlada las transacciones activas.
+`apps/server/.env.example` enumera las variables obligatorias y opcionales. `OIDC_ISSUER_URL`, client ID, secreto, redirect URI, portal de administración de cuenta y clave de cifrado cambian por entorno. La clave `SESSION_ENCRYPTION_KEY` debe ser única por entorno, codificar exactamente 32 bytes y rotarse con un plan que invalide de manera controlada las transacciones activas.
 
 El perfil local se inicia con `docker compose up -d`, seguido de `pnpm db:migrate`, e importa el realm de `infra/keycloak/aether-local-realm.json`. Sus credenciales son de desarrollo y no pueden desplegarse fuera de local.

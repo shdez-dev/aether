@@ -328,6 +328,7 @@ export async function buildServer(input: {
                       error instanceof DocumentNotFoundError ||
                       error instanceof OutboxDeadLetterNotFoundError ||
                       error instanceof PolicyNotConfiguredError ||
+                      error instanceof AccountManagementUnavailableError ||
                       (error instanceof TemporaryAccessGrantError &&
                         error.code === "GRANT_RESOURCE_NOT_FOUND")
                     ? 404
@@ -402,54 +403,58 @@ export async function buildServer(input: {
                         ? "WORKSPACE_ARCHIVED"
                         : error instanceof RecentAuthenticationRequiredError
                           ? "RECENT_AUTH_REQUIRED"
-                          : error instanceof CsrfError ||
-                              error instanceof AccessDeniedError ||
-                              error instanceof DocumentAccessDeniedError ||
-                              error instanceof IdentityEmailRequiredError ||
-                              (error instanceof OwnershipTransferError &&
-                                error.code === "ACTOR_MUST_BE_OWNER") ||
-                              (error instanceof MembershipStatusError &&
-                                error.code === "actor_not_manager") ||
-                              (error instanceof TemporaryAccessGrantError &&
-                                error.code === "GRANT_SEPARATION_OF_DUTIES") ||
-                              (error instanceof SupportAccessGrantError &&
-                                [
-                                  "SUPPORT_OPERATOR_NOT_ELIGIBLE",
-                                  "SUPPORT_ACCESS_SEPARATION_OF_DUTIES",
-                                  "SUPPORT_ACCESS_DENIED",
-                                ].includes(error.code))
-                            ? "FORBIDDEN"
-                            : error instanceof ResourceNotFoundError ||
-                                error instanceof DocumentNotFoundError ||
-                                error instanceof
-                                  OutboxDeadLetterNotFoundError ||
-                                error instanceof PolicyNotConfiguredError ||
+                          : error instanceof AccountManagementUnavailableError
+                            ? "ACCOUNT_MANAGEMENT_UNAVAILABLE"
+                            : error instanceof CsrfError ||
+                                error instanceof AccessDeniedError ||
+                                error instanceof DocumentAccessDeniedError ||
+                                error instanceof IdentityEmailRequiredError ||
+                                (error instanceof OwnershipTransferError &&
+                                  error.code === "ACTOR_MUST_BE_OWNER") ||
+                                (error instanceof MembershipStatusError &&
+                                  error.code === "actor_not_manager") ||
                                 (error instanceof TemporaryAccessGrantError &&
-                                  error.code === "GRANT_RESOURCE_NOT_FOUND")
-                              ? "NOT_FOUND"
-                              : error instanceof TemporaryAccessGrantError
-                                ? error.code
-                                : error instanceof SupportAccessGrantError
+                                  error.code ===
+                                    "GRANT_SEPARATION_OF_DUTIES") ||
+                                (error instanceof SupportAccessGrantError &&
+                                  [
+                                    "SUPPORT_OPERATOR_NOT_ELIGIBLE",
+                                    "SUPPORT_ACCESS_SEPARATION_OF_DUTIES",
+                                    "SUPPORT_ACCESS_DENIED",
+                                  ].includes(error.code))
+                              ? "FORBIDDEN"
+                              : error instanceof ResourceNotFoundError ||
+                                  error instanceof DocumentNotFoundError ||
+                                  error instanceof
+                                    OutboxDeadLetterNotFoundError ||
+                                  error instanceof PolicyNotConfiguredError ||
+                                  (error instanceof TemporaryAccessGrantError &&
+                                    error.code === "GRANT_RESOURCE_NOT_FOUND")
+                                ? "NOT_FOUND"
+                                : error instanceof TemporaryAccessGrantError
                                   ? error.code
-                                  : error instanceof
-                                        InitiativeVersionConflictError ||
-                                      error instanceof
-                                        ProjectVersionConflictError
-                                    ? "CONFLICT"
-                                    : error instanceof InitiativeDomainError ||
+                                  : error instanceof SupportAccessGrantError
+                                    ? error.code
+                                    : error instanceof
+                                          InitiativeVersionConflictError ||
                                         error instanceof
-                                          DocumentValidationError ||
-                                        error instanceof ProjectDomainError
-                                      ? "PRECONDITION_FAILED"
-                                      : error instanceof InvitationError
-                                        ? "INVITATION_INVALID_OR_EXPIRED"
-                                        : error instanceof
-                                            OwnershipTransferError
-                                          ? error.code
+                                          ProjectVersionConflictError
+                                      ? "CONFLICT"
+                                      : error instanceof
+                                            InitiativeDomainError ||
+                                          error instanceof
+                                            DocumentValidationError ||
+                                          error instanceof ProjectDomainError
+                                        ? "PRECONDITION_FAILED"
+                                        : error instanceof InvitationError
+                                          ? "INVITATION_INVALID_OR_EXPIRED"
                                           : error instanceof
-                                              MembershipStatusError
-                                            ? error.code.toUpperCase()
-                                            : "VALIDATION_ERROR",
+                                              OwnershipTransferError
+                                            ? error.code
+                                            : error instanceof
+                                                MembershipStatusError
+                                              ? error.code.toUpperCase()
+                                              : "VALIDATION_ERROR",
         correlationId: reply.getHeader("X-Correlation-ID"),
         instance: request.url,
       });
@@ -483,6 +488,15 @@ export async function buildServer(input: {
       transientCookieOptions(input.config),
     );
     return reply.redirect(login.authorizationUrl);
+  });
+  app.get("/auth/account-management/status", async () => ({
+    available: Boolean(input.config.oidcAccountManagementUrl),
+    authority: "oidc-provider" as const,
+  }));
+  app.get("/auth/account-management", async (_request, reply) => {
+    if (!input.config.oidcAccountManagementUrl)
+      throw new AccountManagementUnavailableError();
+    return reply.redirect(input.config.oidcAccountManagementUrl);
   });
   app.get("/auth/callback", async (request, reply) => {
     const query = callbackQuery.parse(request.query);
@@ -2599,6 +2613,7 @@ class CsrfError extends Error {}
 class UnauthenticatedError extends Error {}
 class RecentAuthenticationRequiredError extends Error {}
 class IdentityEmailRequiredError extends Error {}
+class AccountManagementUnavailableError extends Error {}
 class IdempotencyKeyRequiredError extends Error {}
 class IdempotencyKeyReusedError extends Error {}
 class IdempotencyRequestInProgressError extends Error {}

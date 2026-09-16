@@ -92,6 +92,40 @@ paths:
               schema: { type: string, format: uri }
         "429":
           $ref: "#/components/responses/Problem"
+  /auth/account-management/status:
+    get:
+      tags: [Authentication]
+      operationId: getAccountManagementStatus
+      summary: Consultar disponibilidad del portal de cuenta OIDC
+      description: Informa si el entorno delega recuperación, cambio de correo y vinculación de identidades al proveedor OIDC.
+      security: []
+      responses:
+        "200":
+          description: Estado de la integración de administración de cuenta.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountManagementStatus"
+        "429":
+          $ref: "#/components/responses/Problem"
+  /auth/account-management:
+    get:
+      tags: [Authentication]
+      operationId: openAccountManagement
+      summary: Abrir el portal de cuenta del proveedor OIDC
+      description: Redirige a una URL fija y validada del mismo origen que el emisor OIDC; Aether no procesa credenciales ni códigos de recuperación.
+      security: []
+      responses:
+        "302":
+          description: Redirección al portal de cuenta del proveedor OIDC.
+          headers:
+            Location:
+              required: true
+              schema: { type: string, format: uri }
+        "404":
+          $ref: "#/components/responses/Problem"
+        "429":
+          $ref: "#/components/responses/Problem"
   /auth/callback:
     get:
       tags: [Authentication]
@@ -1833,6 +1867,13 @@ components:
           schema:
             $ref: "#/components/schemas/ApiProblem"
   schemas:
+    AccountManagementStatus:
+      type: object
+      additionalProperties: false
+      required: [available, authority]
+      properties:
+        available: { type: boolean }
+        authority: { type: string, const: oidc-provider }
     CreateOrganizationRequest:
       type: object
       additionalProperties: false

@@ -28,6 +28,7 @@ docs/runbooks/        Procedimientos operativos
 ## Estado funcional actual
 
 La rebanada F1 implementada cubre OIDC con PKCE, sesiones opacas revocables,
+administración de cuenta delegada al portal de Keycloak/OIDC,
 organizaciones, workspaces, equipos, invitaciones, transferencia de propiedad,
 archivado y políticas explícitas de residencia/retención con herencia visible.
 También cubre concesiones temporales exactas por recurso y acción, con
