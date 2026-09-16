@@ -393,6 +393,111 @@ describe("TenantService", () => {
     ).resolves.toBeUndefined();
   });
 
+  it("aísla dos organizaciones con roles superpuestos después de revocar una membresía", async () => {
+    const { service } = createTenantService();
+    const organizationA = await service.createOrganization({
+      actorId: "owner-a",
+      actorEmail: "owner-a@example.test",
+      name: "A",
+      timezone: "UTC",
+      locale: "es-CL",
+    });
+    const organizationB = await service.createOrganization({
+      actorId: "owner-b",
+      actorEmail: "owner-b@example.test",
+      name: "B",
+      timezone: "UTC",
+      locale: "es-CL",
+    });
+    const workspaceA = await service.createWorkspace({
+      actorId: "owner-a",
+      organizationId: organizationA.id,
+      name: "A workspace",
+      mode: "team",
+    });
+    const invitationA = await service.invite({
+      actorId: "owner-a",
+      organizationId: organizationA.id,
+      email: "overlap@example.test",
+      organizationRole: "member",
+      workspaceIds: [workspaceA.id],
+      workspaceRole: "admin",
+      expiresInDays: 7,
+    });
+    await service.acceptInvitation({
+      token: invitationA.deliveryToken,
+      actorId: "overlap",
+      actorEmail: "overlap@example.test",
+    });
+    const invitationB = await service.invite({
+      actorId: "owner-b",
+      organizationId: organizationB.id,
+      email: "overlap@example.test",
+      organizationRole: "admin",
+      workspaceIds: [],
+      workspaceRole: "viewer",
+      expiresInDays: 7,
+    });
+    await service.acceptInvitation({
+      token: invitationB.deliveryToken,
+      actorId: "overlap",
+      actorEmail: "overlap@example.test",
+    });
+
+    await expect(
+      service.createTeam({
+        actorId: "overlap",
+        organizationId: organizationA.id,
+        workspaceId: workspaceA.id,
+        name: "Equipo A",
+        memberActorIds: ["overlap"],
+        correlationId: "00000000-0000-4000-8000-000000000115",
+      }),
+    ).resolves.toMatchObject({ workspaceId: workspaceA.id });
+    await expect(
+      service.createWorkspace({
+        actorId: "overlap",
+        organizationId: organizationA.id,
+        name: "No autorizado en A",
+        mode: "team",
+      }),
+    ).rejects.toBeInstanceOf(AccessDeniedError);
+    await expect(
+      service.createWorkspace({
+        actorId: "overlap",
+        organizationId: organizationB.id,
+        name: "Permitido en B",
+        mode: "team",
+      }),
+    ).resolves.toMatchObject({ organizationId: organizationB.id });
+
+    await service.changeMembershipStatus({
+      actorId: "owner-a",
+      organizationId: organizationA.id,
+      targetActorId: "overlap",
+      status: "revoked",
+      correlationId: "00000000-0000-4000-8000-000000000116",
+    });
+    await expect(
+      service.createTeam({
+        actorId: "overlap",
+        organizationId: organizationA.id,
+        workspaceId: workspaceA.id,
+        name: "Bloqueado tras revocación",
+        memberActorIds: ["overlap"],
+        correlationId: "00000000-0000-4000-8000-000000000117",
+      }),
+    ).rejects.toBeInstanceOf(AccessDeniedError);
+    await expect(
+      service.createWorkspace({
+        actorId: "overlap",
+        organizationId: organizationB.id,
+        name: "B conserva su permiso",
+        mode: "team",
+      }),
+    ).resolves.toMatchObject({ organizationId: organizationB.id });
+  });
+
   it("archiva un workspace con autorización, conserva lectura y bloquea nuevas escrituras", async () => {
     const { service, store } = createTenantService();
     const organization = await service.createOrganization({
