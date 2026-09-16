@@ -1,6 +1,7 @@
 import {
   calculateCapabilities,
   isActionAllowed,
+  isRoleAllowed,
   type AccessCapabilities,
   type AuthorizationAction,
   type OrganizationRole,
@@ -342,7 +343,7 @@ export class TenantService {
       input.actorId,
       input.organizationId,
       input.workspaceId,
-      "workspace:manage",
+      "workspace:archive",
     );
     const result = await this.dependencies.store.archiveWorkspace({
       ...input,
@@ -364,7 +365,7 @@ export class TenantService {
       input.actorId,
       input.organizationId,
       input.workspaceId,
-      "workspace:manage",
+      "team:create",
     );
     await assertWorkspaceWritable(this.dependencies.store, input.workspaceId);
     const memberActorIds = [...new Set(input.memberActorIds)];
@@ -397,7 +398,7 @@ export class TenantService {
       input.actorId,
       input.organizationId,
       input.workspaceId,
-      "workspace:read",
+      "team:read",
     );
     return this.dependencies.store.listTeams(input);
   }
@@ -413,7 +414,7 @@ export class TenantService {
       input.actorId,
       input.organizationId,
       input.workspaceId,
-      "workspace:manage",
+      "team:manage-members",
     );
     await assertWorkspaceWritable(this.dependencies.store, input.workspaceId);
     const result = await this.dependencies.store.replaceTeamMembers({
@@ -432,8 +433,12 @@ export class TenantService {
     actorId: string;
     organizationId: string;
   }): Promise<readonly Workspace[]> {
-    if (!(await this.dependencies.store.findOrganizationRole(input)))
-      throw new AccessDeniedError("organization:read");
+    await this.assertAllowed(
+      input.actorId,
+      input.organizationId,
+      null,
+      "organization:read",
+    );
     return this.dependencies.store.listWorkspaces(input);
   }
 
@@ -504,6 +509,15 @@ export class TenantService {
   }): Promise<void> {
     if (input.actorId === input.targetActorId)
       throw new OwnershipTransferError("TARGET_MUST_BE_DIFFERENT");
+    if (
+      !(await this.isAllowed(
+        input.actorId,
+        input.organizationId,
+        null,
+        "organization:ownership-transfer",
+      ))
+    )
+      throw new OwnershipTransferError("ACTOR_MUST_BE_OWNER");
     const result = await this.dependencies.store.transferOwnership({
       ...input,
       auditEventId: this.dependencies.ids.next(),
@@ -524,6 +538,15 @@ export class TenantService {
     status: "suspended" | "revoked";
     correlationId: string;
   }): Promise<void> {
+    if (
+      !(await this.isAllowed(
+        input.actorId,
+        input.organizationId,
+        null,
+        "membership:manage",
+      ))
+    )
+      throw new MembershipStatusError("actor_not_manager");
     const result = await this.dependencies.store.changeMembershipStatus({
       ...input,
       auditEventId: this.dependencies.ids.next(),
@@ -541,6 +564,15 @@ export class TenantService {
   }): Promise<void> {
     if (input.targetActorId === input.replacementActorId)
       throw new MembershipStatusError("replacement_not_active");
+    if (
+      !(await this.isAllowed(
+        input.actorId,
+        input.organizationId,
+        null,
+        "membership:manage",
+      ))
+    )
+      throw new MembershipStatusError("actor_not_manager");
     const result = await this.dependencies.store.reassignMemberResponsibilities(
       {
         ...input,
@@ -590,14 +622,14 @@ export class TenantService {
         input.actorId,
         input.organizationId,
         input.workspaceId,
-        "workspace:read",
+        "workspace-policy:read",
       );
     } else {
       await this.assertAllowed(
         input.actorId,
         input.organizationId,
         null,
-        "organization:read",
+        "organization-policy:read",
       );
     }
     const policy = await this.dependencies.store.findEffectivePolicy({
@@ -619,7 +651,7 @@ export class TenantService {
       input.actorId,
       input.organizationId,
       null,
-      "organization:manage",
+      "organization-policy:manage",
     );
     return this.dependencies.store.updateOrganizationPolicy({
       ...input,
@@ -640,7 +672,7 @@ export class TenantService {
       input.actorId,
       input.organizationId,
       input.workspaceId,
-      "workspace:manage",
+      "workspace-policy:manage",
     );
     const workspace = await this.dependencies.store.findWorkspace(
       input.workspaceId,
@@ -664,7 +696,7 @@ export class TenantService {
       input.actorId,
       input.organizationId,
       input.workspaceId,
-      "workspace:manage",
+      "workspace-policy:manage",
     );
     const result = await this.dependencies.store.clearWorkspacePolicyOverride({
       ...input,
@@ -681,13 +713,29 @@ export class TenantService {
     workspaceId: string | null,
     action: AuthorizationAction,
   ): Promise<void> {
-    const capabilities = await this.capabilities({
-      actorId,
-      organizationId,
-      ...(workspaceId ? { workspaceId } : {}),
-    });
-    if (!isActionAllowed(action, capabilities))
+    if (!(await this.isAllowed(actorId, organizationId, workspaceId, action)))
       throw new AccessDeniedError(action);
+  }
+
+  private async isAllowed(
+    actorId: string,
+    organizationId: string,
+    workspaceId: string | null,
+    action: AuthorizationAction,
+  ): Promise<boolean> {
+    if (workspaceId) {
+      const workspace =
+        await this.dependencies.store.findWorkspace(workspaceId);
+      if (!workspace || workspace.organizationId !== organizationId)
+        throw new ResourceNotFoundError("WORKSPACE_NOT_FOUND");
+    }
+    const [organizationRole, workspaceRole] = await Promise.all([
+      this.dependencies.store.findOrganizationRole({ actorId, organizationId }),
+      workspaceId
+        ? this.dependencies.store.findWorkspaceRole({ actorId, workspaceId })
+        : Promise.resolve(null),
+    ]);
+    return isRoleAllowed(action, { organizationRole, workspaceRole });
   }
 }
 

@@ -4,6 +4,7 @@ import {
   AuthorizationMatrix,
   calculateCapabilities,
   isActionAllowed,
+  isRoleAllowed,
   type AccessCapabilities,
   type OrganizationRole,
   type WorkspaceRole,
@@ -158,13 +159,64 @@ describe("AuthorizationMatrix", () => {
       });
 
       expect(capabilities).toEqual(expected);
-      for (const action of Object.keys(AuthorizationMatrix) as Array<
-        keyof typeof AuthorizationMatrix
-      >) {
+      for (const action of [
+        "organization:read",
+        "organization:manage",
+        "workspace:create",
+        "workspace:read",
+        "workspace:manage",
+        "member:invite",
+      ] as const) {
         expect(isActionAllowed(action, capabilities)).toBe(
           expected[AuthorizationMatrix[action].capability],
         );
       }
+    },
+  );
+
+  it.each([
+    {
+      action: "organization:ownership-transfer" as const,
+      organizationRole: "owner" as const,
+      workspaceRole: null,
+      allowed: true,
+    },
+    {
+      action: "organization:ownership-transfer" as const,
+      organizationRole: "admin" as const,
+      workspaceRole: null,
+      allowed: false,
+    },
+    {
+      action: "membership:manage" as const,
+      organizationRole: "admin" as const,
+      workspaceRole: null,
+      allowed: true,
+    },
+    {
+      action: "workspace:archive" as const,
+      organizationRole: "member" as const,
+      workspaceRole: "admin" as const,
+      allowed: true,
+    },
+    {
+      action: "team:manage-members" as const,
+      organizationRole: "member" as const,
+      workspaceRole: "member" as const,
+      allowed: false,
+    },
+    {
+      action: "workspace-policy:manage" as const,
+      organizationRole: null,
+      workspaceRole: "admin" as const,
+      allowed: true,
+    },
+  ])(
+    "applies the resource-specific policy for $action",
+    ({ action, organizationRole, workspaceRole, allowed }) => {
+      expect(isRoleAllowed(action, { organizationRole, workspaceRole })).toBe(
+        allowed,
+      );
     },
   );
 });

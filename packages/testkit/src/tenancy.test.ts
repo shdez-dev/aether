@@ -83,7 +83,7 @@ describe("TenantService", () => {
         memberActorIds: [],
         correlationId: "00000000-0000-4000-8000-000000000095",
       }),
-    ).rejects.toBeInstanceOf(AccessDeniedError);
+    ).rejects.toMatchObject({ action: "team:create" });
   });
 
   it("aplica la matriz de permisos a operaciones de tenencia permitidas y denegadas", async () => {
@@ -200,7 +200,7 @@ describe("TenantService", () => {
         workspaceId: workspace.id,
         correlationId: "00000000-0000-4000-8000-000000000097",
       }),
-    ).rejects.toBeInstanceOf(AccessDeniedError);
+    ).rejects.toMatchObject({ action: "workspace:archive" });
     await expect(
       service.archiveWorkspace({
         actorId: "workspace-admin",
@@ -282,7 +282,7 @@ describe("TenantService", () => {
         name: "blocked",
         mode: "team",
       }),
-    ).rejects.toBeInstanceOf(AccessDeniedError);
+    ).rejects.toMatchObject({ action: "workspace:create" });
     const invitation = await service.invite({
       actorId: "owner-a",
       organizationId: organizationA.id,
@@ -497,7 +497,7 @@ describe("TenantService", () => {
         retentionDays: 30,
         correlationId: "00000000-0000-4000-8000-000000000105",
       }),
-    ).rejects.toBeInstanceOf(AccessDeniedError);
+    ).rejects.toMatchObject({ action: "organization-policy:manage" });
     await service.clearWorkspacePolicyOverride({
       actorId: "owner",
       organizationId: organization.id,

@@ -7,6 +7,24 @@ export type WorkspaceRole = (typeof WorkspaceRoles)[number];
 export type AuthorizationAction =
   | "organization:read"
   | "organization:manage"
+  | "organization:ownership-transfer"
+  | "workspace:create"
+  | "workspace:read"
+  | "workspace:manage"
+  | "workspace:archive"
+  | "team:create"
+  | "team:read"
+  | "team:manage-members"
+  | "member:invite"
+  | "membership:manage"
+  | "organization-policy:read"
+  | "organization-policy:manage"
+  | "workspace-policy:read"
+  | "workspace-policy:manage";
+
+export type CapabilityAuthorizationAction =
+  | "organization:read"
+  | "organization:manage"
   | "workspace:create"
   | "workspace:read"
   | "workspace:manage"
@@ -29,6 +47,11 @@ type PermissionRule = Readonly<{
   workspaceRoles?: readonly WorkspaceRole[];
 }>;
 
+export type AuthorizationContext = Readonly<{
+  organizationRole: OrganizationRole | null;
+  workspaceRole: WorkspaceRole | null;
+}>;
+
 /**
  * Matriz ejecutable para acciones de tenencia. La aplicación debe preguntar a
  * esta política y no reconstruir permisos a partir de los roles en cada caso
@@ -46,6 +69,10 @@ export const AuthorizationMatrix: Readonly<
     capability: "canManageOrganization",
     organizationRoles: ["owner", "admin"],
   },
+  "organization:ownership-transfer": {
+    capability: "canManageOrganization",
+    organizationRoles: ["owner"],
+  },
   "workspace:create": {
     capability: "canCreateWorkspace",
     organizationRoles: ["owner", "admin"],
@@ -60,9 +87,51 @@ export const AuthorizationMatrix: Readonly<
     organizationRoles: ["owner", "admin"],
     workspaceRoles: ["admin"],
   },
+  "workspace:archive": {
+    capability: "canManageWorkspace",
+    organizationRoles: ["owner", "admin"],
+    workspaceRoles: ["admin"],
+  },
+  "team:create": {
+    capability: "canManageWorkspace",
+    organizationRoles: ["owner", "admin"],
+    workspaceRoles: ["admin"],
+  },
+  "team:read": {
+    capability: "canReadWorkspace",
+    organizationRoles: ["owner", "admin"],
+    workspaceRoles: WorkspaceRoles,
+  },
+  "team:manage-members": {
+    capability: "canManageWorkspace",
+    organizationRoles: ["owner", "admin"],
+    workspaceRoles: ["admin"],
+  },
   "member:invite": {
     capability: "canInviteMembers",
     organizationRoles: ["owner", "admin"],
+  },
+  "membership:manage": {
+    capability: "canManageOrganization",
+    organizationRoles: ["owner", "admin"],
+  },
+  "organization-policy:read": {
+    capability: "canReadOrganization",
+    organizationRoles: OrganizationRoles,
+  },
+  "organization-policy:manage": {
+    capability: "canManageOrganization",
+    organizationRoles: ["owner", "admin"],
+  },
+  "workspace-policy:read": {
+    capability: "canReadWorkspace",
+    organizationRoles: ["owner", "admin"],
+    workspaceRoles: WorkspaceRoles,
+  },
+  "workspace-policy:manage": {
+    capability: "canManageWorkspace",
+    organizationRoles: ["owner", "admin"],
+    workspaceRoles: ["admin"],
   },
 };
 
@@ -75,7 +144,7 @@ function roleIsAllowed<T extends string>(
 
 function allows(
   action: AuthorizationAction,
-  input: { organizationRole: OrganizationRole | null; workspaceRole: WorkspaceRole | null },
+  input: AuthorizationContext,
 ): boolean {
   const rule = AuthorizationMatrix[action];
   return (
@@ -84,10 +153,9 @@ function allows(
   );
 }
 
-export function calculateCapabilities(input: {
-  organizationRole: OrganizationRole | null;
-  workspaceRole: WorkspaceRole | null;
-}): AccessCapabilities {
+export function calculateCapabilities(
+  input: AuthorizationContext,
+): AccessCapabilities {
   return {
     canReadOrganization: allows("organization:read", input),
     canManageOrganization: allows("organization:manage", input),
@@ -99,10 +167,17 @@ export function calculateCapabilities(input: {
 }
 
 export function isActionAllowed(
-  action: AuthorizationAction,
+  action: CapabilityAuthorizationAction,
   capabilities: AccessCapabilities,
 ): boolean {
   return capabilities[AuthorizationMatrix[action].capability];
+}
+
+export function isRoleAllowed(
+  action: AuthorizationAction,
+  input: AuthorizationContext,
+): boolean {
+  return allows(action, input);
 }
 
 export function canCreateInitiative(input: {

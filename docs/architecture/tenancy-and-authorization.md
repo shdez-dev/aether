@@ -24,10 +24,12 @@ No existe una mutación genérica para transferir recursos entre organizaciones 
 Las capacidades se calculan con el contexto completo: identidad, organización y, cuando existe, workspace. El backend nunca infiere pertenencia desde una URL ni acepta un rol enviado por el cliente.
 
 `AuthorizationMatrix` en `@aether/domain` es la representación ejecutable de
-esta tabla para las acciones de tenencia. Sus pruebas recorren los roles
-permitidos y denegados. Los permisos de iniciativa y proyecto añaden sus
-invariantes de propiedad y estado, por lo que no pueden otorgarse sólo por un
-rol de workspace.
+esta tabla para las acciones de organización, workspace, equipos, membresías,
+transferencia de propiedad y políticas. Sus pruebas recorren los roles
+permitidos y denegados, incluido que sólo un `owner` puede transferir
+propiedad. Los permisos de iniciativa y proyecto añaden sus invariantes de
+propiedad y estado, por lo que no pueden otorgarse sólo por un rol de
+workspace.
 
 ## Invitaciones
 
