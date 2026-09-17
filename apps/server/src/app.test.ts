@@ -2364,6 +2364,13 @@ describe("document project authorization endpoints", () => {
     });
     expect(deniedDownload.statusCode).toBe(403);
     expect(deniedDownload.json()).not.toHaveProperty("url");
+    const documentListUrl = `/v1/documents?resourceType=project&resourceId=${projectId}`;
+    const deniedList = await app.inject({
+      method: "GET",
+      url: documentListUrl,
+      headers: { cookie: "aether_session=member-project-document-session" },
+    });
+    expect(deniedList.statusCode).toBe(403);
     expect(
       (
         await app.inject({
@@ -2395,6 +2402,17 @@ describe("document project authorization endpoints", () => {
       url: expect.any(String),
       expiresAt: expect.any(String),
     });
+    const allowedList = await app.inject({
+      method: "GET",
+      url: documentListUrl,
+      headers: { cookie: "aether_session=member-project-document-session" },
+    });
+    expect(allowedList.statusCode).toBe(200);
+    expect(allowedList.json()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ documentId: started.document.id }),
+      ]),
+    );
     const allowedComplete = await app.inject({
       method: "POST",
       url: `/v1/documents/${pending.document.id}/versions/${pending.version.id}/complete`,
