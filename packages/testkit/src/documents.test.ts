@@ -411,7 +411,7 @@ describe("document evidence slice", () => {
     expect(objects.published.size).toBe(0);
     expect(store.audits.at(-1)?.eventType).toBe("document.malware_rejected.v1");
   });
-  it("impide descargar el documento de un proyecto ajeno dentro del mismo workspace", async () => {
+  it("impide leer o mutar el documento de un proyecto ajeno dentro del mismo workspace", async () => {
     let sequence = 0;
     const ids = {
       next: () =>
@@ -514,6 +514,18 @@ describe("document evidence slice", () => {
         versionId: started.version.id,
       }),
     ).rejects.toBeInstanceOf(DocumentAccessDeniedError);
+    await expect(
+      service.beginReplacement({
+        actorId: "member",
+        correlationId: ids.next(),
+        documentId: started.document.id,
+        replacedVersionId: started.version.id,
+        fileName: "entrega-corregida.pdf",
+        contentType: "application/pdf",
+        contentLength: 10,
+        sha256: "a".repeat(64),
+      }),
+    ).rejects.toBeInstanceOf(DocumentAccessDeniedError);
     projectAccess.grant(projectId, "member");
     await expect(
       service.download({
@@ -523,6 +535,22 @@ describe("document evidence slice", () => {
         versionId: started.version.id,
       }),
     ).resolves.toEqual(expect.objectContaining({ url: expect.any(String) }));
+    await expect(
+      service.beginReplacement({
+        actorId: "member",
+        correlationId: ids.next(),
+        documentId: started.document.id,
+        replacedVersionId: started.version.id,
+        fileName: "entrega-corregida.pdf",
+        contentType: "application/pdf",
+        contentLength: 10,
+        sha256: "a".repeat(64),
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        version: expect.objectContaining({ status: "quarantined" }),
+      }),
+    );
   });
   it("reubica sólo dentro del mismo workspace y conserva los bloqueos de trazabilidad", async () => {
     let sequence = 0;

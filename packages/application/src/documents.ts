@@ -263,6 +263,7 @@ export class DocumentService {
       "document",
       current.document.id,
       input.correlationId,
+      this.projectIdFor(current.document),
     );
     if (current.version.status !== "quarantined")
       throw new DocumentValidationError("DOCUMENT_NOT_QUARANTINED");
@@ -414,6 +415,7 @@ export class DocumentService {
       "document",
       current.document.id,
       input.correlationId,
+      this.projectIdFor(current.document),
     );
     if (current.version.status !== "published")
       throw new DocumentValidationError("DOCUMENT_NOT_PUBLISHED");
@@ -462,6 +464,7 @@ export class DocumentService {
       "document",
       current.document.id,
       input.correlationId,
+      this.projectIdFor(current.document),
     );
     if (
       current.version.status !== "published" &&
@@ -531,6 +534,7 @@ export class DocumentService {
       "document",
       source.document.id,
       input.correlationId,
+      this.projectIdFor(source.document),
     );
     if (!source.version.objectKey || source.version.status === "purged")
       throw new DocumentValidationError("DOCUMENT_NOT_RESTORABLE");
@@ -693,6 +697,7 @@ export class DocumentService {
       resourceType,
       resourceId,
       correlationId,
+      resourceType === "project" ? resourceId : undefined,
     );
     return resource;
   }
@@ -751,13 +756,20 @@ export class DocumentService {
     resourceType: TemporaryGrantResourceType,
     resourceId: string,
     correlationId: string,
+    projectId?: string,
   ) {
     await assertWorkspaceWritable(this.dependencies.tenancy, workspaceId);
-    if (
-      canCreateInitiative(
-        await this.roles(actorId, organizationId, workspaceId),
-      )
-    )
+    const roles = await this.roles(actorId, organizationId, workspaceId);
+    const organizationManager =
+      roles.organizationRole === "owner" || roles.organizationRole === "admin";
+    const hasProjectAccess =
+      !projectId ||
+      organizationManager ||
+      (await this.dependencies.projectAccess?.isParticipant({
+        actorId,
+        projectId,
+      })) === true;
+    if (canCreateInitiative(roles) && hasProjectAccess)
       return;
     if (
       await this.dependencies.accessGrants?.authorize({
@@ -772,6 +784,11 @@ export class DocumentService {
     )
       return;
     throw new DocumentAccessDeniedError();
+  }
+  private projectIdFor(document: InstitutionalDocument): string | undefined {
+    return document.resourceType === "project"
+      ? document.resourceId
+      : undefined;
   }
   private async assertRead(
     actorId: string,

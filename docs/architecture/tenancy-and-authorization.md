@@ -112,6 +112,12 @@ acciones de gobierno como administrar miembros, archivar workspaces, evaluar o
 decidir iniciativas. Las consultas de colecciones requieren el grant del
 workspace correspondiente y un grant individual no revela recursos vecinos.
 
+En recursos de proyecto, la pertenencia al workspace tampoco basta para leer,
+descargar o modificar documentos: se exige participación actual en el proyecto,
+gestión organizacional o una concesión temporal exacta para el recurso y la
+acción. Así un colaborador de un workspace no puede introducir ni reemplazar
+contenido en proyectos a los que no fue asignado.
+
 Los endpoints bajo
 `/v1/organizations/{organizationId}/temporary-access-grants` permiten solicitar,
 listar, aprobar y revocar. La solicitud es idempotente; aprobación y revocación
