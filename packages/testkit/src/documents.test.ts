@@ -509,4 +509,115 @@ describe("document evidence slice", () => {
       }),
     ).resolves.toEqual(expect.objectContaining({ url: expect.any(String) }));
   });
+  it("reubica sólo dentro del mismo workspace y conserva los bloqueos de trazabilidad", async () => {
+    let sequence = 0;
+    const ids = {
+      next: () =>
+        `00000000-0000-4000-8000-${String(++sequence).padStart(12, "0")}`,
+    };
+    const clock = { now: () => new Date("2026-09-17T12:00:00.000Z") };
+    const tenancy = new InMemoryTenantStore();
+    const tenants = new TenantService({
+      store: tenancy,
+      ids,
+      tokens: { generate: () => "x".repeat(43), hash: (value) => value },
+      clock,
+    });
+    const organization = await tenants.createOrganization({
+      actorId: "owner",
+      actorEmail: "owner@test",
+      name: "Org",
+      timezone: "UTC",
+      locale: "es-CL",
+    });
+    const workspace = await tenants.createWorkspace({
+      actorId: "owner",
+      organizationId: organization.id,
+      name: "Origen y destino",
+      mode: "team",
+    });
+    const otherWorkspace = await tenants.createWorkspace({
+      actorId: "owner",
+      organizationId: organization.id,
+      name: "Otro espacio",
+      mode: "team",
+    });
+    const store = new InMemoryDocumentStore();
+    const sourceId = ids.next();
+    const targetId = ids.next();
+    const otherWorkspaceTargetId = ids.next();
+    store.addResource("initiative", sourceId, {
+      organizationId: organization.id,
+      workspaceId: workspace.id,
+    });
+    store.addResource("project", targetId, {
+      organizationId: organization.id,
+      workspaceId: workspace.id,
+    });
+    store.addResource("initiative", otherWorkspaceTargetId, {
+      organizationId: organization.id,
+      workspaceId: otherWorkspace.id,
+    });
+    const service = new DocumentService({
+      store,
+      audit: store,
+      objects: new InMemoryDocumentObjectStore(),
+      tenancy,
+      ids,
+      clock,
+      maxBytes: 1_000,
+      urlTtlSeconds: 60,
+    });
+    const started = await service.beginUpload({
+      actorId: "owner",
+      correlationId: ids.next(),
+      resourceType: "initiative",
+      resourceId: sourceId,
+      classification: "restricted",
+      fileName: "registro.pdf",
+      contentType: "application/pdf",
+      contentLength: 10,
+      sha256: "a".repeat(64),
+    });
+
+    await expect(
+      service.relocate({
+        actorId: "owner",
+        correlationId: ids.next(),
+        documentId: started.document.id,
+        resourceType: "project",
+        resourceId: targetId,
+      }),
+    ).resolves.toMatchObject({
+      resourceType: "project",
+      resourceId: targetId,
+      classification: "restricted",
+    });
+    expect(store.audits.at(-1)).toMatchObject({
+      eventType: "document.relocated.v1",
+      payload: {
+        fromResourceType: "initiative",
+        fromResourceId: sourceId,
+      },
+    });
+    await expect(
+      service.relocate({
+        actorId: "owner",
+        correlationId: ids.next(),
+        documentId: started.document.id,
+        resourceType: "initiative",
+        resourceId: otherWorkspaceTargetId,
+      }),
+    ).rejects.toBeInstanceOf(DocumentAccessDeniedError);
+    store.relocationBlockedDocumentIds.add(started.document.id);
+    await expect(
+      service.relocate({
+        actorId: "owner",
+        correlationId: ids.next(),
+        documentId: started.document.id,
+        resourceType: "initiative",
+        resourceId: sourceId,
+      }),
+    ).rejects.toMatchObject({ code: "DOCUMENT_RELOCATION_BLOCKED" });
+  });
 });

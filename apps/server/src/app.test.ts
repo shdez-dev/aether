@@ -15,6 +15,7 @@ import {
   EvaluationService,
   AuditHistoryService,
   InitiativeService,
+  DocumentService,
   ProjectService,
   ProductMetricsService,
   type SecurityAuditStore,
@@ -35,6 +36,8 @@ import {
   InMemoryTemporaryAccessGrantStore,
   InMemorySupportAccessGrantStore,
   InMemorySupportOperatorDirectory,
+  InMemoryDocumentObjectStore,
+  InMemoryDocumentStore,
 } from "@aether/testkit";
 
 import { buildServer } from "./app.js";
@@ -44,6 +47,19 @@ const testSessionEncryptionKey = Buffer.alloc(32).toString("base64");
 class InMemoryAuthStore implements AuthStore {
   private readonly sessions = new Map<string, AuthSession>();
   private readonly transactions = new Map<string, LoginTransaction>();
+  private readonly identities = new Map<string, string>();
+  async resolveIdentity(input: {
+    id: string;
+    issuer: string;
+    subject: string;
+    email: string | null;
+    authenticatedAt: Date;
+  }): Promise<{ actorId: string }> {
+    const key = `${input.issuer}:${input.subject}`;
+    const actorId = this.identities.get(key) ?? input.id;
+    this.identities.set(key, actorId);
+    return { actorId };
+  }
   async createSession(session: AuthSession): Promise<void> {
     this.sessions.set(session.id, session);
   }
@@ -713,6 +729,13 @@ describe("HTTP authentication boundary", () => {
     expect(sessionHeader).not.toContain("access_token");
     const session = cookieValue(callbackCookies, "aether_session");
     const csrf = cookieValue(callbackCookies, "aether_csrf");
+    const authenticatedActorId = (
+      await app.inject({
+        method: "GET",
+        url: "/auth/session",
+        headers: { cookie: `aether_session=${session}` },
+      })
+    ).json().actorId as string;
     const activeSessions = await app.inject({
       method: "GET",
       url: "/auth/sessions",
@@ -844,10 +867,10 @@ describe("HTTP authentication boundary", () => {
     });
     expect(archivedWorkspaceDetail.json()).toMatchObject({
       status: "archived",
-      archivedByActorId: "actor-123",
+      archivedByActorId: authenticatedActorId,
     });
     const invitation = await tenants.invite({
-      actorId: "actor-123",
+      actorId: authenticatedActorId,
       organizationId: organization.json().id,
       email: "next-owner@example.test",
       organizationRole: "member",
@@ -867,7 +890,7 @@ describe("HTTP authentication boundary", () => {
     await authStore.createSession({
       id: crypto.randomUUID(),
       tokenHash: hashOpaqueToken(staleSession),
-      actorId: "actor-123",
+      actorId: authenticatedActorId,
       actorEmail: "actor@example.test",
       issuer: config.oidcIssuerUrl,
       createdAt: staleSessionCreatedAt,
@@ -918,7 +941,7 @@ describe("HTTP authentication boundary", () => {
     });
     expect(repeatTransfer.statusCode).toBe(403);
     const memberInvitation = await tenants.invite({
-      actorId: "actor-123",
+      actorId: authenticatedActorId,
       organizationId: organization.json().id,
       email: "suspended@example.test",
       organizationRole: "member",
@@ -1148,6 +1171,13 @@ describe("HTTP authentication boundary", () => {
     });
     const session = cookieValue(responseCookies(callback), "aether_session");
     const csrf = cookieValue(responseCookies(callback), "aether_csrf");
+    const authenticatedActorId = (
+      await app.inject({
+        method: "GET",
+        url: "/auth/session",
+        headers: { cookie: `aether_session=${session}` },
+      })
+    ).json().actorId as string;
     const headers = {
       origin: config.webOrigin,
       "x-csrf-token": csrf,
@@ -1170,7 +1200,7 @@ describe("HTTP authentication boundary", () => {
     expect(organizationResponse.statusCode).toBe(201);
     const organization = organizationResponse.json() as { id: string };
     const suspendedInvitation = await tenants.invite({
-      actorId: "actor-123",
+      actorId: authenticatedActorId,
       organizationId: organization.id,
       email: "suspended-api@example.test",
       organizationRole: "member",
@@ -1184,7 +1214,7 @@ describe("HTTP authentication boundary", () => {
       actorEmail: "suspended-api@example.test",
     });
     await tenants.changeMembershipStatus({
-      actorId: "actor-123",
+      actorId: authenticatedActorId,
       organizationId: organization.id,
       targetActorId: "suspended-api",
       status: "suspended",
@@ -1297,7 +1327,7 @@ describe("HTTP authentication boundary", () => {
     await authStore.createSession({
       id: crypto.randomUUID(),
       tokenHash: hashOpaqueToken(staleReplaySession),
-      actorId: "actor-123",
+      actorId: authenticatedActorId,
       actorEmail: "actor@example.test",
       issuer: config.oidcIssuerUrl,
       createdAt: staleReplayCreatedAt,
@@ -1560,12 +1590,12 @@ describe("HTTP authentication boundary", () => {
         conditions: [
           {
             description: "Verificar la adopción inicial.",
-            responsibleActorId: "actor-123",
+            responsibleActorId: authenticatedActorId,
             dueOn: "2026-10-01",
           },
           {
             description: "Formalizar el alcance inicial.",
-            responsibleActorId: "actor-123",
+            responsibleActorId: authenticatedActorId,
             dueOn: "2026-10-02",
           },
         ],
@@ -1604,7 +1634,7 @@ describe("HTTP authentication boundary", () => {
         conditions: expect.arrayContaining([
           expect.objectContaining({
             status: "fulfilled",
-            resolvedByActorId: "actor-123",
+            resolvedByActorId: authenticatedActorId,
             resolutionNote: "La adopción inicial fue verificada.",
           }),
         ]),
@@ -1617,7 +1647,7 @@ describe("HTTP authentication boundary", () => {
     await authStore.createSession({
       id: crypto.randomUUID(),
       tokenHash: hashOpaqueToken(staleExemptionSession),
-      actorId: "actor-123",
+      actorId: authenticatedActorId,
       actorEmail: "actor@example.test",
       issuer: config.oidcIssuerUrl,
       createdAt: staleExemptionCreatedAt,
@@ -1654,7 +1684,7 @@ describe("HTTP authentication boundary", () => {
           },
           {
             status: "exempted",
-            resolvedByActorId: "actor-123",
+            resolvedByActorId: authenticatedActorId,
             resolutionNote: "La validación quedó incorporada en el alcance.",
           },
         ],
@@ -1696,7 +1726,7 @@ describe("HTTP authentication boundary", () => {
         expect.arrayContaining([
           expect.objectContaining({
             action,
-            actorId: "actor-123",
+            actorId: authenticatedActorId,
             result: "succeeded",
           }),
         ]),
@@ -2003,6 +2033,136 @@ describe("HTTP authentication boundary", () => {
       "support_access_grant.used.v1",
       "support_access_grant.revoked.v1",
     ]);
+    await app.close();
+  });
+});
+
+describe("document relocation endpoint", () => {
+  it("requires recent authentication and exposes only a same-workspace relocation", async () => {
+    const ids = { next: () => crypto.randomUUID() };
+    const clock = { now: () => new Date("2026-09-17T12:00:00.000Z") };
+    const tenantStore = new InMemoryTenantStore();
+    const tenants = new TenantService({
+      store: tenantStore,
+      ids,
+      tokens: { generate: () => "x".repeat(43), hash: (value) => value },
+      clock,
+    });
+    const organization = await tenants.createOrganization({
+      actorId: "owner",
+      actorEmail: "owner@example.test",
+      name: "Documentos",
+      timezone: "UTC",
+      locale: "es-CL",
+    });
+    const workspace = await tenants.createWorkspace({
+      actorId: "owner",
+      organizationId: organization.id,
+      name: "Equipo",
+      mode: "team",
+    });
+    const otherWorkspace = await tenants.createWorkspace({
+      actorId: "owner",
+      organizationId: organization.id,
+      name: "Otro equipo",
+      mode: "team",
+    });
+    const documentStore = new InMemoryDocumentStore();
+    const sourceId = ids.next();
+    const targetId = ids.next();
+    const otherWorkspaceTargetId = ids.next();
+    documentStore.addResource("initiative", sourceId, {
+      organizationId: organization.id,
+      workspaceId: workspace.id,
+    });
+    documentStore.addResource("project", targetId, {
+      organizationId: organization.id,
+      workspaceId: workspace.id,
+    });
+    documentStore.addResource("initiative", otherWorkspaceTargetId, {
+      organizationId: organization.id,
+      workspaceId: otherWorkspace.id,
+    });
+    const documents = new DocumentService({
+      store: documentStore,
+      audit: documentStore,
+      objects: new InMemoryDocumentObjectStore(),
+      tenancy: tenantStore,
+      ids,
+      clock,
+      maxBytes: 1_000,
+      urlTtlSeconds: 60,
+    });
+    const started = await documents.beginUpload({
+      actorId: "owner",
+      correlationId: ids.next(),
+      resourceType: "initiative",
+      resourceId: sourceId,
+      classification: "confidential",
+      fileName: "acta.pdf",
+      contentType: "application/pdf",
+      contentLength: 10,
+      sha256: "a".repeat(64),
+    });
+    const authStore = new InMemoryAuthStore();
+    const auth = new AuthService({
+      store: authStore,
+      cipher: createAesGcmCipher(config.sessionEncryptionKey),
+      oidc,
+      issuer: config.oidcIssuerUrl,
+      sessionTtlSeconds: config.sessionTtlSeconds,
+      sessionRenewalWindowSeconds: config.sessionRenewalWindowSeconds,
+    });
+    const app = await buildServer({
+      config,
+      auth,
+      tenants,
+      initiatives: {} as InitiativeService,
+      evaluations: {} as EvaluationService,
+      projects: {} as ProjectService,
+      documents,
+      idempotency: new InMemoryIdempotencyStore(),
+    });
+    const session = "document-owner-session";
+    const csrf = "document-owner-csrf";
+    await createAuthenticatedSession(authStore, {
+      token: session,
+      actorId: "owner",
+      actorEmail: "owner@example.test",
+    });
+    const headers = (key: string) => ({
+      origin: config.webOrigin,
+      "x-csrf-token": csrf,
+      "idempotency-key": key,
+      cookie: `aether_session=${session}; aether_csrf=${csrf}`,
+    });
+    const relocated = await app.inject({
+      method: "POST",
+      url: `/v1/documents/${started.document.id}/relocate`,
+      headers: headers("document-relocation-1"),
+      payload: { resourceType: "project", resourceId: targetId },
+    });
+    expect(relocated.statusCode).toBe(200);
+    expect(relocated.json()).toEqual({
+      documentId: started.document.id,
+      resourceType: "project",
+      resourceId: targetId,
+      classification: "confidential",
+    });
+    const crossWorkspace = await app.inject({
+      method: "POST",
+      url: `/v1/documents/${started.document.id}/relocate`,
+      headers: headers("document-relocation-2"),
+      payload: {
+        resourceType: "initiative",
+        resourceId: otherWorkspaceTargetId,
+      },
+    });
+    expect(crossWorkspace.statusCode).toBe(403);
+    expect(documentStore.documents.get(started.document.id)).toMatchObject({
+      resourceType: "project",
+      resourceId: targetId,
+    });
     await app.close();
   });
 });

@@ -15,6 +15,27 @@ const testSessionEncryptionKey = Buffer.alloc(32).toString("base64");
 class InMemoryAuthStore implements AuthStore {
   readonly sessions = new Map<string, AuthSession>();
   readonly transactions = new Map<string, LoginTransaction>();
+  readonly identities = new Map<
+    string,
+    { actorId: string; email: string | null; authenticatedAt: Date }
+  >();
+  async resolveIdentity(input: {
+    id: string;
+    issuer: string;
+    subject: string;
+    email: string | null;
+    authenticatedAt: Date;
+  }): Promise<{ actorId: string }> {
+    const key = `${input.issuer}:${input.subject}`;
+    const existing = this.identities.get(key);
+    const identity = {
+      actorId: existing?.actorId ?? input.id,
+      email: input.email,
+      authenticatedAt: input.authenticatedAt,
+    };
+    this.identities.set(key, identity);
+    return { actorId: identity.actorId };
+  }
   async createSession(session: AuthSession): Promise<void> {
     this.sessions.set(session.id, session);
   }
@@ -225,6 +246,8 @@ describe("AuthService", () => {
       callbackUrl: `https://app.example/auth/callback?code=code&state=${state}`,
     });
     expect(completed.sessionToken).not.toContain(".");
+    expect(completed.session.actorId).not.toBe("actor-123");
+    expect(store.identities).toHaveLength(1);
     expect([...store.sessions.values()][0]?.tokenHash).toBe(
       hashOpaqueToken(completed.sessionToken),
     );

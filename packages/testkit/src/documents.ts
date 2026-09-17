@@ -21,6 +21,7 @@ export class InMemoryDocumentStore
   readonly versions = new Map<string, DocumentVersion>();
   readonly audits: DocumentAuditEvent[] = [];
   readonly events: import("@aether/application").DurableDomainEvent[] = [];
+  readonly relocationBlockedDocumentIds = new Set<string>();
   addResource(
     type: DocumentResourceType,
     id: string,
@@ -174,7 +175,11 @@ export class InMemoryDocumentStore
     document: InstitutionalDocument;
     audit: DocumentAuditEvent;
   }): Promise<boolean> {
-    if (!this.documents.has(input.document.id)) return false;
+    if (
+      !this.documents.has(input.document.id) ||
+      this.relocationBlockedDocumentIds.has(input.document.id)
+    )
+      return false;
     this.documents.set(input.document.id, input.document);
     this.audits.push(input.audit);
     return true;

@@ -192,6 +192,51 @@ describe.sequential("PostgreSQL integration", () => {
   );
 
   runPostgresIntegration(
+    "binds each OIDC issuer and subject to one stable internal actor",
+    async () => {
+      const store = new PostgresAuthStore(pool);
+      const authenticatedAt = new Date("2026-09-17T13:00:00.000Z");
+      const first = await store.resolveIdentity({
+        id: randomUUID(),
+        issuer: "https://identity.example/realms/aether",
+        subject: "provider-subject",
+        email: "first@example.test",
+        authenticatedAt,
+      });
+      const repeated = await store.resolveIdentity({
+        id: randomUUID(),
+        issuer: "https://identity.example/realms/aether",
+        subject: "provider-subject",
+        email: "updated@example.test",
+        authenticatedAt: new Date(authenticatedAt.getTime() + 1_000),
+      });
+      const differentIssuer = await store.resolveIdentity({
+        id: randomUUID(),
+        issuer: "https://other-identity.example/realms/aether",
+        subject: "provider-subject",
+        email: "other@example.test",
+        authenticatedAt,
+      });
+      expect(repeated.actorId).toBe(first.actorId);
+      expect(differentIssuer.actorId).not.toBe(first.actorId);
+      await expect(
+        pool.query<{ email: string; last_authenticated_at: Date }>(
+          "SELECT email, last_authenticated_at FROM actor_identities WHERE id = $1",
+          [first.actorId],
+        ),
+      ).resolves.toMatchObject({
+        rows: [
+          {
+            email: "updated@example.test",
+            last_authenticated_at: new Date(authenticatedAt.getTime() + 1_000),
+          },
+        ],
+      });
+    },
+    120_000,
+  );
+
+  runPostgresIntegration(
     "persists rejected, revoked, and expired invitations without granting membership",
     async () => {
       let now = new Date("2026-09-16T03:00:00.000Z");
@@ -578,6 +623,138 @@ describe.sequential("PostgreSQL integration", () => {
           [requested.id],
         ),
       ).rejects.toThrow();
+    },
+    120_000,
+  );
+
+  runPostgresIntegration(
+    "relocates an unreferenced document atomically and blocks evidence-linked documents",
+    async () => {
+      const ids = { next: randomUUID };
+      const now = new Date("2026-09-17T12:00:00.000Z");
+      const tenants = new TenantService({
+        store: new PostgresTenantStore(pool),
+        ids,
+        tokens: {
+          generate: () => "document-relocation-token",
+          hash: (value) => `document-relocation:${value}`,
+        },
+        clock: { now: () => now },
+      });
+      const organization = await tenants.createOrganization({
+        actorId: "document-relocation-owner",
+        actorEmail: "document-relocation-owner@example.test",
+        name: "Document relocation",
+        timezone: "UTC",
+        locale: "es-CL",
+      });
+      const workspace = await tenants.createWorkspace({
+        actorId: "document-relocation-owner",
+        organizationId: organization.id,
+        name: "Document relocation workspace",
+        mode: "team",
+      });
+      const documents = new PostgresDocumentStore(pool);
+      const document = {
+        id: randomUUID(),
+        organizationId: organization.id,
+        workspaceId: workspace.id,
+        resourceType: "initiative" as const,
+        resourceId: randomUUID(),
+        classification: "internal" as const,
+        createdByActorId: "document-relocation-owner",
+        createdAt: now,
+      };
+      const version = {
+        id: randomUUID(),
+        documentId: document.id,
+        versionNumber: 1,
+        originalName: "acta.pdf",
+        declaredContentType: "application/pdf",
+        detectedContentType: null,
+        byteLength: 10,
+        sha256: "a".repeat(64),
+        status: "quarantined" as const,
+        quarantineKey: `quarantine/${randomUUID()}`,
+        objectKey: null,
+        createdAt: now,
+        publishedAt: null,
+        rejectedAt: null,
+        withdrawnAt: null,
+        retentionUntil: null,
+        evidenceStatus: "pending" as const,
+        supersedesVersionId: null,
+        replacedByVersionId: null,
+      };
+      const audit = (
+        eventType: "document.upload_started.v1" | "document.relocated.v1",
+      ) => ({
+        id: randomUUID(),
+        eventType,
+        documentId: document.id,
+        versionId: version.id,
+        organizationId: organization.id,
+        workspaceId: workspace.id,
+        actorId: "document-relocation-owner",
+        correlationId: randomUUID(),
+        occurredAt: now,
+        payload: {},
+      });
+      await documents.createQuarantined({
+        document,
+        version,
+        audit: audit("document.upload_started.v1"),
+      });
+      const targetResourceId = randomUUID();
+      await expect(
+        documents.relocate({
+          document: {
+            ...document,
+            resourceType: "project",
+            resourceId: targetResourceId,
+          },
+          audit: {
+            ...audit("document.relocated.v1"),
+            payload: {
+              fromResourceType: document.resourceType,
+              fromResourceId: document.resourceId,
+            },
+          },
+        }),
+      ).resolves.toBe(true);
+      await expect(
+        pool.query<{ resource_type: string; resource_id: string }>(
+          "SELECT resource_type, resource_id FROM documents WHERE id = $1",
+          [document.id],
+        ),
+      ).resolves.toMatchObject({
+        rows: [{ resource_type: "project", resource_id: targetResourceId }],
+      });
+      await pool.query(
+        `INSERT INTO evidence_references
+         (id, organization_id, workspace_id, subject_type, subject_id, document_id, document_version_id, linked_by_actor_id, linked_at)
+         VALUES ($1,$2,$3,'evaluation',$4,$5,$6,$7,$8)`,
+        [
+          randomUUID(),
+          organization.id,
+          workspace.id,
+          randomUUID(),
+          document.id,
+          version.id,
+          "document-relocation-owner",
+          now,
+        ],
+      );
+      await expect(
+        documents.relocate({
+          document: {
+            ...document,
+            resourceType: "initiative",
+            resourceId: randomUUID(),
+          },
+          audit: audit("document.relocated.v1"),
+        }),
+      ).resolves.toBe(false);
     },
     120_000,
   );
@@ -1257,13 +1434,13 @@ describe.sequential("PostgreSQL integration", () => {
     "renews, expires and revokes opaque sessions with append-only audit",
     async () => {
       let now = new Date("2026-09-09T12:00:00.000Z");
-      const actorId = `session-${randomUUID()}@example.test`;
+      const subject = `session-${randomUUID()}@example.test`;
       const oidc: OidcProvider = {
         async buildAuthorizationUrl({ state }) {
           return `https://identity.example/authorize?state=${state}`;
         },
         async exchangeAuthorizationCode() {
-          return { subject: actorId, email: actorId };
+          return { subject, email: subject };
         },
       };
       const store = new PostgresAuthStore(pool);
@@ -1291,6 +1468,7 @@ describe.sequential("PostgreSQL integration", () => {
       };
 
       const first = await login();
+      const actorId = first.session.actorId;
       now = new Date("2026-09-09T12:55:00.000Z");
       expect(
         (await auth.authenticate(first.sessionToken))?.expiresAt.toISOString(),

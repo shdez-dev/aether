@@ -203,6 +203,16 @@ export class InMemoryTenantStore implements TenantStore {
       ? (this.organizationRoles.get(key) ?? null)
       : null;
   }
+  async findOrganizationMembershipStatus(input: {
+    actorId: string;
+    organizationId: string;
+  }): Promise<"active" | "suspended" | "revoked" | null> {
+    return (
+      this.organizationStatuses.get(
+        this.organizationKey(input.actorId, input.organizationId),
+      ) ?? null
+    );
+  }
   async findWorkspaceRole(input: {
     actorId: string;
     workspaceId: string;

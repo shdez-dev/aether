@@ -84,6 +84,7 @@ import {
   UpdateInitiativeRequestSchema,
   BeginDocumentUploadRequestSchema,
   DocumentListQuerySchema,
+  RelocateDocumentRequestSchema,
   BeginDocumentReplacementRequestSchema,
   WithdrawDocumentVersionRequestSchema,
   AcceptProjectDeliverableRequestSchema,
@@ -1331,6 +1332,45 @@ export async function buildServer(input: {
               headers: result.upload.headers,
               expiresAt: result.expiresAt.toISOString(),
             },
+          },
+        };
+      },
+    });
+  });
+  app.post("/v1/documents/:documentId/relocate", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    assertRecentAuthentication(session, input.config);
+    if (!input.documents) throw new Error("Document service is not configured");
+    const { documentId } = z
+      .object({ documentId: z.string().uuid() })
+      .parse(request.params);
+    const body = RelocateDocumentRequestSchema.parse(request.body);
+    return respondIdempotently({
+      request,
+      reply,
+      store: input.idempotency,
+      actorId: session.actorId,
+      operation: `document.relocate:${documentId}`,
+      requestPayload: { documentId, ...body },
+      execute: async () => {
+        const document = await input.documents!.relocate({
+          actorId: session.actorId,
+          correlationId: correlationId(reply),
+          documentId,
+          ...body,
+        });
+        return {
+          statusCode: 200,
+          body: {
+            documentId: document.id,
+            resourceType: document.resourceType,
+            resourceId: document.resourceId,
+            classification: document.classification,
           },
         };
       },

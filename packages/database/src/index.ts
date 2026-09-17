@@ -96,6 +96,30 @@ export { migratePool } from "./migrations.js";
 export class PostgresAuthStore implements AuthStore, AuthSessionAuditStore {
   constructor(private readonly pool: Pool) {}
 
+  async resolveIdentity(input: {
+    id: string;
+    issuer: string;
+    subject: string;
+    email: string | null;
+    authenticatedAt: Date;
+  }): Promise<{ actorId: string }> {
+    const result = await this.pool.query<{ id: string }>(
+      `INSERT INTO actor_identities (id, issuer, subject, email, created_at, last_authenticated_at)
+       VALUES ($1,$2,$3,$4,$5,$5)
+       ON CONFLICT (issuer, subject) DO UPDATE
+       SET email = EXCLUDED.email, last_authenticated_at = EXCLUDED.last_authenticated_at
+       RETURNING id`,
+      [
+        input.id,
+        input.issuer,
+        input.subject,
+        input.email,
+        input.authenticatedAt,
+      ],
+    );
+    return { actorId: result.rows[0]!.id };
+  }
+
   async createSession(session: AuthSession): Promise<void> {
     await this.pool.query(
       `INSERT INTO auth_sessions (id, token_hash, actor_id, actor_email, issuer, created_at, last_seen_at, expires_at, revoked_at)
@@ -576,6 +600,19 @@ export class PostgresTenantStore implements TenantStore {
       [input.actorId, input.organizationId],
     );
     return result.rows[0]?.role ?? null;
+  }
+
+  async findOrganizationMembershipStatus(input: {
+    actorId: string;
+    organizationId: string;
+  }): Promise<"active" | "suspended" | "revoked" | null> {
+    const result = await this.pool.query<{
+      status: "active" | "suspended" | "revoked";
+    }>(
+      "SELECT status FROM organization_memberships WHERE actor_id = $1 AND organization_id = $2",
+      [input.actorId, input.organizationId],
+    );
+    return result.rows[0]?.status ?? null;
   }
 
   async findWorkspaceRole(input: {

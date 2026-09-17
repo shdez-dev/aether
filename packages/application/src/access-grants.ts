@@ -294,12 +294,28 @@ export class TemporaryAccessGrantService implements TemporaryAccessGrantAuthoriz
     workspaceId: string;
     resourceType: TemporaryGrantResourceType;
     resourceId: string;
-    action: TemporaryGrantAction;
+  action: TemporaryGrantAction;
     correlationId: string;
   }): Promise<boolean> {
+    const now = this.dependencies.clock.now();
+    await this.dependencies.store.recordExpired({
+      organizationId: input.organizationId,
+      now,
+      correlationId: input.correlationId,
+    });
+    const membershipStatus =
+      await this.dependencies.tenancy.findOrganizationMembershipStatus({
+        actorId: input.actorId,
+        organizationId: input.organizationId,
+      });
+    if (
+      membershipStatus === "suspended" ||
+      membershipStatus === "revoked"
+    )
+      return false;
     return this.dependencies.store.authorizeAndAudit({
       ...input,
-      now: this.dependencies.clock.now(),
+      now,
       auditEventId: this.dependencies.ids.next(),
       expirationCorrelationId: input.correlationId,
     });

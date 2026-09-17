@@ -130,6 +130,38 @@ describe("TemporaryAccessGrantService", () => {
         correlationId: ids.next(),
       }),
     ).resolves.toBe(false);
+    const externalInvitation = await tenants.invite({
+      actorId: "owner",
+      organizationId: organization.id,
+      email: "external-reviewer@example.test",
+      organizationRole: "member",
+      workspaceIds: [workspace.id],
+      workspaceRole: "viewer",
+      expiresInDays: 1,
+    });
+    await tenants.acceptInvitation({
+      token: externalInvitation.deliveryToken,
+      actorId: "external-reviewer",
+      actorEmail: "external-reviewer@example.test",
+    });
+    await tenants.changeMembershipStatus({
+      actorId: "owner",
+      organizationId: organization.id,
+      targetActorId: "external-reviewer",
+      status: "revoked",
+      correlationId: ids.next(),
+    });
+    await expect(
+      service.authorize({
+        actorId: "external-reviewer",
+        organizationId: organization.id,
+        workspaceId: workspace.id,
+        resourceType: "project",
+        resourceId: projectId,
+        action: "read",
+        correlationId: ids.next(),
+      }),
+    ).resolves.toBe(false);
 
     const revoked = await service.revoke({
       actorId: "external-reviewer",

@@ -119,6 +119,10 @@ export interface TenantStore {
     actorId: string;
     organizationId: string;
   }): Promise<OrganizationRole | null>;
+  findOrganizationMembershipStatus(input: {
+    actorId: string;
+    organizationId: string;
+  }): Promise<"active" | "suspended" | "revoked" | null>;
   findWorkspaceRole(input: {
     actorId: string;
     workspaceId: string;

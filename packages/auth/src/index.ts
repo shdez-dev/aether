@@ -50,6 +50,13 @@ export type AuthSessionAuditEvent = Readonly<{
 }>;
 
 export interface AuthStore {
+  resolveIdentity(input: {
+    id: string;
+    issuer: string;
+    subject: string;
+    email: string | null;
+    authenticatedAt: Date;
+  }): Promise<{ actorId: string }>;
   createSession(session: AuthSession): Promise<void>;
   findActiveSession(tokenHash: string, now: Date): Promise<AuthSession | null>;
   renewSession(
@@ -190,11 +197,18 @@ export class AuthService {
         transaction.codeVerifierCiphertext,
       ),
     });
+    const actor = await this.options.store.resolveIdentity({
+      id: randomUUID(),
+      issuer: this.options.issuer,
+      subject: identity.subject,
+      email: identity.email,
+      authenticatedAt: now,
+    });
     const sessionToken = randomOpaqueToken();
     const session: AuthSession = {
       id: randomUUID(),
       tokenHash: hashOpaqueToken(sessionToken),
-      actorId: identity.subject,
+      actorId: actor.actorId,
       actorEmail: identity.email,
       issuer: this.options.issuer,
       createdAt: now,

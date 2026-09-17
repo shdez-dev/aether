@@ -31,6 +31,10 @@ export const DocumentListQuerySchema = z.object({
   resourceType: DocumentResourceTypeSchema,
   resourceId: UuidSchema,
 });
+export const RelocateDocumentRequestSchema = z.object({
+  resourceType: DocumentResourceTypeSchema,
+  resourceId: UuidSchema,
+});
 export const BeginDocumentReplacementRequestSchema = z.object({
   replacedVersionId: UuidSchema,
   fileName: z.string().trim().min(1).max(255),
