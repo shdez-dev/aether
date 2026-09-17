@@ -2373,6 +2373,17 @@ describe("document project authorization endpoints", () => {
         })
       ).statusCode,
     ).toBe(403);
+    const withdrawUrl = `/v1/documents/${started.document.id}/versions/${started.version.id}/withdraw`;
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: withdrawUrl,
+          headers: headers("project-document-withdraw-denied"),
+          payload: { reason: "No debe retirarse sin participación" },
+        })
+      ).statusCode,
+    ).toBe(403);
     projectAccess.grant(projectId, "member");
     const allowedDownload = await app.inject({
       method: "GET",
@@ -2391,6 +2402,14 @@ describe("document project authorization endpoints", () => {
     });
     expect(allowedComplete.statusCode).toBe(200);
     expect(allowedComplete.json()).toMatchObject({ status: "pending_scan" });
+    const allowedWithdraw = await app.inject({
+      method: "POST",
+      url: withdrawUrl,
+      headers: headers("project-document-withdraw-allowed"),
+      payload: { reason: "Sustituir por versión corregida" },
+    });
+    expect(allowedWithdraw.statusCode).toBe(200);
+    expect(allowedWithdraw.json()).toMatchObject({ status: "withdrawn" });
     expect(
       (
         await app.inject({
