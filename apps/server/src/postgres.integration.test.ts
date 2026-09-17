@@ -9,6 +9,7 @@ import {
   EvaluationService,
   InitiativeVersionConflictError,
   InitiativeService,
+  NotificationService,
   OutboxWorker,
   ProjectAlreadyExistsError,
   ProjectService,
@@ -28,6 +29,7 @@ import {
   PostgresInitiativeAuditStore,
   PostgresInitiativeStore,
   PostgresIdempotencyStore,
+  PostgresNotificationStore,
   PostgresOutboxStore,
   PostgresOutboxAdministrationStore,
   PostgresProjectAuditStore,
@@ -1384,6 +1386,61 @@ describe.sequential("PostgreSQL integration", () => {
       await expect(store.reserve(pending)).resolves.toEqual({
         kind: "claimed",
       });
+    },
+  );
+
+  runPostgresIntegration(
+    "deduplicates notifications by recipient and event key",
+    async () => {
+      const tenants = new TenantService({
+        store: new PostgresTenantStore(pool),
+        ids: { next: randomUUID },
+        tokens: {
+          generate: () => "notification-token",
+          hash: (value) => value,
+        },
+        clock: { now: () => new Date("2026-09-17T12:00:00.000Z") },
+      });
+      const owner = "notifications-owner@example.test";
+      const organization = await tenants.createOrganization({
+        actorId: owner,
+        actorEmail: owner,
+        name: "Notification integration",
+        timezone: "UTC",
+        locale: "es-CL",
+      });
+      const workspace = await tenants.createWorkspace({
+        actorId: owner,
+        organizationId: organization.id,
+        name: "Notifications",
+        mode: "institutional",
+      });
+      const notifications = new NotificationService({
+        store: new PostgresNotificationStore(pool),
+        tenancy: new PostgresTenantStore(pool),
+        ids: { next: randomUUID },
+        clock: { now: () => new Date("2026-09-17T12:00:00.000Z") },
+      });
+      const input = {
+        organizationId: organization.id,
+        workspaceId: workspace.id,
+        recipientActorId: owner,
+        eventKey: `notification.integration.v1:${randomUUID()}`,
+        resourceType: "project" as const,
+        resourceId: randomUUID(),
+        title: "Actualización disponible",
+      };
+
+      const first = await notifications.notify(input);
+      const duplicate = await notifications.notify(input);
+
+      expect(duplicate).toEqual(first);
+      await expect(
+        notifications.inbox({
+          actorId: owner,
+          organizationId: organization.id,
+        }),
+      ).resolves.toEqual([first]);
     },
   );
 

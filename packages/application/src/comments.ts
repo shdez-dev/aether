@@ -59,13 +59,11 @@ export class CommentService {
     );
     await assertWorkspaceWritable(this.d.tenancy, resource.workspaceId);
     for (const actorId of new Set(input.mentionedActorIds))
-      if (
-        !(await this.d.tenancy.findOrganizationRole({
-          actorId,
-          organizationId: resource.organizationId,
-        }))
-      )
-        throw new AccessDeniedError("organization:read");
+      await this.requireAccess(
+        actorId,
+        input.resourceType,
+        input.resourceId,
+      );
     const now = this.d.clock.now();
     const comment: Comment = {
       id: this.d.ids.next(),

@@ -168,6 +168,7 @@ const evidence = new EvidenceService({
 const notifications = new NotificationService({
   store: new PostgresNotificationStore(pool),
   tenancy: new PostgresTenantStore(pool),
+  projects: new PostgresDocumentProjectAccess(pool),
   ids: { next: randomUUID },
   clock: { now: () => new Date() },
 });

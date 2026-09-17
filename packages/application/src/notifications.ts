@@ -1,4 +1,5 @@
 import { AccessDeniedError, type TenantStore } from "./tenancy.js";
+import type { DocumentProjectAccess } from "./documents.js";
 
 export type Notification = Readonly<{
   id: string;
@@ -41,6 +42,7 @@ export class NotificationService {
     private readonly dependencies: {
       store: NotificationStore;
       tenancy: TenantStore;
+      projects?: DocumentProjectAccess;
       ids: { next(): string };
       clock: { now(): Date };
     },
@@ -116,15 +118,21 @@ export class NotificationService {
       actorId,
       organizationId: notification.organizationId,
     });
-    return (
-      role === "owner" ||
-      role === "admin" ||
-      Boolean(
-        await this.dependencies.tenancy.findWorkspaceRole({
-          actorId,
-          workspaceId: notification.workspaceId,
-        }),
-      )
-    );
+    if (role === "owner" || role === "admin") return true;
+    if (
+      !(await this.dependencies.tenancy.findWorkspaceRole({
+        actorId,
+        workspaceId: notification.workspaceId,
+      }))
+    )
+      return false;
+    return notification.resourceType !== "project"
+      ? true
+      : Boolean(
+          await this.dependencies.projects?.isParticipant({
+            actorId,
+            projectId: notification.resourceId,
+          }),
+        );
   }
 }
