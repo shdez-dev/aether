@@ -121,6 +121,15 @@ const callbackQuery = z.object({
   state: z.string().min(1),
   error: z.string().optional(),
 });
+const publicRoutes = new Set([
+  "/health",
+  "/metrics",
+  "/ready",
+  "/auth/login",
+  "/auth/account-management/status",
+  "/auth/account-management",
+  "/auth/callback",
+]);
 
 export async function buildServer(input: {
   config: ServerConfig;
@@ -269,6 +278,11 @@ export async function buildServer(input: {
     ) {
       assertCsrf(request, input.config);
     }
+  });
+  app.addHook("preHandler", async (request, reply) => {
+    const routeUrl = request.routeOptions.url;
+    if (routeUrl && publicRoutes.has(routeUrl)) return;
+    await requireSession(request, reply, input.auth, input.config);
   });
   app.setErrorHandler(async (error, request, reply) => {
     const errorStatusCode =

@@ -228,6 +228,36 @@ function responseCookies(response: {
 }
 
 describe("HTTP authentication boundary", () => {
+  it("deniega anónimos por defecto y conserva explícitas las rutas públicas", async () => {
+    const auth = new AuthService({
+      store: new InMemoryAuthStore(),
+      cipher: createAesGcmCipher(config.sessionEncryptionKey),
+      oidc,
+      issuer: config.oidcIssuerUrl,
+      sessionTtlSeconds: config.sessionTtlSeconds,
+      sessionRenewalWindowSeconds: config.sessionRenewalWindowSeconds,
+    });
+    const app = await buildServer({
+      config,
+      auth,
+      tenants: {} as TenantService,
+      initiatives: {} as InitiativeService,
+      evaluations: {} as EvaluationService,
+      projects: {} as ProjectService,
+      idempotency: new InMemoryIdempotencyStore(),
+    });
+    await expect(
+      app.inject({ method: "GET", url: "/health" }),
+    ).resolves.toMatchObject({ statusCode: 200 });
+    await expect(
+      app.inject({ method: "GET", url: "/v1/organizations" }),
+    ).resolves.toMatchObject({ statusCode: 401 });
+    await expect(
+      app.inject({ method: "GET", url: "/auth/sessions" }),
+    ).resolves.toMatchObject({ statusCode: 401 });
+    await app.close();
+  });
+
   it("expone indisponibilidad de OIDC sin iniciar una transacción ni una sesión", async () => {
     const auth = new AuthService({
       store: new InMemoryAuthStore(),
