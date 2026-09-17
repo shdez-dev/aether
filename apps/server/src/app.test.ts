@@ -2340,7 +2340,25 @@ describe("document project authorization endpoints", () => {
         })
       ).statusCode,
     ).toBe(403);
+    const downloadUrl = `/v1/documents/${started.document.id}/versions/${started.version.id}/download`;
+    const deniedDownload = await app.inject({
+      method: "GET",
+      url: downloadUrl,
+      headers: { cookie: "aether_session=member-project-document-session" },
+    });
+    expect(deniedDownload.statusCode).toBe(403);
+    expect(deniedDownload.json()).not.toHaveProperty("url");
     projectAccess.grant(projectId, "member");
+    const allowedDownload = await app.inject({
+      method: "GET",
+      url: downloadUrl,
+      headers: { cookie: "aether_session=member-project-document-session" },
+    });
+    expect(allowedDownload.statusCode).toBe(200);
+    expect(allowedDownload.json()).toMatchObject({
+      url: expect.any(String),
+      expiresAt: expect.any(String),
+    });
     expect(
       (
         await app.inject({
