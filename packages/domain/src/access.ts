@@ -33,6 +33,7 @@ export type CapabilityAuthorizationAction =
 export type InitiativeAction = "edit" | "present" | "review" | "decide";
 
 export type AccessCapabilities = Readonly<{
+  accessLevels: readonly ContextualAccessLevel[];
   canReadOrganization: boolean;
   canManageOrganization: boolean;
   canCreateWorkspace: boolean;
@@ -41,8 +42,16 @@ export type AccessCapabilities = Readonly<{
   canInviteMembers: boolean;
 }>;
 
+export const ContextualAccessLevels = [
+  "READ",
+  "CONTRIBUTE",
+  "MANAGE",
+  "ADMIN",
+] as const;
+export type ContextualAccessLevel = (typeof ContextualAccessLevels)[number];
+
 type PermissionRule = Readonly<{
-  capability: keyof AccessCapabilities;
+  capability: Exclude<keyof AccessCapabilities, "accessLevels">;
   organizationRoles?: readonly OrganizationRole[];
   workspaceRoles?: readonly WorkspaceRole[];
 }>;
@@ -157,6 +166,7 @@ export function calculateCapabilities(
   input: AuthorizationContext,
 ): AccessCapabilities {
   return {
+    accessLevels: resolveContextualAccessLevels(input),
     canReadOrganization: allows("organization:read", input),
     canManageOrganization: allows("organization:manage", input),
     canCreateWorkspace: allows("workspace:create", input),
@@ -164,6 +174,22 @@ export function calculateCapabilities(
     canManageWorkspace: allows("workspace:manage", input),
     canInviteMembers: allows("member:invite", input),
   };
+}
+
+export function resolveContextualAccessLevels(
+  input: AuthorizationContext,
+): readonly ContextualAccessLevel[] {
+  const levels: ContextualAccessLevel[] = [];
+  const organizationManager =
+    input.organizationRole === "owner" || input.organizationRole === "admin";
+  const workspaceContributor =
+    input.workspaceRole === "member" || input.workspaceRole === "admin";
+  const workspaceManager = input.workspaceRole === "admin";
+  if (input.organizationRole || input.workspaceRole) levels.push("READ");
+  if (organizationManager || workspaceContributor) levels.push("CONTRIBUTE");
+  if (organizationManager || workspaceManager) levels.push("MANAGE");
+  if (input.organizationRole === "owner") levels.push("ADMIN");
+  return levels;
 }
 
 export function isActionAllowed(

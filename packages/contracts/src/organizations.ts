@@ -152,6 +152,7 @@ export const InvitationResponseSchema = z.object({
 });
 
 export const AccessCapabilitiesResponseSchema = z.object({
+  accessLevels: z.array(z.enum(["READ", "CONTRIBUTE", "MANAGE", "ADMIN"])),
   canReadOrganization: z.boolean(),
   canManageOrganization: z.boolean(),
   canCreateWorkspace: z.boolean(),

@@ -5,6 +5,7 @@ import {
   calculateCapabilities,
   isActionAllowed,
   isRoleAllowed,
+  resolveContextualAccessLevels,
   type AccessCapabilities,
   type OrganizationRole,
   type WorkspaceRole,
@@ -14,7 +15,7 @@ describe("AuthorizationMatrix", () => {
   it.each<{
     organizationRole: OrganizationRole | null;
     workspaceRole: WorkspaceRole | null;
-    expected: AccessCapabilities;
+    expected: Omit<AccessCapabilities, "accessLevels">;
   }>([
     {
       organizationRole: "owner",
@@ -81,14 +82,14 @@ describe("AuthorizationMatrix", () => {
     ({ organizationRole, workspaceRole, expected }) => {
       expect(
         calculateCapabilities({ organizationRole, workspaceRole }),
-      ).toEqual(expected);
+      ).toMatchObject(expected);
     },
   );
 
   it.each<{
     organizationRole: OrganizationRole | null;
     workspaceRole: WorkspaceRole | null;
-    expected: AccessCapabilities;
+    expected: Omit<AccessCapabilities, "accessLevels">;
   }>([
     {
       organizationRole: "owner",
@@ -158,7 +159,7 @@ describe("AuthorizationMatrix", () => {
         workspaceRole,
       });
 
-      expect(capabilities).toEqual(expected);
+      expect(capabilities).toMatchObject(expected);
       for (const action of [
         "organization:read",
         "organization:manage",
@@ -217,6 +218,36 @@ describe("AuthorizationMatrix", () => {
       expect(isRoleAllowed(action, { organizationRole, workspaceRole })).toBe(
         allowed,
       );
+    },
+  );
+
+  it.each([
+    {
+      organizationRole: "owner" as const,
+      workspaceRole: null,
+      expected: ["READ", "CONTRIBUTE", "MANAGE", "ADMIN"],
+    },
+    {
+      organizationRole: "admin" as const,
+      workspaceRole: null,
+      expected: ["READ", "CONTRIBUTE", "MANAGE"],
+    },
+    {
+      organizationRole: "member" as const,
+      workspaceRole: "viewer" as const,
+      expected: ["READ"],
+    },
+    {
+      organizationRole: "member" as const,
+      workspaceRole: "member" as const,
+      expected: ["READ", "CONTRIBUTE"],
+    },
+  ])(
+    "derives ordered contextual access levels",
+    ({ organizationRole, workspaceRole, expected }) => {
+      expect(
+        resolveContextualAccessLevels({ organizationRole, workspaceRole }),
+      ).toEqual(expected);
     },
   );
 });

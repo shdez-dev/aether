@@ -57,6 +57,7 @@ test("carga una iniciativa y la presenta", async ({ page }) => {
     (route) =>
       route.fulfill({
         json: {
+          accessLevels: ["READ", "CONTRIBUTE", "MANAGE", "ADMIN"],
           canReadOrganization: true,
           canManageOrganization: true,
           canCreateWorkspace: true,

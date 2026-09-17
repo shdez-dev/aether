@@ -39,6 +39,7 @@ const emptyDraft: Draft = {
   classification: "internal",
 };
 const emptyCapabilities: AccessCapabilitiesResponse = {
+  accessLevels: [],
   canReadOrganization: false,
   canManageOrganization: false,
   canCreateWorkspace: false,

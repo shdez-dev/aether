@@ -566,6 +566,7 @@ describe("HTTP authentication boundary", () => {
     });
     expect(capabilities.statusCode).toBe(200);
     expect(capabilities.json()).toEqual({
+      accessLevels: ["READ"],
       canReadOrganization: true,
       canManageOrganization: false,
       canCreateWorkspace: false,
