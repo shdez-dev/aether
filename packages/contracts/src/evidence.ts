@@ -2,8 +2,10 @@ import { z } from "zod";
 import { UuidSchema } from "./common.js";
 
 export const EvidenceReferenceSubjectTypeSchema = z.enum([
+  "initiative",
   "evaluation",
   "decision",
+  "project",
   "project_closure",
 ]);
 export const AttachEvidenceRequestSchema = z.object({

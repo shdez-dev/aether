@@ -3144,8 +3144,10 @@ export class PostgresEvidenceStore
     subjectId: string;
   }): Promise<{ organizationId: string; workspaceId: string } | null> {
     const source = {
+      initiative: "initiatives",
       evaluation: "initiative_evaluations",
       decision: "initiative_decisions",
+      project: "projects",
       project_closure: "project_closures",
     }[input.subjectType];
     const result = await this.pool.query<DocumentResourceRow>(

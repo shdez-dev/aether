@@ -1,7 +1,9 @@
 /** Referencia inmutable a una versión concreta de evidencia documental. */
 export const EvidenceReferenceSubjectTypes = [
+  "initiative",
   "evaluation",
   "decision",
+  "project",
   "project_closure",
 ] as const;
 export type EvidenceReferenceSubjectType =

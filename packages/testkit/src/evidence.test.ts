@@ -8,6 +8,115 @@ import { InMemoryEvidenceStore } from "./evidence.js";
 import { InMemoryTenantStore } from "./tenancy.js";
 
 describe("evidence references", () => {
+  it("relaciona una versión publicada con iniciativa y proyecto", async () => {
+    const organizationId = "00000000-0000-4000-8000-000000000101";
+    const workspaceId = "00000000-0000-4000-8000-000000000102";
+    const initiativeId = "00000000-0000-4000-8000-000000000103";
+    const projectId = "00000000-0000-4000-8000-000000000104";
+    const documentId = "00000000-0000-4000-8000-000000000105";
+    const versionId = "00000000-0000-4000-8000-000000000106";
+    const documents = new InMemoryDocumentStore();
+    const references = new InMemoryEvidenceStore();
+    const tenancy = new InMemoryTenantStore();
+    await tenancy.bootstrapOrganization({
+      organization: {
+        id: organizationId,
+        name: "Aether",
+        organizationType: null,
+        timezone: "UTC",
+        locale: "es-CL",
+        version: 0,
+      },
+      ownerActorId: "owner",
+      ownerEmail: "owner@example.test",
+    });
+    await tenancy.createWorkspace({
+      id: workspaceId,
+      organizationId,
+      name: "Estrategia",
+      mode: "institutional",
+      version: 0,
+      status: "active",
+      archivedAt: null,
+      archivedByActorId: null,
+    });
+    references.setSubject("initiative", initiativeId, {
+      organizationId,
+      workspaceId,
+    });
+    references.setSubject("project", projectId, {
+      organizationId,
+      workspaceId,
+    });
+    const createdAt = new Date("2026-09-17T15:00:00.000Z");
+    const document: InstitutionalDocument = {
+      id: documentId,
+      organizationId,
+      workspaceId,
+      resourceType: "initiative",
+      resourceId: initiativeId,
+      classification: "internal",
+      createdByActorId: "owner",
+      createdAt,
+    };
+    const version: DocumentVersion = {
+      id: versionId,
+      documentId,
+      versionNumber: 1,
+      originalName: "respaldo.pdf",
+      declaredContentType: "application/pdf",
+      detectedContentType: "application/pdf",
+      byteLength: 10,
+      sha256: "b".repeat(64),
+      status: "published",
+      quarantineKey: "quarantine/x",
+      objectKey: "published/x",
+      createdAt,
+      publishedAt: createdAt,
+      rejectedAt: null,
+      withdrawnAt: null,
+      retentionUntil: null,
+      evidenceStatus: "valid",
+      supersedesVersionId: null,
+      replacedByVersionId: null,
+    };
+    documents.documents.set(document.id, document);
+    documents.versions.set(version.id, version);
+    let sequence = 200;
+    const service = new EvidenceService({
+      references,
+      subjects: references,
+      documents,
+      documentAudit: documents,
+      tenancy,
+      ids: {
+        next: () =>
+          `00000000-0000-4000-8000-${String(++sequence).padStart(12, "0")}`,
+      },
+      clock: { now: () => createdAt },
+    });
+
+    for (const [subjectType, subjectId] of [
+      ["initiative", initiativeId],
+      ["project", projectId],
+    ] as const)
+      await expect(
+        service.attach({
+          actorId: "owner",
+          organizationId,
+          subjectType,
+          subjectId,
+          documentId,
+          documentVersionId: versionId,
+          correlationId: "00000000-0000-4000-8000-000000000107",
+        }),
+      ).resolves.toMatchObject({
+        subjectType,
+        subjectId,
+        documentVersionId: versionId,
+      });
+  });
+
   it("preserva la versión histórica y marca inválido el cumplimiento al retirar evidencia", async () => {
     const organizationId = "00000000-0000-4000-8000-000000000001";
     const workspaceId = "00000000-0000-4000-8000-000000000002";
