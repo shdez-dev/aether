@@ -43,6 +43,8 @@ import type {
   CommentStore,
   Comment,
   CommentAuditEvent,
+  ExportJob,
+  ExportJobStore,
   EvidenceReferenceStore,
   EvidenceSubjectLookup,
   ProjectClosureStore,
@@ -3342,6 +3344,60 @@ export class PostgresProductMetricsStore implements ProductMetricsStore {
     };
   }
 }
+export class PostgresExportJobStore implements ExportJobStore {
+  constructor(private readonly pool: Pool) {}
+  async create(job: ExportJob): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO export_jobs (id,organization_id,requested_by_actor_id,scope,status,object_key,expires_at,requested_at,completed_at,error_code)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      [
+        job.id,
+        job.organizationId,
+        job.requestedByActorId,
+        job.scope,
+        job.status,
+        job.objectKey,
+        job.expiresAt,
+        job.requestedAt,
+        job.completedAt,
+        job.errorCode,
+      ],
+    );
+  }
+  async list(input: {
+    organizationId: string;
+    requestedByActorId: string;
+  }): Promise<readonly ExportJob[]> {
+    const result = await this.pool.query<{
+      id: string;
+      organization_id: string;
+      requested_by_actor_id: string;
+      scope: ExportJob["scope"];
+      status: ExportJob["status"];
+      object_key: string | null;
+      expires_at: Date | null;
+      requested_at: Date;
+      completed_at: Date | null;
+      error_code: string | null;
+    }>(
+      `SELECT id,organization_id,requested_by_actor_id,scope,status,object_key,expires_at,requested_at,completed_at,error_code FROM export_jobs WHERE organization_id=$1 AND requested_by_actor_id=$2 ORDER BY requested_at DESC, id DESC`,
+      [input.organizationId, input.requestedByActorId],
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      organizationId: row.organization_id,
+      requestedByActorId: row.requested_by_actor_id,
+      scope: row.scope,
+      status: row.status,
+      objectKey: row.object_key,
+      expiresAt: row.expires_at,
+      requestedAt: row.requested_at,
+      completedAt: row.completed_at,
+      errorCode: row.error_code,
+    }));
+  }
+}
+
 export class PostgresNotificationStore implements NotificationStore {
   constructor(private readonly pool: Pool) {}
   async create(notification: Notification): Promise<Notification> {
