@@ -59,6 +59,17 @@ describe("notifications", () => {
     await expect(
       service.inbox({ actorId: "owner", organizationId }),
     ).resolves.toEqual([first]);
+    await expect(
+      service.read({ actorId: "owner", notificationId: first.id }),
+    ).resolves.toMatchObject({ id: first.id, readAt: expect.any(Date) });
+    await service.setEmailPreference({
+      actorId: "owner",
+      organizationId,
+      emailEnabled: false,
+    });
+    await expect(
+      store.getPreference({ actorId: "owner", organizationId }),
+    ).resolves.toMatchObject({ emailEnabled: false });
   });
 
   it("oculta la notificación de proyecto al perder la participación", async () => {

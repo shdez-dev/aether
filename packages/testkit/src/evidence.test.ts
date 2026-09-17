@@ -12,9 +12,10 @@ describe("evidence references", () => {
     const organizationId = "00000000-0000-4000-8000-000000000101";
     const workspaceId = "00000000-0000-4000-8000-000000000102";
     const initiativeId = "00000000-0000-4000-8000-000000000103";
-    const projectId = "00000000-0000-4000-8000-000000000104";
-    const documentId = "00000000-0000-4000-8000-000000000105";
-    const versionId = "00000000-0000-4000-8000-000000000106";
+    const decisionId = "00000000-0000-4000-8000-000000000104";
+    const projectId = "00000000-0000-4000-8000-000000000105";
+    const documentId = "00000000-0000-4000-8000-000000000106";
+    const versionId = "00000000-0000-4000-8000-000000000107";
     const documents = new InMemoryDocumentStore();
     const references = new InMemoryEvidenceStore();
     const tenancy = new InMemoryTenantStore();
@@ -41,6 +42,10 @@ describe("evidence references", () => {
       archivedByActorId: null,
     });
     references.setSubject("initiative", initiativeId, {
+      organizationId,
+      workspaceId,
+    });
+    references.setSubject("decision", decisionId, {
       organizationId,
       workspaceId,
     });
@@ -98,6 +103,7 @@ describe("evidence references", () => {
 
     for (const [subjectType, subjectId] of [
       ["initiative", initiativeId],
+      ["decision", decisionId],
       ["project", projectId],
     ] as const)
       await expect(
@@ -108,7 +114,7 @@ describe("evidence references", () => {
           subjectId,
           documentId,
           documentVersionId: versionId,
-          correlationId: "00000000-0000-4000-8000-000000000107",
+          correlationId: "00000000-0000-4000-8000-000000000108",
         }),
       ).resolves.toMatchObject({
         subjectType,
