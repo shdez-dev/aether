@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { readFile } from "node:fs/promises";
 
 import {
   AuthService,
@@ -11,6 +12,7 @@ import {
   type OidcProvider,
 } from "@aether/auth";
 import { ApiProblemSchema } from "@aether/contracts";
+import { parse } from "yaml";
 import {
   EvaluationService,
   AuditHistoryService,
@@ -277,6 +279,71 @@ describe("HTTP authentication boundary", () => {
       ).statusCode,
     ).toBe(200);
     expect(authStore.activeSessionLookups).toBe(1);
+    await app.close();
+  });
+
+  it("requires a session for every cookie-protected OpenAPI operation", async () => {
+    const auth = new AuthService({
+      store: new InMemoryAuthStore(),
+      cipher: createAesGcmCipher(config.sessionEncryptionKey),
+      oidc,
+      issuer: config.oidcIssuerUrl,
+      sessionTtlSeconds: config.sessionTtlSeconds,
+      sessionRenewalWindowSeconds: config.sessionRenewalWindowSeconds,
+    });
+    const app = await buildServer({
+      config,
+      auth,
+      tenants: {} as TenantService,
+      initiatives: {} as InitiativeService,
+      evaluations: {} as EvaluationService,
+      projects: {} as ProjectService,
+      idempotency: new InMemoryIdempotencyStore(),
+    });
+    const spec = parse(
+      await readFile(
+        new URL(
+          "../../../packages/contracts/openapi/aether.v1.yaml",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    ) as {
+      paths: Record<
+        string,
+        Record<string, { security?: readonly Record<string, unknown>[] }>
+      >;
+    };
+    const unsafeMethods = new Set(["post", "put", "patch", "delete"]);
+    const protectedOperations = Object.entries(spec.paths).flatMap(
+      ([path, operations]) =>
+        Object.entries(operations).flatMap(([method, operation]) =>
+          operation.security?.some((entry) => "cookieSession" in entry)
+            ? [[method, path] as const]
+            : [],
+        ),
+    );
+    expect(protectedOperations.length).toBeGreaterThan(0);
+    for (const [method, path] of protectedOperations) {
+      const response = await app.inject({
+        method: method.toUpperCase() as
+          "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
+        url: path.replaceAll(
+          /\{[^}]+\}/g,
+          "00000000-0000-4000-8000-000000000001",
+        ),
+        ...(unsafeMethods.has(method)
+          ? {
+              headers: {
+                origin: config.webOrigin,
+                "x-csrf-token": "openapi-auth-boundary",
+                cookie: "aether_csrf=openapi-auth-boundary",
+              },
+            }
+          : {}),
+      });
+      expect(response.statusCode, `${method.toUpperCase()} ${path}`).toBe(401);
+    }
     await app.close();
   });
 
