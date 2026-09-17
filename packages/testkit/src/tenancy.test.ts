@@ -103,6 +103,31 @@ describe("TenantService", () => {
     ).not.toContain(invitation.deliveryToken);
   });
 
+  it("conserva el tipo explícito de organizaciones nuevas sin clasificar registros previos", async () => {
+    const { service, store } = createTenantService();
+    const organization = await service.createOrganization({
+      actorId: "owner",
+      actorEmail: "owner@example.test",
+      name: "Empresa",
+      organizationType: "business",
+      timezone: "UTC",
+      locale: "es-CL",
+    });
+    expect(organization.organizationType).toBe("business");
+    expect(await service.listOrganizations("owner")).toEqual([
+      expect.objectContaining({ organizationType: "business" }),
+    ]);
+    store.organizations.set("legacy", {
+      id: "legacy",
+      name: "Sin clasificar",
+      organizationType: null,
+      timezone: "UTC",
+      locale: "es-CL",
+      version: 0,
+    });
+    expect(store.organizations.get("legacy")?.organizationType).toBeNull();
+  });
+
   it("rechaza, revoca y vence invitaciones sin conceder acceso ni duplicar aceptación", async () => {
     const { service, store, setTime } = createTenantService();
     const organization = await service.createOrganization({

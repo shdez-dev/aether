@@ -428,10 +428,11 @@ export class PostgresTenantStore implements TenantStore {
     try {
       await client.query("BEGIN");
       await client.query(
-        "INSERT INTO organizations (id, name, timezone, locale, version) VALUES ($1, $2, $3, $4, $5)",
+        "INSERT INTO organizations (id, name, organization_type, timezone, locale, version) VALUES ($1, $2, $3, $4, $5, $6)",
         [
           input.organization.id,
           input.organization.name,
+          input.organization.organizationType,
           input.organization.timezone,
           input.organization.locale,
           input.organization.version,
@@ -546,7 +547,7 @@ export class PostgresTenantStore implements TenantStore {
   }
   async listOrganizations(actorId: string): Promise<readonly Organization[]> {
     const result = await this.pool.query<Organization>(
-      `SELECT organizations.id, organizations.name, organizations.timezone, organizations.locale, organizations.version FROM organizations JOIN organization_memberships ON organization_memberships.organization_id = organizations.id WHERE organization_memberships.actor_id = $1 AND organization_memberships.status = 'active' ORDER BY organizations.name`,
+      `SELECT organizations.id, organizations.name, organizations.organization_type AS "organizationType", organizations.timezone, organizations.locale, organizations.version FROM organizations JOIN organization_memberships ON organization_memberships.organization_id = organizations.id WHERE organization_memberships.actor_id = $1 AND organization_memberships.status = 'active' ORDER BY organizations.name`,
       [actorId],
     );
     return result.rows;

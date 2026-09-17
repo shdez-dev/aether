@@ -1917,18 +1917,25 @@ components:
     CreateOrganizationRequest:
       type: object
       additionalProperties: false
-      required: [name, timezone, locale, policy]
+      required: [name, organizationType, timezone, locale, policy]
       properties:
         name: { type: string, minLength: 1, maxLength: 255 }
+        organizationType:
+          { type: string, enum: [personal, business, institutional] }
         timezone: { type: string, minLength: 1, maxLength: 64 }
         locale: { type: string, minLength: 2, maxLength: 16 }
         policy: { $ref: "#/components/schemas/TenancyPolicyValues" }
     Organization:
       type: object
-      required: [id, name, timezone, locale, version]
+      required: [id, name, organizationType, timezone, locale, version]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
+        organizationType:
+          {
+            type: [string, "null"],
+            enum: [personal, business, institutional, null],
+          }
         timezone: { type: string }
         locale: { type: string }
         version: { type: integer, minimum: 0 }

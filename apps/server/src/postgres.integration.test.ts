@@ -804,6 +804,7 @@ describe.sequential("PostgreSQL integration", () => {
         actorId: "policy-owner",
         actorEmail: "policy-owner@example.test",
         name: "Policy organization",
+        organizationType: "business",
         timezone: "UTC",
         locale: "es-CL",
         policy: { dataResidencyRegion: "cl", retentionDays: 365 },
@@ -824,6 +825,12 @@ describe.sequential("PostgreSQL integration", () => {
         name: "Regional workspace",
         mode: "institutional",
       });
+      await expect(
+        pool.query<{ organization_type: string | null }>(
+          "SELECT organization_type FROM organizations WHERE id = $1",
+          [organization.id],
+        ),
+      ).resolves.toMatchObject({ rows: [{ organization_type: "business" }] });
 
       await expect(
         tenants.getEffectivePolicy({

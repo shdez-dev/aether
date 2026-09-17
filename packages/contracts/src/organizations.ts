@@ -63,6 +63,7 @@ export const TenancyPolicyValuesSchema = z.object({
 
 export const CreateOrganizationRequestSchema = z.object({
   name: NonEmptyTextSchema.max(255),
+  organizationType: z.enum(["personal", "business", "institutional"]),
   timezone: z.string().trim().min(1).max(64),
   locale: z.string().trim().min(2).max(16),
   policy: TenancyPolicyValuesSchema,
@@ -71,6 +72,9 @@ export const CreateOrganizationRequestSchema = z.object({
 export const OrganizationResponseSchema = z.object({
   id: UuidSchema,
   name: z.string(),
+  organizationType: z
+    .enum(["personal", "business", "institutional"])
+    .nullable(),
   timezone: z.string(),
   locale: z.string(),
   version: z.number().int().nonnegative(),

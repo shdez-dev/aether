@@ -21,6 +21,7 @@ describe("evidence references", () => {
       organization: {
         id: organizationId,
         name: "Aether",
+        organizationType: null,
         timezone: "UTC",
         locale: "es-CL",
         version: 0,

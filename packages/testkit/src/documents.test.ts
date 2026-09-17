@@ -217,6 +217,7 @@ describe("document evidence slice", () => {
       organization: {
         id: ids.next(),
         name: "Org",
+        organizationType: null,
         timezone: "UTC",
         locale: "es",
         version: 0,
@@ -297,6 +298,7 @@ describe("document evidence slice", () => {
     const organization = {
       id: ids.next(),
       name: "Org",
+      organizationType: null,
       timezone: "UTC",
       locale: "es",
       version: 0,

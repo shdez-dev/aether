@@ -13,6 +13,7 @@ import {
 export type Organization = Readonly<{
   id: string;
   name: string;
+  organizationType: "personal" | "business" | "institutional" | null;
   timezone: string;
   locale: string;
   version: number;
@@ -315,6 +316,7 @@ export class TenantService {
     actorId: string;
     actorEmail: string;
     name: string;
+    organizationType?: Organization["organizationType"];
     timezone: string;
     locale: string;
     policy?: OrganizationPolicyInput;
@@ -325,6 +327,7 @@ export class TenantService {
     const organization: Organization = {
       id: this.dependencies.ids.next(),
       name: input.name,
+      organizationType: input.organizationType ?? null,
       timezone: input.timezone,
       locale: input.locale,
       version: 0,

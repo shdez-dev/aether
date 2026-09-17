@@ -57,6 +57,7 @@ describe("institutional product metrics", () => {
       organization: {
         id: organizationId,
         name: "Aether",
+        organizationType: null,
         timezone: "America/Santiago",
         locale: "es-CL",
         version: 0,
@@ -89,6 +90,7 @@ describe("institutional product metrics", () => {
       organization: {
         id: organizationId,
         name: "Aether",
+        organizationType: null,
         timezone: "UTC",
         locale: "es-CL",
         version: 0,
@@ -100,6 +102,7 @@ describe("institutional product metrics", () => {
       organization: {
         id: otherOrganizationId,
         name: "Other",
+        organizationType: null,
         timezone: "UTC",
         locale: "es-CL",
         version: 0,

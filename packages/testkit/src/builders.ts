@@ -11,6 +11,7 @@ export function organizationBuilder(
 ): CreateOrganizationRequest {
   return {
     name: "Organización de prueba",
+    organizationType: "institutional",
     timezone: "America/Santiago",
     locale: "es-CL",
     policy: {

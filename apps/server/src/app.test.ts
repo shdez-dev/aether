@@ -740,6 +740,7 @@ describe("HTTP authentication boundary", () => {
       headers: { cookie: `aether_session=${session}; aether_csrf=${csrf}` },
       payload: {
         name: "Aether Test",
+        organizationType: "institutional",
         timezone: "UTC",
         locale: "es-CL",
         policy: { dataResidencyRegion: "cl", retentionDays: 365 },
@@ -756,12 +757,16 @@ describe("HTTP authentication boundary", () => {
       },
       payload: {
         name: "Aether Test",
+        organizationType: "institutional",
         timezone: "UTC",
         locale: "es-CL",
         policy: { dataResidencyRegion: "cl", retentionDays: 365 },
       },
     });
     expect(organization.statusCode).toBe(201);
+    expect(organization.json()).toMatchObject({
+      organizationType: "institutional",
+    });
     const workspace = await app.inject({
       method: "POST",
       url: "/v1/workspaces",
@@ -981,6 +986,7 @@ describe("HTTP authentication boundary", () => {
       },
       payload: {
         name: "Horario exigido",
+        organizationType: "business",
         timezone: "UTC",
         locale: "es-CL",
         policy: {
@@ -1155,6 +1161,7 @@ describe("HTTP authentication boundary", () => {
       headers,
       payload: {
         name: "Aether Test",
+        organizationType: "institutional",
         timezone: "UTC",
         locale: "es-CL",
         policy: { dataResidencyRegion: "cl", retentionDays: 365 },
