@@ -16,6 +16,7 @@ import {
   AuditHistoryService,
   InitiativeService,
   DocumentService,
+  DocumentScanService,
   ProjectService,
   ProductMetricsService,
   type SecurityAuditStore,
@@ -37,6 +38,7 @@ import {
   InMemorySupportAccessGrantStore,
   InMemorySupportOperatorDirectory,
   InMemoryDocumentObjectStore,
+  InMemoryDocumentProjectAccess,
   InMemoryDocumentStore,
 } from "@aether/testkit";
 
@@ -2194,6 +2196,161 @@ describe("document relocation endpoint", () => {
       resourceType: "project",
       resourceId: targetId,
     });
+    await app.close();
+  });
+});
+
+describe("document project authorization endpoints", () => {
+  it("denies a workspace member until they participate in the project", async () => {
+    const ids = { next: () => crypto.randomUUID() };
+    const clock = { now: () => new Date("2026-09-17T12:00:00.000Z") };
+    const tenantStore = new InMemoryTenantStore();
+    const tenants = new TenantService({
+      store: tenantStore,
+      ids,
+      tokens: { generate: () => "x".repeat(43), hash: (value) => value },
+      clock,
+    });
+    const organization = await tenants.createOrganization({
+      actorId: "owner",
+      actorEmail: "owner@example.test",
+      name: "Documentos de proyecto",
+      timezone: "UTC",
+      locale: "es-CL",
+    });
+    const workspace = await tenants.createWorkspace({
+      actorId: "owner",
+      organizationId: organization.id,
+      name: "Equipo",
+      mode: "team",
+    });
+    const invitation = await tenants.invite({
+      actorId: "owner",
+      organizationId: organization.id,
+      email: "member@example.test",
+      organizationRole: "member",
+      workspaceIds: [workspace.id],
+      workspaceRole: "member",
+      expiresInDays: 1,
+    });
+    await tenants.acceptInvitation({
+      token: invitation.deliveryToken,
+      actorId: "member",
+      actorEmail: "member@example.test",
+    });
+    const documentStore = new InMemoryDocumentStore();
+    const objects = new InMemoryDocumentObjectStore();
+    const projectAccess = new InMemoryDocumentProjectAccess();
+    const projectId = ids.next();
+    documentStore.addResource("project", projectId, {
+      organizationId: organization.id,
+      workspaceId: workspace.id,
+    });
+    const documents = new DocumentService({
+      store: documentStore,
+      audit: documentStore,
+      objects,
+      tenancy: tenantStore,
+      projectAccess,
+      ids,
+      clock,
+      maxBytes: 1_000,
+      urlTtlSeconds: 60,
+    });
+    const started = await documents.beginUpload({
+      actorId: "owner",
+      correlationId: ids.next(),
+      resourceType: "project",
+      resourceId: projectId,
+      classification: "internal",
+      fileName: "entrega.pdf",
+      contentType: "application/pdf",
+      contentLength: 10,
+      sha256: "a".repeat(64),
+    });
+    objects.putQuarantined(started.version.quarantineKey, {
+      bytes: 10,
+      sha256: "a".repeat(64),
+      contentType: "application/pdf",
+    });
+    await documents.completeUpload({
+      actorId: "owner",
+      correlationId: ids.next(),
+      documentId: started.document.id,
+      versionId: started.version.id,
+    });
+    await new DocumentScanService({
+      store: documentStore,
+      audit: documentStore,
+      objects,
+      scanner: {
+        async scan() {
+          return { clean: true, signature: null };
+        },
+      },
+      ids,
+      clock,
+      retentionDays: { internal: 1, confidential: 1, restricted: 1 },
+    }).handle(documentStore.events[0]!);
+    const authStore = new InMemoryAuthStore();
+    const auth = new AuthService({
+      store: authStore,
+      cipher: createAesGcmCipher(config.sessionEncryptionKey),
+      oidc,
+      issuer: config.oidcIssuerUrl,
+      sessionTtlSeconds: config.sessionTtlSeconds,
+      sessionRenewalWindowSeconds: config.sessionRenewalWindowSeconds,
+    });
+    const app = await buildServer({
+      config,
+      auth,
+      tenants,
+      initiatives: {} as InitiativeService,
+      evaluations: {} as EvaluationService,
+      projects: {} as ProjectService,
+      documents,
+      idempotency: new InMemoryIdempotencyStore(),
+    });
+    await createAuthenticatedSession(authStore, {
+      token: "member-project-document-session",
+      actorId: "member",
+      actorEmail: "member@example.test",
+    });
+    const csrf = "member-project-document-csrf";
+    const headers = (key: string) => ({
+      origin: config.webOrigin,
+      "x-csrf-token": csrf,
+      "idempotency-key": key,
+      cookie: `aether_session=member-project-document-session; aether_csrf=${csrf}`,
+    });
+    const payload = {
+      replacedVersionId: started.version.id,
+      fileName: "entrega-corregida.pdf",
+      contentType: "application/pdf",
+      contentLength: 10,
+      sha256: "b".repeat(64),
+    };
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: `/v1/documents/${started.document.id}/replacements`,
+          headers: headers("project-document-denied"),
+          payload,
+        })
+      ).statusCode,
+    ).toBe(403);
+    projectAccess.grant(projectId, "member");
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: `/v1/documents/${started.document.id}/replacements`,
+          headers: headers("project-document-allowed"),
+          payload,
+        })
+      ).statusCode,
+    ).toBe(201);
     await app.close();
   });
 });
