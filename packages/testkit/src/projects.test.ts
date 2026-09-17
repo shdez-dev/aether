@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   AccessDeniedError,
+  DocumentNotFoundError,
   ProjectService,
   TenantService,
 } from "@aether/application";
@@ -268,6 +269,29 @@ describe("project conversion and execution", () => {
     };
     documentStore.documents.set(document.id, document);
     documentStore.versions.set(version.id, version);
+    const foreignDocument: InstitutionalDocument = {
+      ...document,
+      id: ids.next(),
+      resourceId: ids.next(),
+    };
+    const foreignVersion: DocumentVersion = {
+      ...version,
+      id: ids.next(),
+      documentId: foreignDocument.id,
+    };
+    documentStore.documents.set(foreignDocument.id, foreignDocument);
+    documentStore.versions.set(foreignVersion.id, foreignVersion);
+    await expect(
+      projects.acceptDeliverable({
+        actorId: "lead",
+        organizationId: organization.id,
+        projectId: project.id,
+        name: "Documento de otro proyecto",
+        documentId: foreignDocument.id,
+        documentVersionId: foreignVersion.id,
+        correlationId: ids.next(),
+      }),
+    ).rejects.toBeInstanceOf(DocumentNotFoundError);
     const deliverable = await projects.acceptDeliverable({
       actorId: "lead",
       organizationId: organization.id,

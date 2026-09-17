@@ -345,6 +345,8 @@ export class ProjectService {
       !document ||
       document.document.organizationId !== project.organizationId ||
       document.document.workspaceId !== project.workspaceId ||
+      document.document.resourceType !== "project" ||
+      document.document.resourceId !== project.id ||
       document.version.status !== "published"
     )
       throw new DocumentNotFoundError();

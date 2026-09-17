@@ -23,3 +23,10 @@ registra responsable y vencimiento.
 Creación, cambios de estado, hitos y acciones producen eventos de auditoría con
 actor, correlación y fecha. La migración `0005_projects_and_execution.sql`
 persiste el agregado, ejecución y bitácora.
+
+## Entregables
+
+La aceptación conserva el identificador exacto de la versión publicada. El
+documento debe pertenecer al mismo proyecto, organización y workspace; una
+versión de otro proyecto, incluso dentro del mismo workspace, se trata como no
+encontrada para no revelar ni reutilizar entregables ajenos.
