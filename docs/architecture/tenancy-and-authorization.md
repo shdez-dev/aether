@@ -74,7 +74,7 @@ evaluaciones, proyectos, documentos, evidencia y comentarios responden
 `WORKSPACE_ARCHIVED`; las consultas siguen disponibles. El registro
 `workspace.archived.v1` conserva actor, fecha y correlación.
 
-`GET /v1/organizations/{organizationId}/capabilities` devuelve capacidades calculadas en servidor. La interfaz usa esas capacidades para mostrar u ocultar acciones mediante `canRenderWorkspaceAction`, pero la API repite la autorización en cada mutación y lectura.
+`GET /v1/organizations/{organizationId}/capabilities` devuelve capacidades calculadas en servidor. La interfaz usa esas capacidades para mostrar u ocultar acciones mediante `canRenderWorkspaceAction`, pero la API repite la autorización en cada mutación y lectura. El borde HTTP autentica las rutas protegidas por defecto y conserva la sesión validada sólo durante esa solicitud, por lo que un handler no puede omitir el control ni provocar una segunda evaluación de la misma sesión; la siguiente solicitud vuelve a consultarla.
 
 ## Políticas de residencia y retención
 

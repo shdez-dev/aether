@@ -50,6 +50,7 @@ class InMemoryAuthStore implements AuthStore {
   private readonly sessions = new Map<string, AuthSession>();
   private readonly transactions = new Map<string, LoginTransaction>();
   private readonly identities = new Map<string, string>();
+  activeSessionLookups = 0;
   async resolveIdentity(input: {
     id: string;
     issuer: string;
@@ -69,6 +70,7 @@ class InMemoryAuthStore implements AuthStore {
     tokenHash: string,
     now: Date,
   ): Promise<AuthSession | null> {
+    this.activeSessionLookups++;
     return (
       [...this.sessions.values()].find(
         (session) =>
@@ -231,8 +233,9 @@ function responseCookies(response: {
 
 describe("HTTP authentication boundary", () => {
   it("deniega anónimos por defecto y conserva explícitas las rutas públicas", async () => {
+    const authStore = new InMemoryAuthStore();
     const auth = new AuthService({
-      store: new InMemoryAuthStore(),
+      store: authStore,
       cipher: createAesGcmCipher(config.sessionEncryptionKey),
       oidc,
       issuer: config.oidcIssuerUrl,
@@ -257,6 +260,23 @@ describe("HTTP authentication boundary", () => {
     await expect(
       app.inject({ method: "GET", url: "/auth/sessions" }),
     ).resolves.toMatchObject({ statusCode: 401 });
+    await createAuthenticatedSession(authStore, {
+      token: "single-authentication-per-request",
+      actorId: "authenticated-actor",
+      actorEmail: "actor@example.test",
+    });
+    expect(
+      (
+        await app.inject({
+          method: "GET",
+          url: "/auth/session",
+          headers: {
+            cookie: "aether_session=single-authentication-per-request",
+          },
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect(authStore.activeSessionLookups).toBe(1);
     await app.close();
   });
 

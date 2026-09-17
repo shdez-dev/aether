@@ -116,6 +116,7 @@ import type { ServerConfig } from "./config.js";
 const sessionCookie = "aether_session";
 const transactionCookie = "aether_oidc_tx";
 const csrfCookie = "aether_csrf";
+const authenticatedRequestSessions = new WeakMap<FastifyRequest, AuthSession>();
 const callbackQuery = z.object({
   code: z.string().min(1),
   state: z.string().min(1),
@@ -2913,8 +2914,11 @@ async function requireSession(
   auth: AuthService,
   config: ServerConfig,
 ) {
-  const session = await auth.authenticate(request.cookies[sessionCookie]);
+  const cached = authenticatedRequestSessions.get(request);
+  const session =
+    cached ?? (await auth.authenticate(request.cookies[sessionCookie]));
   if (!session) throw new UnauthenticatedError();
+  if (!cached) authenticatedRequestSessions.set(request, session);
   reply.setCookie(
     sessionCookie,
     request.cookies[sessionCookie]!,
