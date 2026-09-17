@@ -70,6 +70,7 @@ import type {
   EvaluationStandard,
   InitiativeEvaluation,
   InitiativeDecision,
+  DecisionCondition,
   Project,
   ProjectMilestone,
   ProjectNextAction,
@@ -2799,25 +2800,37 @@ export class PostgresEvaluationStore implements EvaluationStore {
     return result.rows[0] ? toInitiativeEvaluation(result.rows[0]) : null;
   }
   async createDecision(decision: InitiativeDecision): Promise<void> {
-    await this.pool.query(
-      `INSERT INTO initiative_decisions (id, organization_id, workspace_id, initiative_id, evaluation_id, outcome, rationale, evidence, standard_id, standard_version, coverage, decided_by_actor_id, decided_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-      [
-        decision.id,
-        decision.organizationId,
-        decision.workspaceId,
-        decision.initiativeId,
-        decision.evaluationId,
-        decision.outcome,
-        decision.rationale,
-        asJson(decision.evidence),
-        decision.standardId,
-        decision.standardVersion,
-        asJson(decision.coverage),
-        decision.decidedByActorId,
-        decision.decidedAt,
-      ],
-    );
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        `INSERT INTO initiative_decisions (id, organization_id, workspace_id, initiative_id, evaluation_id, outcome, rationale, evidence, standard_id, standard_version, coverage, decided_by_actor_id, decided_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+        [
+          decision.id,
+          decision.organizationId,
+          decision.workspaceId,
+          decision.initiativeId,
+          decision.evaluationId,
+          decision.outcome,
+          decision.rationale,
+          asJson(decision.evidence),
+          decision.standardId,
+          decision.standardVersion,
+          asJson(decision.coverage),
+          decision.decidedByActorId,
+          decision.decidedAt,
+        ],
+      );
+      for (const condition of decision.conditions ?? [])
+        await insertDecisionCondition(client, decision, condition);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
   async findDecision(decisionId: string): Promise<InitiativeDecision | null> {
     const result = await this.pool.query<InitiativeDecisionRow>(
@@ -2825,8 +2838,59 @@ export class PostgresEvaluationStore implements EvaluationStore {
        FROM initiative_decisions WHERE id = $1`,
       [decisionId],
     );
-    return result.rows[0] ? toInitiativeDecision(result.rows[0]) : null;
+    if (!result.rows[0]) return null;
+    const conditions = await this.pool.query<DecisionConditionRow>(
+      `SELECT id, description, responsible_actor_id, due_on, status, resolved_by_actor_id, resolved_at, resolution_note
+       FROM initiative_decision_conditions WHERE decision_id = $1 ORDER BY due_on, id`,
+      [decisionId],
+    );
+    return {
+      ...toInitiativeDecision(result.rows[0]),
+      conditions: conditions.rows.map(toDecisionCondition),
+    };
   }
+  async updateDecisionCondition(input: {
+    decisionId: string;
+    condition: DecisionCondition;
+  }): Promise<void> {
+    const updated = await this.pool.query(
+      `UPDATE initiative_decision_conditions
+       SET status = $3, resolved_by_actor_id = $4, resolved_at = $5, resolution_note = $6
+       WHERE id = $1 AND decision_id = $2`,
+      [
+        input.condition.id,
+        input.decisionId,
+        input.condition.status,
+        input.condition.resolvedByActorId,
+        input.condition.resolvedAt,
+        input.condition.resolutionNote,
+      ],
+    );
+    if (updated.rowCount !== 1) throw new Error("Decision condition not found");
+  }
+}
+
+async function insertDecisionCondition(
+  client: PoolClient,
+  decision: InitiativeDecision,
+  condition: DecisionCondition,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO initiative_decision_conditions (id, decision_id, organization_id, description, responsible_actor_id, due_on, status, resolved_by_actor_id, resolved_at, resolution_note)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+    [
+      condition.id,
+      decision.id,
+      decision.organizationId,
+      condition.description,
+      condition.responsibleActorId,
+      condition.dueOn,
+      condition.status,
+      condition.resolvedByActorId,
+      condition.resolvedAt,
+      condition.resolutionNote,
+    ],
+  );
 }
 
 export class PostgresProjectStore implements ProjectStore {
@@ -3939,6 +4003,16 @@ type InitiativeDecisionRow = {
   decided_by_actor_id: string;
   decided_at: Date;
 };
+type DecisionConditionRow = {
+  id: string;
+  description: string;
+  responsible_actor_id: string;
+  due_on: string;
+  status: DecisionCondition["status"];
+  resolved_by_actor_id: string | null;
+  resolved_at: Date | null;
+  resolution_note: string | null;
+};
 type ProjectRow = {
   id: string;
   organization_id: string;
@@ -4159,6 +4233,18 @@ function toInitiativeDecision(row: InitiativeDecisionRow): InitiativeDecision {
     coverage: row.coverage,
     decidedByActorId: row.decided_by_actor_id,
     decidedAt: row.decided_at,
+  };
+}
+function toDecisionCondition(row: DecisionConditionRow): DecisionCondition {
+  return {
+    id: row.id,
+    description: row.description,
+    responsibleActorId: row.responsible_actor_id,
+    dueOn: row.due_on,
+    status: row.status,
+    resolvedByActorId: row.resolved_by_actor_id,
+    resolvedAt: row.resolved_at,
+    resolutionNote: row.resolution_note,
   };
 }
 function toProject(row: ProjectRow): Project {

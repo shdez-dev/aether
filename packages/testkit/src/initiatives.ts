@@ -179,4 +179,17 @@ export class InMemoryEvaluationStore implements EvaluationStore {
   async findDecision(decisionId: string): Promise<InitiativeDecision | null> {
     return this.decisions.get(decisionId) ?? null;
   }
+  async updateDecisionCondition(input: {
+    decisionId: string;
+    condition: import("@aether/domain").DecisionCondition;
+  }): Promise<void> {
+    const decision = this.decisions.get(input.decisionId);
+    if (!decision) throw new Error("Decision condition not found");
+    this.decisions.set(input.decisionId, {
+      ...decision,
+      conditions: (decision.conditions ?? []).map((condition) =>
+        condition.id === input.condition.id ? input.condition : condition,
+      ),
+    });
+  }
 }

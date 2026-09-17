@@ -47,12 +47,30 @@ export const StartReviewRequestSchema = z.object({
     .max(100),
 });
 
-export const DecideInitiativeRequestSchema = z.object({
-  expectedVersion: z.number().int().nonnegative(),
-  evaluationId: UuidSchema,
-  outcome: z.enum(["approved", "rejected", "returned", "cancelled"]),
-  rationale: NonEmptyTextSchema.max(10_000),
-  evidence: z.array(NonEmptyTextSchema.max(2_000)).max(50),
+export const DecisionConditionInputSchema = z.object({
+  description: NonEmptyTextSchema.max(2_000),
+  responsibleActorId: z.string().min(1).max(255),
+  dueOn: z.string().date(),
+});
+export const DecideInitiativeRequestSchema = z
+  .object({
+    expectedVersion: z.number().int().nonnegative(),
+    evaluationId: UuidSchema,
+    outcome: z.enum(["approved", "rejected", "returned", "cancelled"]),
+    rationale: NonEmptyTextSchema.max(10_000),
+    evidence: z.array(NonEmptyTextSchema.max(2_000)).max(50),
+    conditions: z.array(DecisionConditionInputSchema).max(50).optional(),
+  })
+  .superRefine((value, context) => {
+    if (value.outcome !== "approved" && (value.conditions?.length ?? 0) > 0)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["conditions"],
+        message: "Conditions are only allowed for approved decisions",
+      });
+  });
+export const ExemptDecisionConditionRequestSchema = z.object({
+  reason: NonEmptyTextSchema.max(2_000),
 });
 
 export const EvaluationCriterionInputSchema = z.object({
@@ -199,6 +217,18 @@ export const InitiativeDecisionResponseSchema = z.object({
   }),
   decidedByActorId: z.string(),
   decidedAt: z.string().datetime(),
+  conditions: z.array(
+    z.object({
+      id: UuidSchema,
+      description: z.string(),
+      responsibleActorId: z.string(),
+      dueOn: z.string().date(),
+      status: z.enum(["pending", "fulfilled", "exempted"]),
+      resolvedByActorId: z.string().nullable(),
+      resolvedAt: z.string().datetime().nullable(),
+      resolutionNote: z.string().nullable(),
+    }),
+  ),
 });
 export const ProjectResponseSchema = z.object({
   id: UuidSchema,
@@ -228,6 +258,9 @@ export type UpdateInitiativeRequest = z.infer<
 export type StartReviewRequest = z.infer<typeof StartReviewRequestSchema>;
 export type DecideInitiativeRequest = z.infer<
   typeof DecideInitiativeRequestSchema
+>;
+export type ExemptDecisionConditionRequest = z.infer<
+  typeof ExemptDecisionConditionRequestSchema
 >;
 export type PublishEvaluationStandardRequest = z.infer<
   typeof PublishEvaluationStandardRequestSchema

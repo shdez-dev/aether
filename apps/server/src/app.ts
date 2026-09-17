@@ -69,6 +69,7 @@ import {
   SupportAccessGrantContextSchema,
   RevokeSupportAccessGrantSchema,
   DecideInitiativeRequestSchema,
+  ExemptDecisionConditionRequestSchema,
   ActivateEvaluationStandardRequestSchema,
   AuditHistoryQuerySchema,
   AddProjectMilestoneRequestSchema,
@@ -1558,8 +1559,52 @@ export async function buildServer(input: {
       organizationId,
       decisionId,
     });
-    return { ...decision, decidedAt: decision.decidedAt.toISOString() };
+    return toDecisionResponse(decision);
   });
+  app.post(
+    "/v1/decisions/:decisionId/conditions/:conditionId/exemptions",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      assertRecentAuthentication(session, input.config);
+      const params = z
+        .object({
+          decisionId: z.string().uuid(),
+          conditionId: z.string().uuid(),
+        })
+        .parse(request.params);
+      const query = z
+        .object({ organizationId: z.string().uuid() })
+        .parse(request.query);
+      const body = ExemptDecisionConditionRequestSchema.parse(request.body);
+      return respondIdempotently({
+        request,
+        reply,
+        store: input.idempotency,
+        actorId: session.actorId,
+        operation: `decision.condition.exempt:${params.conditionId}`,
+        requestPayload: { params, query, body },
+        execute: async () => ({
+          statusCode: 200,
+          body: {
+            decision: toDecisionResponse(
+              await input.evaluations.exemptCondition({
+                actorId: session.actorId,
+                correlationId: correlationId(reply),
+                ...params,
+                ...query,
+                ...body,
+              }),
+            ),
+          },
+        }),
+      });
+    },
+  );
   app.post("/v1/projects", async (request, reply) => {
     const session = await requireSession(
       request,
@@ -2507,9 +2552,21 @@ function toEvaluationResponse(
   return { ...evaluation, evaluatedAt: evaluation.evaluatedAt.toISOString() };
 }
 function toDecisionResponse(
-  decision: { decidedAt: Date } & Record<string, unknown>,
+  decision: {
+    decidedAt: Date;
+    conditions?: readonly {
+      resolvedAt: Date | null;
+    }[];
+  } & Record<string, unknown>,
 ) {
-  return { ...decision, decidedAt: decision.decidedAt.toISOString() };
+  return {
+    ...decision,
+    decidedAt: decision.decidedAt.toISOString(),
+    conditions: (decision.conditions ?? []).map((condition) => ({
+      ...condition,
+      resolvedAt: condition.resolvedAt?.toISOString() ?? null,
+    })),
+  };
 }
 function toProjectResponse(
   project: { createdAt: Date; updatedAt: Date } & Record<string, unknown>,

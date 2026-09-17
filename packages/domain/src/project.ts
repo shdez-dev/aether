@@ -117,7 +117,9 @@ export function transitionProject(
 export class ProjectDomainError extends Error {
   constructor(
     public readonly code:
-      "PROJECT_ROLES_INVALID" | "INVALID_PROJECT_TRANSITION",
+      | "PROJECT_ROLES_INVALID"
+      | "INVALID_PROJECT_TRANSITION"
+      | "DECISION_CONDITIONS_PENDING",
   ) {
     super(code);
   }

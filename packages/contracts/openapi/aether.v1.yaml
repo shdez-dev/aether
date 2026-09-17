@@ -1062,6 +1062,45 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
+  /v1/decisions/{decisionId}/conditions/{conditionId}/exemptions:
+    post:
+      tags: [Initiatives]
+      operationId: exemptDecisionCondition
+      summary: Eximir una condición pendiente de una decisión
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: decisionId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: conditionId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/OrganizationContextId"
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              { $ref: "#/components/schemas/ExemptDecisionConditionRequest" }
+      responses:
+        "200":
+          description: Condición eximida y decisión actualizada.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [decision]
+                properties:
+                  decision: { $ref: "#/components/schemas/InitiativeDecision" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
   /v1/initiatives:
     get:
       tags: [Initiatives]
@@ -2441,6 +2480,24 @@ components:
           { type: string, enum: [approved, rejected, returned, cancelled] }
         rationale: { type: string, minLength: 1, maxLength: 10000 }
         evidence: { type: array, items: { type: string }, maxItems: 50 }
+        conditions:
+          type: array
+          maxItems: 50
+          items: { $ref: "#/components/schemas/DecisionConditionInput" }
+    DecisionConditionInput:
+      type: object
+      additionalProperties: false
+      required: [description, responsibleActorId, dueOn]
+      properties:
+        description: { type: string, minLength: 1, maxLength: 2000 }
+        responsibleActorId: { type: string, minLength: 1, maxLength: 255 }
+        dueOn: { type: string, format: date }
+    ExemptDecisionConditionRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 1, maxLength: 2000 }
     EvaluationCriterion:
       type: object
       additionalProperties: false
@@ -2561,6 +2618,7 @@ components:
           coverage,
           decidedByActorId,
           decidedAt,
+          conditions,
         ]
       properties:
         id: { type: string, format: uuid }
@@ -2577,6 +2635,32 @@ components:
         coverage: { type: object }
         decidedByActorId: { type: string }
         decidedAt: { type: string, format: date-time }
+        conditions:
+          type: array
+          items: { $ref: "#/components/schemas/DecisionCondition" }
+    DecisionCondition:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          id,
+          description,
+          responsibleActorId,
+          dueOn,
+          status,
+          resolvedByActorId,
+          resolvedAt,
+          resolutionNote,
+        ]
+      properties:
+        id: { type: string, format: uuid }
+        description: { type: string }
+        responsibleActorId: { type: string }
+        dueOn: { type: string, format: date }
+        status: { type: string, enum: [pending, fulfilled, exempted] }
+        resolvedByActorId: { type: [string, "null"] }
+        resolvedAt: { type: [string, "null"], format: date-time }
+        resolutionNote: { type: [string, "null"] }
     ProjectParticipant:
       type: object
       required: [actorId, role]

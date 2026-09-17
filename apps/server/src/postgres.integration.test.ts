@@ -1530,6 +1530,13 @@ describe.sequential("PostgreSQL integration", () => {
         outcome: "approved" as const,
         rationale: "Evidencia suficiente.",
         evidence: ["Acta."],
+        conditions: [
+          {
+            description: "Validar el resultado del piloto.",
+            responsibleActorId: "lead@example.test",
+            dueOn: "2026-10-01",
+          },
+        ],
       };
       const decisionAttempts = await Promise.allSettled([
         evaluationService.decide({
@@ -1553,6 +1560,16 @@ describe.sequential("PostgreSQL integration", () => {
       if (!successfulDecision || successfulDecision.status !== "fulfilled")
         throw new Error("An approved decision was expected");
       const decision = successfulDecision.value;
+      const persistedDecision = await evaluationsStore.findDecision(
+        decision.id,
+      );
+      expect(persistedDecision?.conditions).toMatchObject([
+        {
+          description: "Validar el resultado del piloto.",
+          responsibleActorId: "lead@example.test",
+          status: "pending",
+        },
+      ]);
       const projectInput = {
         actorId: owner,
         organizationId: organization.id,
@@ -1566,6 +1583,29 @@ describe.sequential("PostgreSQL integration", () => {
           { actorId: "lead@example.test", role: "lead" },
         ] as const,
       };
+      await expect(
+        projectService.createFromInitiative({
+          ...projectInput,
+          correlationId: randomUUID(),
+        }),
+      ).rejects.toMatchObject({ code: "DECISION_CONDITIONS_PENDING" });
+      await evaluationService.exemptCondition({
+        actorId: owner,
+        organizationId: organization.id,
+        decisionId: decision.id,
+        conditionId: persistedDecision!.conditions![0]!.id,
+        reason: "La validación se incorporó al alcance inicial.",
+        correlationId: randomUUID(),
+      });
+      expect(
+        (await evaluationsStore.findDecision(decision.id))?.conditions,
+      ).toMatchObject([
+        {
+          status: "exempted",
+          resolvedByActorId: owner,
+          resolutionNote: "La validación se incorporó al alcance inicial.",
+        },
+      ]);
       const projectAttempts = await Promise.allSettled([
         projectService.createFromInitiative({
           ...projectInput,

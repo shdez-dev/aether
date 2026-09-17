@@ -122,6 +122,10 @@ export class ProjectService {
       decision.outcome !== "approved"
     )
       throw new ProjectDomainError("INVALID_PROJECT_TRANSITION");
+    if (
+      decision.conditions?.some((condition) => condition.status === "pending")
+    )
+      throw new ProjectDomainError("DECISION_CONDITIONS_PENDING");
     await assertWorkspaceWritable(
       this.dependencies.tenancy,
       initiative.workspaceId,

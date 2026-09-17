@@ -94,6 +94,7 @@ describe("project conversion and execution", () => {
     await initiatives.create(approved);
     const decisions = new InMemoryEvaluationStore();
     const decisionId = ids.next();
+    const conditionId = ids.next();
     await decisions.createDecision({
       id: decisionId,
       organizationId: organization.id,
@@ -108,6 +109,18 @@ describe("project conversion and execution", () => {
       coverage: { totalCriteria: 1, assessedCriteria: 1, percentage: 100 },
       decidedByActorId: "owner",
       decidedAt: new Date(),
+      conditions: [
+        {
+          id: conditionId,
+          description: "Completar la validación operativa.",
+          responsibleActorId: "lead",
+          dueOn: "2026-10-01",
+          status: "pending",
+          resolvedByActorId: null,
+          resolvedAt: null,
+          resolutionNote: null,
+        },
+      ],
     });
     const projectStore = new InMemoryProjectStore();
     const execution = new InMemoryProjectExecutionStore();
@@ -126,7 +139,7 @@ describe("project conversion and execution", () => {
       ids,
       clock: { now: () => new Date("2026-09-11T10:00:00.000Z") },
     });
-    const project = await projects.createFromInitiative({
+    const conversionInput = {
       actorId: "owner",
       organizationId: organization.id,
       initiativeId: approved.id,
@@ -138,9 +151,24 @@ describe("project conversion and execution", () => {
         { actorId: "owner", role: "sponsor" },
         { actorId: "lead", role: "lead" },
         { actorId: "observer", role: "observer" },
-      ],
+      ] as const,
       correlationId: ids.next(),
+    };
+    await expect(
+      projects.createFromInitiative(conversionInput),
+    ).rejects.toMatchObject({ code: "DECISION_CONDITIONS_PENDING" });
+    const storedDecision = await decisions.findDecision(decisionId);
+    await decisions.updateDecisionCondition({
+      decisionId,
+      condition: {
+        ...storedDecision!.conditions![0]!,
+        status: "exempted",
+        resolvedByActorId: "owner",
+        resolvedAt: new Date(),
+        resolutionNote: "Resuelta dentro del alcance inicial.",
+      },
     });
+    const project = await projects.createFromInitiative(conversionInput);
     expect(project.sourceInitiativeId).toBe(approved.id);
     expect(project.sourceDecisionId).toBe(decisionId);
     await expect(

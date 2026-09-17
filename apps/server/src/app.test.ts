@@ -1557,10 +1557,19 @@ describe("HTTP authentication boundary", () => {
         outcome: "approved",
         rationale: "Impacto y evidencia suficientes.",
         evidence: ["Acta de comité."],
+        conditions: [
+          {
+            description: "Verificar la adopción inicial.",
+            responsibleActorId: "actor-123",
+            dueOn: "2026-10-01",
+          },
+        ],
       },
     });
     expect(decisionResponse.statusCode).toBe(200);
-    const decision = decisionResponse.json() as { decision: { id: string } };
+    const decision = decisionResponse.json() as {
+      decision: { id: string; conditions: { id: string; status: string }[] };
+    };
     expect(decision).toMatchObject({
       initiative: { status: "approved", allowedActions: [] },
     });
@@ -1574,6 +1583,54 @@ describe("HTTP authentication boundary", () => {
       id: decision.decision.id,
       initiativeId: created.id,
       outcome: "approved",
+      conditions: [expect.objectContaining({ status: "pending" })],
+    });
+    const staleExemptionSession = "stale-condition-exemption-session";
+    const staleExemptionCreatedAt = new Date(
+      Date.now() - (config.recentAuthMaxAgeSeconds + 1) * 1_000,
+    );
+    await authStore.createSession({
+      id: crypto.randomUUID(),
+      tokenHash: hashOpaqueToken(staleExemptionSession),
+      actorId: "actor-123",
+      actorEmail: "actor@example.test",
+      issuer: config.oidcIssuerUrl,
+      createdAt: staleExemptionCreatedAt,
+      lastSeenAt: staleExemptionCreatedAt,
+      expiresAt: new Date(Date.now() + config.sessionTtlSeconds * 1_000),
+      revokedAt: null,
+    });
+    const staleExemptionResponse = await app.inject({
+      method: "POST",
+      url: `/v1/decisions/${decision.decision.id}/conditions/${decision.decision.conditions[0]!.id}/exemptions?organizationId=${organization.id}`,
+      headers: {
+        ...headers,
+        cookie: `aether_session=${staleExemptionSession}; aether_csrf=${csrf}`,
+        "idempotency-key": crypto.randomUUID(),
+      },
+      payload: { reason: "No debe llegar a la exención." },
+    });
+    expect(staleExemptionResponse.statusCode).toBe(403);
+    expect(staleExemptionResponse.json()).toMatchObject({
+      code: "RECENT_AUTH_REQUIRED",
+    });
+    const exemptionResponse = await app.inject({
+      method: "POST",
+      url: `/v1/decisions/${decision.decision.id}/conditions/${decision.decision.conditions[0]!.id}/exemptions?organizationId=${organization.id}`,
+      headers: { ...headers, "idempotency-key": crypto.randomUUID() },
+      payload: { reason: "La validación quedó incorporada en el alcance." },
+    });
+    expect(exemptionResponse.statusCode).toBe(200);
+    expect(exemptionResponse.json()).toMatchObject({
+      decision: {
+        conditions: [
+          {
+            status: "exempted",
+            resolvedByActorId: "actor-123",
+            resolutionNote: "La validación quedó incorporada en el alcance.",
+          },
+        ],
+      },
     });
     const auditResponse = await app.inject({
       method: "GET",
@@ -1588,6 +1645,9 @@ describe("HTTP authentication boundary", () => {
         expect.objectContaining({ eventType: "initiative.presented.v1" }),
         expect.objectContaining({ eventType: "initiative.evaluated.v1" }),
         expect.objectContaining({ eventType: "initiative.decided.v2" }),
+        expect.objectContaining({
+          eventType: "initiative.decision_condition_exempted.v1",
+        }),
       ]),
     );
     for (const [resourceType, resourceId, action] of [

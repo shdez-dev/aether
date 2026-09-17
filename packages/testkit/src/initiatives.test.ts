@@ -125,9 +125,10 @@ describe("initiative vertical slice", () => {
       expectedVersion: edited.version,
     });
     const standards = new InMemoryEvaluationStandardStore();
+    const evaluationStore = new InMemoryEvaluationStore();
     const evaluations = new EvaluationService({
       standards,
-      evaluations: new InMemoryEvaluationStore(),
+      evaluations: evaluationStore,
       initiatives: initiativeStore,
       audit,
       tenancy: tenantStore,
@@ -192,8 +193,36 @@ describe("initiative vertical slice", () => {
       outcome: "approved",
       rationale: "Revisión favorable.",
       evidence: ["Acta."],
+      conditions: [
+        {
+          description: "Validar la adopción con el área usuaria.",
+          responsibleActorId: "author",
+          dueOn: "2026-10-01",
+        },
+      ],
     });
     expect(decided.outcome).toBe("approved");
+    expect(decided.conditions).toMatchObject([
+      {
+        responsibleActorId: "author",
+        status: "pending",
+        resolvedAt: null,
+      },
+    ]);
+    const conditionId = decided.conditions![0]!.id;
+    const exempted = await evaluations.exemptCondition({
+      actorId: "owner",
+      organizationId: organization.id,
+      decisionId: decided.id,
+      conditionId,
+      reason: "La validación se incorporó en el alcance inicial.",
+      correlationId: ids.next(),
+    });
+    expect(exempted.conditions![0]).toMatchObject({
+      status: "exempted",
+      resolvedByActorId: "owner",
+      resolutionNote: "La validación se incorporó en el alcance inicial.",
+    });
     expect(
       (
         await initiatives.auditTrail({
@@ -208,6 +237,7 @@ describe("initiative vertical slice", () => {
       "initiative.presented.v1",
       "initiative.evaluated.v1",
       "initiative.decided.v2",
+      "initiative.decision_condition_exempted.v1",
     ]);
     await tenants.archiveWorkspace({
       actorId: "owner",

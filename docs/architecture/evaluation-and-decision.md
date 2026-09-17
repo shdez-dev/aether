@@ -28,3 +28,18 @@ aplicados. Sus resultados posibles son `approved`, `rejected`, `returned` y
 La migración `0004_evaluations_and_decisions.sql` persiste estándares,
 evaluaciones y decisiones. Los eventos de auditoría conservan los identificadores
 de evaluación y decisión, la cobertura y el conteo de evidencias.
+
+## Condiciones de decisión
+
+Una decisión `approved` puede incluir condiciones estructuradas: descripción,
+responsable organizacional activo al registrarla y fecha de vencimiento. Nacen
+en estado `pending` y bloquean la conversión a proyecto hasta que estén
+resueltas o exentas. La migración
+`0036_decision_conditions.sql` las persiste separadas de la decisión para
+conservar su historial.
+
+En esta rebanada un `owner` puede eximir una condición pendiente con motivo y
+autenticación reciente. La exención registra actor, fecha y motivo, y emite el
+evento de auditoría `initiative.decision_condition_exempted.v1`. El comando de
+cumplimiento queda deliberadamente fuera de esta API inicial; la decisión de
+gobierno está registrada en [ADR-0009](../adr/0009-condiciones-de-decision.md).

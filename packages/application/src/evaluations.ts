@@ -1,10 +1,12 @@
 import {
   EvaluationDomainError,
   decideInitiative,
+  exemptDecisionCondition,
   evaluateInitiative,
   publishEvaluationStandard,
   transitionInitiative,
   type EvaluationCriterion,
+  type DecisionCondition,
   type InitiativeDecision,
   type InitiativeEvaluation,
   type EvaluationStandard,
@@ -36,6 +38,10 @@ export interface EvaluationStore {
   findEvaluation(evaluationId: string): Promise<InitiativeEvaluation | null>;
   createDecision(decision: InitiativeDecision): Promise<void>;
   findDecision(decisionId: string): Promise<InitiativeDecision | null>;
+  updateDecisionCondition(input: {
+    decisionId: string;
+    condition: DecisionCondition;
+  }): Promise<void>;
 }
 export interface EvaluationIdGenerator {
   next(): string;
@@ -231,6 +237,13 @@ export class EvaluationService {
     outcome: InitiativeDecision["outcome"];
     rationale: string;
     evidence: readonly string[];
+    conditions?:
+      | readonly {
+          description: string;
+          responsibleActorId: string;
+          dueOn: string;
+        }[]
+      | undefined;
     correlationId: string;
   }): Promise<InitiativeDecision> {
     await this.assertOwner(input.actorId, input.organizationId);
@@ -251,6 +264,11 @@ export class EvaluationService {
     );
     if (!evaluation) throw new ResourceNotFoundError("INITIATIVE_NOT_FOUND");
     const now = this.dependencies.clock.now();
+    for (const condition of input.conditions ?? [])
+      await this.assertOrganizationMember(
+        condition.responsibleActorId,
+        input.organizationId,
+      );
     const decision = decideInitiative({
       id: this.dependencies.ids.next(),
       organizationId: initiative.organizationId,
@@ -263,6 +281,14 @@ export class EvaluationService {
       decidedByActorId: input.actorId,
       decidedAt: now,
       evaluation,
+      conditions: (input.conditions ?? []).map((condition) => ({
+        id: this.dependencies.ids.next(),
+        ...condition,
+        status: "pending" as const,
+        resolvedByActorId: null,
+        resolvedAt: null,
+        resolutionNote: null,
+      })),
     });
     const decided = transitionInitiative(initiative, decision.outcome, now);
     if (
@@ -290,6 +316,52 @@ export class EvaluationService {
       },
     );
     return decision;
+  }
+
+  async exemptCondition(input: {
+    actorId: string;
+    organizationId: string;
+    decisionId: string;
+    conditionId: string;
+    reason: string;
+    correlationId: string;
+  }): Promise<InitiativeDecision> {
+    await this.assertOwner(input.actorId, input.organizationId);
+    const decision = await this.dependencies.evaluations.findDecision(
+      input.decisionId,
+    );
+    if (!decision || decision.organizationId !== input.organizationId)
+      throw new ResourceNotFoundError("INITIATIVE_NOT_FOUND");
+    const updated = exemptDecisionCondition({
+      decision,
+      conditionId: input.conditionId,
+      actorId: input.actorId,
+      reason: input.reason,
+      occurredAt: this.dependencies.clock.now(),
+    });
+    const condition = updated.conditions?.find(
+      (item) => item.id === input.conditionId,
+    );
+    if (!condition)
+      throw new EvaluationDomainError("DECISION_CONDITION_NOT_PENDING");
+    await this.dependencies.evaluations.updateDecisionCondition({
+      decisionId: updated.id,
+      condition,
+    });
+    const initiative = await this.requireInitiative(
+      decision.initiativeId,
+      input.organizationId,
+    );
+    await this.record(
+      initiative,
+      input.actorId,
+      input.correlationId,
+      "initiative.decision_condition_exempted.v1",
+      initiative.status,
+      initiative.status,
+      { decisionId: decision.id, conditionId: input.conditionId },
+    );
+    return updated;
   }
 
   private async requireInitiative(
@@ -322,6 +394,18 @@ export class EvaluationService {
         actorId,
         organizationId,
       })) !== "owner"
+    )
+      throw new AccessDeniedError("organization:manage");
+  }
+  private async assertOrganizationMember(
+    actorId: string,
+    organizationId: string,
+  ): Promise<void> {
+    if (
+      !(await this.dependencies.tenancy.findOrganizationRole({
+        actorId,
+        organizationId,
+      }))
     )
       throw new AccessDeniedError("organization:manage");
   }

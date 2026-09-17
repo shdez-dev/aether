@@ -62,6 +62,17 @@ export type InitiativeDecision = Readonly<{
   coverage: EvaluationCoverage;
   decidedByActorId: string;
   decidedAt: Date;
+  conditions?: readonly DecisionCondition[];
+}>;
+export type DecisionCondition = Readonly<{
+  id: string;
+  description: string;
+  responsibleActorId: string;
+  dueOn: string;
+  status: "pending" | "fulfilled" | "exempted";
+  resolvedByActorId: string | null;
+  resolvedAt: Date | null;
+  resolutionNote: string | null;
 }>;
 
 export function publishEvaluationStandard(
@@ -137,8 +148,13 @@ export function decideInitiative(
   input: Omit<
     InitiativeDecision,
     "coverage" | "standardId" | "standardVersion"
-  > & { evaluation: InitiativeEvaluation },
+  > & {
+    evaluation: InitiativeEvaluation;
+    conditions?: readonly DecisionCondition[];
+  },
 ): InitiativeDecision {
+  if (input.outcome !== "approved" && (input.conditions?.length ?? 0) > 0)
+    throw new EvaluationDomainError("DECISION_CONDITIONS_REQUIRE_APPROVAL");
   if (input.evaluation.initiativeId !== input.initiativeId)
     throw new EvaluationDomainError("EVALUATION_DOES_NOT_MATCH_INITIATIVE");
   if (input.evaluation.coverage.percentage !== 100)
@@ -148,6 +164,34 @@ export function decideInitiative(
     standardId: input.evaluation.standardId,
     standardVersion: input.evaluation.standardVersion,
     coverage: input.evaluation.coverage,
+    conditions: input.conditions ?? [],
+  };
+}
+
+export function exemptDecisionCondition(input: {
+  decision: InitiativeDecision;
+  conditionId: string;
+  actorId: string;
+  reason: string;
+  occurredAt: Date;
+}): InitiativeDecision {
+  const conditions = input.decision.conditions ?? [];
+  const condition = conditions.find((item) => item.id === input.conditionId);
+  if (!condition || condition.status !== "pending")
+    throw new EvaluationDomainError("DECISION_CONDITION_NOT_PENDING");
+  return {
+    ...input.decision,
+    conditions: conditions.map((item) =>
+      item.id === input.conditionId
+        ? {
+            ...item,
+            status: "exempted",
+            resolvedByActorId: input.actorId,
+            resolvedAt: input.occurredAt,
+            resolutionNote: input.reason,
+          }
+        : item,
+    ),
   };
 }
 
@@ -159,7 +203,9 @@ export class EvaluationDomainError extends Error {
       | "INVALID_CRITERION_WEIGHT"
       | "INVALID_EVALUATION_CRITERIA"
       | "EVALUATION_DOES_NOT_MATCH_INITIATIVE"
-      | "EVALUATION_INCOMPLETE",
+      | "EVALUATION_INCOMPLETE"
+      | "DECISION_CONDITION_NOT_PENDING"
+      | "DECISION_CONDITIONS_REQUIRE_APPROVAL",
   ) {
     super(code);
   }
