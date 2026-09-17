@@ -2292,6 +2292,22 @@ describe("document project authorization endpoints", () => {
       clock,
       retentionDays: { internal: 1, confidential: 1, restricted: 1 },
     }).handle(documentStore.events[0]!);
+    const pending = await documents.beginUpload({
+      actorId: "owner",
+      correlationId: ids.next(),
+      resourceType: "project",
+      resourceId: projectId,
+      classification: "internal",
+      fileName: "pendiente.pdf",
+      contentType: "application/pdf",
+      contentLength: 10,
+      sha256: "c".repeat(64),
+    });
+    objects.putQuarantined(pending.version.quarantineKey, {
+      bytes: 10,
+      sha256: "c".repeat(64),
+      contentType: "application/pdf",
+    });
     const authStore = new InMemoryAuthStore();
     const auth = new AuthService({
       store: authStore,
@@ -2348,6 +2364,15 @@ describe("document project authorization endpoints", () => {
     });
     expect(deniedDownload.statusCode).toBe(403);
     expect(deniedDownload.json()).not.toHaveProperty("url");
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: `/v1/documents/${pending.document.id}/versions/${pending.version.id}/complete`,
+          headers: headers("project-document-complete-denied"),
+        })
+      ).statusCode,
+    ).toBe(403);
     projectAccess.grant(projectId, "member");
     const allowedDownload = await app.inject({
       method: "GET",
@@ -2359,6 +2384,13 @@ describe("document project authorization endpoints", () => {
       url: expect.any(String),
       expiresAt: expect.any(String),
     });
+    const allowedComplete = await app.inject({
+      method: "POST",
+      url: `/v1/documents/${pending.document.id}/versions/${pending.version.id}/complete`,
+      headers: headers("project-document-complete-allowed"),
+    });
+    expect(allowedComplete.statusCode).toBe(200);
+    expect(allowedComplete.json()).toMatchObject({ status: "pending_scan" });
     expect(
       (
         await app.inject({
