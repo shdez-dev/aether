@@ -6,7 +6,7 @@ Las mutaciones que producen efectos posteriores al commit escriben el hecho dura
 
 Los eventos durables pertenecen a un catálogo versionado en `@aether/contracts`. El worker vuelve a validar el sobre y el payload antes de invocar un handler; un tipo o payload desconocido no se reconoce como procesado y sigue la política de reintentos hasta dead-letter. Cada consumidor registra `consumer + event_id`, con lo cual reentregas posteriores al registro se reconocen sin repetir el handler.
 
-El único handler de producto activo mientras F5 permanece suspendido es `document.scan_requested.v1`. Los eventos de proyecto se validan y se reconocen explícitamente, pero no disparan correo ni exportaciones hasta reactivar F5.
+El único handler de producto activo mientras F5 permanece suspendido es `document.scan_requested.v1`. Antes de promover o rechazar el binario, el worker vuelve a comprobar que el tenant, agregado y versión recuperados coincidan exactamente con el sobre durable; un evento fuera de ese alcance falla sin tocar el recurso. Los eventos de proyecto se validan y se reconocen explícitamente, pero no disparan correo ni exportaciones hasta reactivar F5.
 
 ## Recuperación
 

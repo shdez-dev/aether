@@ -16,6 +16,7 @@ export * from "./exports.js";
 export * from "./metrics.js";
 export * from "./access-grants.js";
 export * from "./support-access.js";
+export * from "./worker-authorization.js";
 
 export interface RequestMetadata {
   readonly actorId: string;

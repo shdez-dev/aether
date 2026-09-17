@@ -6,6 +6,7 @@ import {
   type InstitutionalDocument,
 } from "@aether/domain";
 import type { DurableDomainEvent, DurableEventHandler } from "./outbox.js";
+import { assertDocumentScanEventScope } from "./worker-authorization.js";
 
 import { assertWorkspaceWritable, type TenantStore } from "./tenancy.js";
 import type {
@@ -859,6 +860,7 @@ export class DocumentScanService implements DurableEventHandler {
       versionId,
     });
     if (!current || current.version.status !== "pending_scan") return;
+    assertDocumentScanEventScope({ event, current });
     const now = this.dependencies.clock.now();
     const scanned = await this.dependencies.scanner.scan({
       content: await this.dependencies.objects.readQuarantine({

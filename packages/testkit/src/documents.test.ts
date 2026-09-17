@@ -5,6 +5,7 @@ import {
   DocumentScanService,
   DocumentValidationError,
   TenantService,
+  WorkerEventAuthorizationError,
 } from "@aether/application";
 import {
   InMemoryDocumentObjectStore,
@@ -118,6 +119,20 @@ describe("document evidence slice", () => {
       clock,
       retentionDays: { internal: 365, confidential: 1095, restricted: 2555 },
     });
+    await expect(
+      scans.handle({
+        ...store.events[0]!,
+        organizationId: foreign.id,
+      }),
+    ).rejects.toBeInstanceOf(WorkerEventAuthorizationError);
+    expect(
+      (
+        await store.findVersion({
+          documentId: started.document.id,
+          versionId: started.version.id,
+        })
+      )?.version.status,
+    ).toBe("pending_scan");
     await scans.handle(store.events[0]!);
     const complete = await store.findVersion({
       documentId: started.document.id,
