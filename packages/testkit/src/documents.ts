@@ -170,6 +170,15 @@ export class InMemoryDocumentStore
   async record(event: DocumentAuditEvent) {
     this.audits.push(event);
   }
+  async relocate(input: {
+    document: InstitutionalDocument;
+    audit: DocumentAuditEvent;
+  }): Promise<boolean> {
+    if (!this.documents.has(input.document.id)) return false;
+    this.documents.set(input.document.id, input.document);
+    this.audits.push(input.audit);
+    return true;
+  }
 }
 export class InMemoryDocumentProjectAccess implements DocumentProjectAccess {
   readonly participants = new Set<string>();

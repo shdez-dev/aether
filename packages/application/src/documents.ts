@@ -34,7 +34,8 @@ export type DocumentAuditEvent = Readonly<{
     | "document.restored.v1"
     | "document.purged.v1"
     | "document.download_url_issued.v1"
-    | "document.evidence_linked.v1";
+    | "document.evidence_linked.v1"
+    | "document.relocated.v1";
   documentId: string;
   versionId: string;
   organizationId: string;
@@ -94,6 +95,10 @@ export interface DocumentStore {
   }): Promise<boolean>;
   reject(input: {
     version: DocumentVersion;
+    audit: DocumentAuditEvent;
+  }): Promise<boolean>;
+  relocate(input: {
+    document: InstitutionalDocument;
     audit: DocumentAuditEvent;
   }): Promise<boolean>;
 }
@@ -616,6 +621,59 @@ export class DocumentService {
       payload: { documentId: document.id, versionId: version.id },
     };
   }
+  async relocate(input: {
+    actorId: string;
+    correlationId: string;
+    documentId: string;
+    resourceType: DocumentResourceType;
+    resourceId: string;
+  }): Promise<InstitutionalDocument> {
+    const found = await this.dependencies.store.findLatestVersion(
+      input.documentId,
+    );
+    if (!found) throw new DocumentNotFoundError();
+    await this.requireWritableResource(
+      input.actorId,
+      found.document.resourceType,
+      found.document.resourceId,
+      input.correlationId,
+    );
+    const target = await this.requireWritableResource(
+      input.actorId,
+      input.resourceType,
+      input.resourceId,
+      input.correlationId,
+    );
+    if (
+      target.organizationId !== found.document.organizationId ||
+      target.workspaceId !== found.document.workspaceId
+    )
+      throw new DocumentAccessDeniedError();
+    const document = {
+      ...found.document,
+      resourceType: input.resourceType,
+      resourceId: input.resourceId,
+    };
+    const moved = await this.dependencies.store.relocate({
+      document,
+      audit: this.event(
+        "document.relocated.v1",
+        document,
+        found.version,
+        input.actorId,
+        input.correlationId,
+        this.dependencies.clock.now(),
+        {
+          fromResourceType: found.document.resourceType,
+          fromResourceId: found.document.resourceId,
+        },
+      ),
+    });
+    if (!moved)
+      throw new DocumentValidationError("DOCUMENT_RELOCATION_BLOCKED");
+    return document;
+  }
+
   private async requireWritableResource(
     actorId: string,
     resourceType: DocumentResourceType,
@@ -938,7 +996,8 @@ export class DocumentValidationError extends Error {
       | "DOCUMENT_EXTENSION_MISMATCH"
       | "DOCUMENT_NOT_PUBLISHED"
       | "DOCUMENT_NOT_REPLACEABLE"
-      | "DOCUMENT_NOT_RESTORABLE",
+      | "DOCUMENT_NOT_RESTORABLE"
+      | "DOCUMENT_RELOCATION_BLOCKED",
   ) {
     super(code);
   }

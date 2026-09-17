@@ -3837,6 +3837,37 @@ export class PostgresDocumentStore
       client.release();
     }
   }
+  async relocate(input: {
+    document: InstitutionalDocument;
+    audit: DocumentAuditEvent;
+  }): Promise<boolean> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const updated = await client.query(
+        `UPDATE documents SET resource_type=$2, resource_id=$3 WHERE id=$1
+         AND NOT EXISTS (SELECT 1 FROM evidence_references WHERE document_id=$1)
+         AND NOT EXISTS (SELECT 1 FROM project_deliverable_acceptances WHERE document_id=$1)`,
+        [
+          input.document.id,
+          input.document.resourceType,
+          input.document.resourceId,
+        ],
+      );
+      if (updated.rowCount !== 1) {
+        await client.query("ROLLBACK");
+        return false;
+      }
+      await insertDocumentAudit(client, input.audit);
+      await client.query("COMMIT");
+      return true;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
   async record(event: DocumentAuditEvent): Promise<void> {
     await insertDocumentAudit(this.pool, event);
   }
