@@ -6,6 +6,12 @@ PostgreSQL es la fuente confiable para los eventos de negocio asíncronos. Una m
 
 La conversión de una iniciativa aprobada y el cambio de estado de un proyecto generan, respectivamente, `project.created.v1` y `project.status_changed.v1`. Cada evento incluye identificador, tipo y versión de esquema, agregado y versión del agregado, organización, correlación, causalidad, instante y carga útil. El identificador del evento es estable y es la clave de idempotencia del consumidor.
 
+La conversión persiste proyecto, evento de outbox y auditoría de creación en una
+sola transacción. Si el commit falla no queda estado parcial; si se pierde la
+respuesta después del commit, el mismo comando canónico devuelve el proyecto
+existente sin duplicar efectos. La política está registrada en
+[ADR-0010](../adr/0010-conversion-atomica-y-recuperable.md).
+
 ## Ciclo de procesamiento
 
 El worker reclama lotes con `FOR UPDATE SKIP LOCKED`. Una fila pasa por `pending`, `processing`, `processed` o `dead_letter`; conserva intentos, bloqueo, fecha disponible y último error. Un bloqueo vencido puede ser reclamado por otro worker tras cinco minutos.

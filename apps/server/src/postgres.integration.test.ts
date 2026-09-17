@@ -1396,6 +1396,7 @@ describe.sequential("PostgreSQL integration", () => {
       const initiativesStore = new PostgresInitiativeStore(pool);
       const initiativeAudit = new PostgresInitiativeAuditStore(pool);
       const evaluationsStore = new PostgresEvaluationStore(pool);
+      const projectStore = new PostgresProjectStore(pool);
       const tenantService = new TenantService({
         store: tenantStore,
         ids,
@@ -1419,7 +1420,7 @@ describe.sequential("PostgreSQL integration", () => {
         clock,
       });
       const projectService = new ProjectService({
-        projects: new PostgresProjectStore(pool),
+        projects: projectStore,
         execution: new PostgresProjectExecutionStore(pool),
         closures: new PostgresProjectClosureStore(pool),
         documents: new PostgresDocumentStore(pool),
@@ -1629,6 +1630,63 @@ describe.sequential("PostgreSQL integration", () => {
           resolutionNote: "La validación se incorporó al alcance inicial.",
         },
       ]);
+      const duplicateEventId = randomUUID();
+      await pool.query(
+        `INSERT INTO outbox_events (event_id, event_type, occurred_at, aggregate_id, aggregate_type, aggregate_version, organization_id, correlation_id, causation_id, schema_version, payload)
+         VALUES ($1, 'project.created.v1', NOW(), $2, 'project', 1, $3, $4, NULL, 1, '{}')`,
+        [duplicateEventId, randomUUID(), organization.id, randomUUID()],
+      );
+      const failedConversionProject = {
+        id: randomUUID(),
+        organizationId: organization.id,
+        workspaceId: workspace.id,
+        sourceInitiativeId: draft.id,
+        sourceDecisionId: decision.id,
+        name: "Proyecto que debe revertirse",
+        sponsorActorId: owner,
+        leadActorId: "lead@example.test",
+        participants: [
+          { actorId: owner, role: "sponsor" },
+          { actorId: "lead@example.test", role: "lead" },
+        ] as const,
+        status: "planned" as const,
+        version: 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      await expect(
+        projectStore.createWithEventAndAudit!({
+          project: failedConversionProject,
+          event: {
+            eventId: duplicateEventId,
+            eventType: "project.created.v1",
+            occurredAt: new Date(),
+            aggregateId: failedConversionProject.id,
+            aggregateType: "project",
+            aggregateVersion: 0,
+            organizationId: organization.id,
+            correlationId: randomUUID(),
+            causationId: null,
+            schemaVersion: 1,
+            payload: {},
+          },
+          auditEvent: {
+            id: randomUUID(),
+            eventType: "project.created_from_initiative.v1",
+            organizationId: organization.id,
+            workspaceId: workspace.id,
+            projectId: failedConversionProject.id,
+            actorId: owner,
+            correlationId: randomUUID(),
+            occurredAt: new Date(),
+            payload: {},
+          },
+        }),
+      ).rejects.toBeDefined();
+      await expect(projectStore.findByInitiative(draft.id)).resolves.toBeNull();
+      await pool.query("DELETE FROM outbox_events WHERE event_id = $1", [
+        duplicateEventId,
+      ]);
       const projectAttempts = await Promise.allSettled([
         projectService.createFromInitiative({
           ...projectInput,
@@ -1658,6 +1716,13 @@ describe.sequential("PostgreSQL integration", () => {
       );
       expect(events.rows).toEqual([
         { event_type: "project.created.v1", status: "pending" },
+      ]);
+      const audit = await pool.query<{ event_type: string }>(
+        "SELECT event_type FROM project_audit_events WHERE project_id = $1",
+        [project.id],
+      );
+      expect(audit.rows).toEqual([
+        { event_type: "project.created_from_initiative.v1" },
       ]);
 
       const handled: string[] = [];

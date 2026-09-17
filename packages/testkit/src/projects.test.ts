@@ -171,6 +171,18 @@ describe("project conversion and execution", () => {
     const project = await projects.createFromInitiative(conversionInput);
     expect(project.sourceInitiativeId).toBe(approved.id);
     expect(project.sourceDecisionId).toBe(decisionId);
+    const retried = await projects.createFromInitiative({
+      ...conversionInput,
+      correlationId: ids.next(),
+    });
+    expect(retried.id).toBe(project.id);
+    await expect(
+      projects.createFromInitiative({
+        ...conversionInput,
+        name: "Intento con parámetros distintos",
+        correlationId: ids.next(),
+      }),
+    ).rejects.toMatchObject({ message: "PROJECT_ALREADY_EXISTS" });
     await expect(
       projects.list({
         actorId: "outsider",

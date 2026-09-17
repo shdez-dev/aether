@@ -2935,6 +2935,27 @@ export class PostgresProjectStore implements ProjectStore {
       client.release();
     }
   }
+  async createWithEventAndAudit(input: {
+    project: Project;
+    event: DurableDomainEvent;
+    auditEvent: ProjectAuditEvent;
+  }): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await insertProject(client, input.project);
+      await insertOutboxEvent(client, input.event);
+      await insertProjectAuditEvent(client, input.auditEvent);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      if (isProjectConversionConflict(error))
+        throw new ProjectAlreadyExistsError();
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
   async findById(projectId: string): Promise<Project | null> {
     const result = await this.pool.query<ProjectRow>(
       `SELECT id, organization_id, workspace_id, source_initiative_id, source_decision_id, name, sponsor_actor_id, lead_actor_id, participants, status, version, created_at, updated_at FROM projects WHERE id = $1`,
@@ -3136,20 +3157,7 @@ export class PostgresEvidenceStore
 export class PostgresProjectAuditStore implements ProjectAuditStore {
   constructor(private readonly pool: Pool) {}
   async record(event: ProjectAuditEvent): Promise<void> {
-    await this.pool.query(
-      `INSERT INTO project_audit_events (id, event_type, organization_id, workspace_id, project_id, actor_id, correlation_id, occurred_at, payload) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-      [
-        event.id,
-        event.eventType,
-        event.organizationId,
-        event.workspaceId,
-        event.projectId,
-        event.actorId,
-        event.correlationId,
-        event.occurredAt,
-        event.payload,
-      ],
-    );
+    await insertProjectAuditEvent(this.pool, event);
   }
   async list(input: {
     organizationId: string;
@@ -3161,6 +3169,26 @@ export class PostgresProjectAuditStore implements ProjectAuditStore {
     );
     return result.rows.map(toProjectAuditEvent);
   }
+}
+
+async function insertProjectAuditEvent(
+  client: Pool | PoolClient,
+  event: ProjectAuditEvent,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO project_audit_events (id, event_type, organization_id, workspace_id, project_id, actor_id, correlation_id, occurred_at, payload) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+    [
+      event.id,
+      event.eventType,
+      event.organizationId,
+      event.workspaceId,
+      event.projectId,
+      event.actorId,
+      event.correlationId,
+      event.occurredAt,
+      event.payload,
+    ],
+  );
 }
 
 export class PostgresAuditHistoryStore implements AuditHistoryStore {

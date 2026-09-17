@@ -47,6 +47,11 @@ export interface ProjectStore {
     project: Project;
     event: DurableDomainEvent;
   }): Promise<void>;
+  createWithEventAndAudit?(input: {
+    project: Project;
+    event: DurableDomainEvent;
+    auditEvent: ProjectAuditEvent;
+  }): Promise<void>;
   saveWithEvent?(input: {
     project: Project;
     expectedVersion: number;
@@ -130,8 +135,13 @@ export class ProjectService {
       this.dependencies.tenancy,
       initiative.workspaceId,
     );
-    if (await this.dependencies.projects.findByInitiative(initiative.id))
+    const existing = await this.dependencies.projects.findByInitiative(
+      initiative.id,
+    );
+    if (existing) {
+      if (this.isCanonicalConversion(existing, input)) return existing;
       throw new ProjectAlreadyExistsError();
+    }
     await Promise.all(
       [
         input.sponsorActorId,
@@ -159,10 +169,7 @@ export class ProjectService {
       "project.created.v1",
       { initiativeId: initiative.id, decisionId: decision.id },
     );
-    if (this.dependencies.projects.createWithEvent)
-      await this.dependencies.projects.createWithEvent({ project, event });
-    else await this.dependencies.projects.create(project);
-    await this.record(
+    const auditEvent = this.auditEventFor(
       project,
       input.actorId,
       input.correlationId,
@@ -174,6 +181,17 @@ export class ProjectService {
         leadActorId: project.leadActorId,
       },
     );
+    if (this.dependencies.projects.createWithEventAndAudit)
+      await this.dependencies.projects.createWithEventAndAudit({
+        project,
+        event,
+        auditEvent,
+      });
+    else if (this.dependencies.projects.createWithEvent)
+      await this.dependencies.projects.createWithEvent({ project, event });
+    else await this.dependencies.projects.create(project);
+    if (!this.dependencies.projects.createWithEventAndAudit)
+      await this.dependencies.audit.record(auditEvent);
     return project;
   }
   async changeStatus(input: {
@@ -533,7 +551,18 @@ export class ProjectService {
     eventType: string,
     payload: Record<string, unknown>,
   ): Promise<void> {
-    await this.dependencies.audit.record({
+    await this.dependencies.audit.record(
+      this.auditEventFor(project, actorId, correlationId, eventType, payload),
+    );
+  }
+  private auditEventFor(
+    project: Project,
+    actorId: string,
+    correlationId: string,
+    eventType: string,
+    payload: Record<string, unknown>,
+  ): ProjectAuditEvent {
+    return {
       id: this.dependencies.ids.next(),
       eventType,
       organizationId: project.organizationId,
@@ -543,7 +572,30 @@ export class ProjectService {
       correlationId,
       occurredAt: this.dependencies.clock.now(),
       payload,
-    });
+    };
+  }
+  private isCanonicalConversion(
+    project: Project,
+    input: {
+      decisionId: string;
+      name: string;
+      sponsorActorId: string;
+      leadActorId: string;
+      participants: readonly ProjectParticipant[];
+    },
+  ): boolean {
+    return (
+      project.sourceDecisionId === input.decisionId &&
+      project.name === input.name &&
+      project.sponsorActorId === input.sponsorActorId &&
+      project.leadActorId === input.leadActorId &&
+      project.participants.length === input.participants.length &&
+      project.participants.every(
+        (participant, index) =>
+          participant.actorId === input.participants[index]?.actorId &&
+          participant.role === input.participants[index]?.role,
+      )
+    );
   }
   private eventFor(
     project: Project,
