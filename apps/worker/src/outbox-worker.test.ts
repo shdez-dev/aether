@@ -7,7 +7,11 @@ import type {
 } from "@aether/application";
 import { OutboxWorker } from "@aether/application";
 
-import { assertValidDurableEvent } from "./outbox-worker.js";
+import {
+  assertValidDurableEvent,
+  createWorkerEventHandler,
+  UnsupportedWorkerEventError,
+} from "./outbox-worker.js";
 
 const event: DurableDomainEvent = {
   eventId: "00000000-0000-4000-8000-000000000001",
@@ -126,6 +130,38 @@ describe("outbox worker", () => {
     expect(() =>
       assertValidDurableEvent({ ...event, eventType: "unknown.event.v1" }),
     ).toThrow("Invalid durable event");
+  });
+  it("routes document scans and makes deferred project events explicit", async () => {
+    const handled: DurableDomainEvent[] = [];
+    const deferred: DurableDomainEvent[] = [];
+    const handler = createWorkerEventHandler({
+      documentScans: {
+        async handle(event) {
+          handled.push(event);
+        },
+      },
+      onDeferred(event) {
+        deferred.push(event);
+      },
+    });
+    const scan = {
+      ...event,
+      eventId: "00000000-0000-4000-8000-000000000010",
+      eventType: "document.scan_requested.v1",
+      aggregateId: "00000000-0000-4000-8000-000000000011",
+      aggregateType: "document_version",
+      payload: {
+        documentId: "00000000-0000-4000-8000-000000000012",
+        versionId: "00000000-0000-4000-8000-000000000011",
+      },
+    } satisfies DurableDomainEvent;
+    await handler.handle(scan);
+    await handler.handle(event);
+    await expect(
+      handler.handle({ ...event, eventType: "unknown.event.v1" }),
+    ).rejects.toBeInstanceOf(UnsupportedWorkerEventError);
+    expect(handled).toEqual([scan]);
+    expect(deferred).toEqual([event]);
   });
   it("reintenta después de una caída del handler y procesa al recuperarse", async () => {
     const store = new InMemoryOutboxStore();

@@ -8,6 +8,16 @@ import { PostgresOutboxStore } from "@aether/database";
 import { telemetryTracer, withinSpan } from "@aether/observability";
 import type { Pool } from "pg";
 
+const deferredWorkerEventTypes = new Set([
+  "project.created.v1",
+  "project.created_from_initiative.v1",
+  "project.status_changed.v1",
+  "project.milestone_added.v1",
+  "project.next_action_added.v1",
+  "project.deliverable_accepted.v1",
+  "project.closed.v1",
+]);
+
 export function createOutboxWorker(input: {
   pool: Pool;
   workerId: string;
@@ -58,4 +68,31 @@ export function assertValidDurableEvent(event: DurableDomainEvent): void {
     throw new InvalidDurableEventError(
       `Invalid durable event ${event.eventId}`,
     );
+}
+
+/**
+ * Política central de ejecución asíncrona. Un evento durable sólo puede llegar
+ * al handler que corresponde a su catálogo y los eventos aplazados se hacen
+ * visibles, en vez de quedar como un caso implícito en el runtime.
+ */
+export class UnsupportedWorkerEventError extends Error {}
+export function createWorkerEventHandler(input: {
+  documentScans: DurableEventHandler;
+  onDeferred?(event: DurableDomainEvent): void;
+}): DurableEventHandler {
+  return {
+    async handle(event): Promise<void> {
+      if (event.eventType === "document.scan_requested.v1") {
+        await input.documentScans.handle(event);
+        return;
+      }
+      if (deferredWorkerEventTypes.has(event.eventType)) {
+        input.onDeferred?.(event);
+        return;
+      }
+      throw new UnsupportedWorkerEventError(
+        `Unsupported worker event ${event.eventType}`,
+      );
+    },
+  };
 }

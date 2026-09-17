@@ -10,7 +10,10 @@ import {
   withinSpan,
 } from "@aether/observability";
 
-import { createOutboxWorker } from "./outbox-worker.js";
+import {
+  createOutboxWorker,
+  createWorkerEventHandler,
+} from "./outbox-worker.js";
 import { ClamAvDocumentScanner } from "./clamav-scanner.js";
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -57,15 +60,14 @@ const worker = createOutboxWorker({
   pool,
   store: outboxStore,
   workerId: process.env.WORKER_ID ?? `worker-${randomUUID()}`,
-  handler: {
-    async handle(event) {
-      if (event.eventType === "document.scan_requested.v1")
-        return documentScans.handle(event);
+  handler: createWorkerEventHandler({
+    documentScans,
+    onDeferred(event) {
       process.stdout.write(
-        `Processed outbox event ${event.eventType} (${event.eventId})\n`,
+        `Deferred outbox event ${event.eventType} (${event.eventId})\n`,
       );
     },
-  },
+  }),
 });
 const intervalMs = Number(process.env.OUTBOX_POLL_INTERVAL_MS ?? 1_000);
 let stopped = false;
