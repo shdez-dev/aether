@@ -13,3 +13,4 @@ export * from "./access-grants.js";
 export * from "./support-access.js";
 export * from "./notifications.js";
 export * from "./comments.js";
+export * from "./exports.js";
