@@ -2,6 +2,7 @@ import {
   EvaluationDomainError,
   decideInitiative,
   exemptDecisionCondition,
+  fulfillDecisionCondition,
   evaluateInitiative,
   publishEvaluationStandard,
   transitionInitiative,
@@ -357,6 +358,61 @@ export class EvaluationService {
       input.actorId,
       input.correlationId,
       "initiative.decision_condition_exempted.v1",
+      initiative.status,
+      initiative.status,
+      { decisionId: decision.id, conditionId: input.conditionId },
+    );
+    return updated;
+  }
+
+  async fulfillCondition(input: {
+    actorId: string;
+    organizationId: string;
+    decisionId: string;
+    conditionId: string;
+    note: string;
+    correlationId: string;
+  }): Promise<InitiativeDecision> {
+    const decision = await this.dependencies.evaluations.findDecision(
+      input.decisionId,
+    );
+    if (!decision || decision.organizationId !== input.organizationId)
+      throw new ResourceNotFoundError("INITIATIVE_NOT_FOUND");
+    const role = await this.dependencies.tenancy.findOrganizationRole({
+      actorId: input.actorId,
+      organizationId: input.organizationId,
+    });
+    if (!role) throw new AccessDeniedError("organization:manage");
+    const condition = decision.conditions?.find(
+      (item) => item.id === input.conditionId,
+    );
+    if (role !== "owner" && condition?.responsibleActorId !== input.actorId)
+      throw new AccessDeniedError("organization:manage");
+    const updated = fulfillDecisionCondition({
+      decision,
+      conditionId: input.conditionId,
+      actorId: input.actorId,
+      note: input.note,
+      occurredAt: this.dependencies.clock.now(),
+    });
+    const updatedCondition = updated.conditions?.find(
+      (item) => item.id === input.conditionId,
+    );
+    if (!updatedCondition)
+      throw new EvaluationDomainError("DECISION_CONDITION_NOT_PENDING");
+    await this.dependencies.evaluations.updateDecisionCondition({
+      decisionId: updated.id,
+      condition: updatedCondition,
+    });
+    const initiative = await this.requireInitiative(
+      decision.initiativeId,
+      input.organizationId,
+    );
+    await this.record(
+      initiative,
+      input.actorId,
+      input.correlationId,
+      "initiative.decision_condition_fulfilled.v1",
       initiative.status,
       initiative.status,
       { decisionId: decision.id, conditionId: input.conditionId },

@@ -195,6 +195,33 @@ export function exemptDecisionCondition(input: {
   };
 }
 
+export function fulfillDecisionCondition(input: {
+  decision: InitiativeDecision;
+  conditionId: string;
+  actorId: string;
+  note: string;
+  occurredAt: Date;
+}): InitiativeDecision {
+  const conditions = input.decision.conditions ?? [];
+  const condition = conditions.find((item) => item.id === input.conditionId);
+  if (!condition || condition.status !== "pending")
+    throw new EvaluationDomainError("DECISION_CONDITION_NOT_PENDING");
+  return {
+    ...input.decision,
+    conditions: conditions.map((item) =>
+      item.id === input.conditionId
+        ? {
+            ...item,
+            status: "fulfilled",
+            resolvedByActorId: input.actorId,
+            resolvedAt: input.occurredAt,
+            resolutionNote: input.note,
+          }
+        : item,
+    ),
+  };
+}
+
 export class EvaluationDomainError extends Error {
   constructor(
     public readonly code:

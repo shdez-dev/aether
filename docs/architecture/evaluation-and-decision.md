@@ -38,8 +38,10 @@ resueltas o exentas. La migración
 `0036_decision_conditions.sql` las persiste separadas de la decisión para
 conservar su historial.
 
-En esta rebanada un `owner` puede eximir una condición pendiente con motivo y
-autenticación reciente. La exención registra actor, fecha y motivo, y emite el
-evento de auditoría `initiative.decision_condition_exempted.v1`. El comando de
-cumplimiento queda deliberadamente fuera de esta API inicial; la decisión de
-gobierno está registrada en [ADR-0009](../adr/0009-condiciones-de-decision.md).
+El responsable activo puede cumplir sólo su propia condición; un `owner` puede
+cumplirla en su lugar y un `admin` no puede modificarla. El cumplimiento exige
+nota y autenticación reciente, registra actor y fecha, y emite
+`initiative.decision_condition_fulfilled.v1`. Un `owner` puede eximir una
+condición pendiente con motivo y autenticación reciente; la exención emite
+`initiative.decision_condition_exempted.v1`. La decisión de gobierno está
+registrada en [ADR-0009](../adr/0009-condiciones-de-decision.md).

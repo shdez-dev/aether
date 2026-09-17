@@ -199,26 +199,56 @@ describe("initiative vertical slice", () => {
           responsibleActorId: "author",
           dueOn: "2026-10-01",
         },
+        {
+          description: "Formalizar el alcance con el patrocinador.",
+          responsibleActorId: "author",
+          dueOn: "2026-10-02",
+        },
       ],
     });
     expect(decided.outcome).toBe("approved");
-    expect(decided.conditions).toMatchObject([
-      {
-        responsibleActorId: "author",
-        status: "pending",
-        resolvedAt: null,
-      },
-    ]);
-    const conditionId = decided.conditions![0]!.id;
+    expect(decided.conditions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          responsibleActorId: "author",
+          status: "pending",
+          resolvedAt: null,
+        }),
+      ]),
+    );
+    const fulfilledConditionId = decided.conditions![0]!.id;
+    await expect(
+      evaluations.fulfillCondition({
+        actorId: "reviewer",
+        organizationId: organization.id,
+        decisionId: decided.id,
+        conditionId: fulfilledConditionId,
+        note: "No debe autorizarse por rol de administrador.",
+        correlationId: ids.next(),
+      }),
+    ).rejects.toBeInstanceOf(AccessDeniedError);
+    const fulfilled = await evaluations.fulfillCondition({
+      actorId: "author",
+      organizationId: organization.id,
+      decisionId: decided.id,
+      conditionId: fulfilledConditionId,
+      note: "La adopción fue validada con el área usuaria.",
+      correlationId: ids.next(),
+    });
+    expect(fulfilled.conditions![0]).toMatchObject({
+      status: "fulfilled",
+      resolvedByActorId: "author",
+      resolutionNote: "La adopción fue validada con el área usuaria.",
+    });
     const exempted = await evaluations.exemptCondition({
       actorId: "owner",
       organizationId: organization.id,
       decisionId: decided.id,
-      conditionId,
+      conditionId: decided.conditions![1]!.id,
       reason: "La validación se incorporó en el alcance inicial.",
       correlationId: ids.next(),
     });
-    expect(exempted.conditions![0]).toMatchObject({
+    expect(exempted.conditions![1]).toMatchObject({
       status: "exempted",
       resolvedByActorId: "owner",
       resolutionNote: "La validación se incorporó en el alcance inicial.",
@@ -237,6 +267,7 @@ describe("initiative vertical slice", () => {
       "initiative.presented.v1",
       "initiative.evaluated.v1",
       "initiative.decided.v2",
+      "initiative.decision_condition_fulfilled.v1",
       "initiative.decision_condition_exempted.v1",
     ]);
     await tenants.archiveWorkspace({

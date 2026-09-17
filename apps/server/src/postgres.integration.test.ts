@@ -1536,6 +1536,11 @@ describe.sequential("PostgreSQL integration", () => {
             responsibleActorId: "lead@example.test",
             dueOn: "2026-10-01",
           },
+          {
+            description: "Formalizar el alcance inicial.",
+            responsibleActorId: "lead@example.test",
+            dueOn: "2026-10-02",
+          },
         ],
       };
       const decisionAttempts = await Promise.allSettled([
@@ -1569,6 +1574,11 @@ describe.sequential("PostgreSQL integration", () => {
           responsibleActorId: "lead@example.test",
           status: "pending",
         },
+        {
+          description: "Formalizar el alcance inicial.",
+          responsibleActorId: "lead@example.test",
+          status: "pending",
+        },
       ]);
       const projectInput = {
         actorId: owner,
@@ -1589,17 +1599,30 @@ describe.sequential("PostgreSQL integration", () => {
           correlationId: randomUUID(),
         }),
       ).rejects.toMatchObject({ code: "DECISION_CONDITIONS_PENDING" });
+      await evaluationService.fulfillCondition({
+        actorId: "lead@example.test",
+        organizationId: organization.id,
+        decisionId: decision.id,
+        conditionId: persistedDecision!.conditions![0]!.id,
+        note: "El resultado del piloto fue validado.",
+        correlationId: randomUUID(),
+      });
       await evaluationService.exemptCondition({
         actorId: owner,
         organizationId: organization.id,
         decisionId: decision.id,
-        conditionId: persistedDecision!.conditions![0]!.id,
+        conditionId: persistedDecision!.conditions![1]!.id,
         reason: "La validación se incorporó al alcance inicial.",
         correlationId: randomUUID(),
       });
       expect(
         (await evaluationsStore.findDecision(decision.id))?.conditions,
       ).toMatchObject([
+        {
+          status: "fulfilled",
+          resolvedByActorId: "lead@example.test",
+          resolutionNote: "El resultado del piloto fue validado.",
+        },
         {
           status: "exempted",
           resolvedByActorId: owner,

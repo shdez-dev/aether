@@ -72,6 +72,9 @@ export const DecideInitiativeRequestSchema = z
 export const ExemptDecisionConditionRequestSchema = z.object({
   reason: NonEmptyTextSchema.max(2_000),
 });
+export const FulfillDecisionConditionRequestSchema = z.object({
+  note: NonEmptyTextSchema.max(2_000),
+});
 
 export const EvaluationCriterionInputSchema = z.object({
   id: UuidSchema,
@@ -261,6 +264,9 @@ export type DecideInitiativeRequest = z.infer<
 >;
 export type ExemptDecisionConditionRequest = z.infer<
   typeof ExemptDecisionConditionRequestSchema
+>;
+export type FulfillDecisionConditionRequest = z.infer<
+  typeof FulfillDecisionConditionRequestSchema
 >;
 export type PublishEvaluationStandardRequest = z.infer<
   typeof PublishEvaluationStandardRequestSchema

@@ -70,6 +70,7 @@ import {
   RevokeSupportAccessGrantSchema,
   DecideInitiativeRequestSchema,
   ExemptDecisionConditionRequestSchema,
+  FulfillDecisionConditionRequestSchema,
   ActivateEvaluationStandardRequestSchema,
   AuditHistoryQuerySchema,
   AddProjectMilestoneRequestSchema,
@@ -1593,6 +1594,50 @@ export async function buildServer(input: {
           body: {
             decision: toDecisionResponse(
               await input.evaluations.exemptCondition({
+                actorId: session.actorId,
+                correlationId: correlationId(reply),
+                ...params,
+                ...query,
+                ...body,
+              }),
+            ),
+          },
+        }),
+      });
+    },
+  );
+  app.post(
+    "/v1/decisions/:decisionId/conditions/:conditionId/fulfillments",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      assertRecentAuthentication(session, input.config);
+      const params = z
+        .object({
+          decisionId: z.string().uuid(),
+          conditionId: z.string().uuid(),
+        })
+        .parse(request.params);
+      const query = z
+        .object({ organizationId: z.string().uuid() })
+        .parse(request.query);
+      const body = FulfillDecisionConditionRequestSchema.parse(request.body);
+      return respondIdempotently({
+        request,
+        reply,
+        store: input.idempotency,
+        actorId: session.actorId,
+        operation: `decision.condition.fulfill:${params.conditionId}`,
+        requestPayload: { params, query, body },
+        execute: async () => ({
+          statusCode: 200,
+          body: {
+            decision: toDecisionResponse(
+              await input.evaluations.fulfillCondition({
                 actorId: session.actorId,
                 correlationId: correlationId(reply),
                 ...params,

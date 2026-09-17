@@ -20,20 +20,23 @@ atribuirse a una persona responsable.
   `fulfilled` o `exempted`.
 - Una condición pendiente bloquea la creación de cualquier proyecto desde su
   decisión fuente. Las condiciones resueltas o exentas no bloquean.
-- En esta rebanada, sólo un `owner` puede eximir una condición pendiente. Debe
-  aportar un motivo, contar con autenticación reciente y la operación queda
-  auditada con correlación.
-- La exención no borra la condición: conserva actor, fecha y motivo de
-  resolución. El comando para declarar `fulfilled` se implementará en una
-  rebanada posterior con su autorización específica.
+- El responsable activo puede declarar cumplida únicamente su propia condición;
+  un `owner` puede hacerlo en su lugar. Un `admin` no puede alterar ese
+  compromiso. La operación exige nota, autenticación reciente y auditoría
+  correlacionada.
+- Sólo un `owner` puede eximir una condición pendiente. Debe aportar un motivo,
+  contar con autenticación reciente y la operación queda auditada con
+  correlación.
+- Ni el cumplimiento ni la exención borran la condición: conservan actor, fecha
+  y nota o motivo de resolución.
 
 ## Consecuencias
 
 PostgreSQL es la fuente transaccional de las condiciones. La consulta de una
 decisión devuelve siempre su colección de condiciones, incluso vacía, y la
 conversión a proyecto revalida sus estados antes de crear recursos. Los clientes
-pueden mostrar `fulfilled` como estado histórico, pero no pueden mutarlo en
-esta versión de la API.
+usan comandos separados para cumplir o eximir; ambos devuelven la decisión con
+su historial actualizado.
 
 ## Alternativas rechazadas
 

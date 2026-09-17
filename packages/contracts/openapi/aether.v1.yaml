@@ -1101,6 +1101,44 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
+  /v1/decisions/{decisionId}/conditions/{conditionId}/fulfillments:
+    post:
+      tags: [Initiatives]
+      operationId: fulfillDecisionCondition
+      summary: Declarar cumplida una condición pendiente de una decisión
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: decisionId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: conditionId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/OrganizationContextId"
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FulfillDecisionConditionRequest" }
+      responses:
+        "200":
+          description: Condición cumplida y decisión actualizada.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [decision]
+                properties:
+                  decision: { $ref: "#/components/schemas/InitiativeDecision" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
   /v1/initiatives:
     get:
       tags: [Initiatives]
@@ -2498,6 +2536,12 @@ components:
       required: [reason]
       properties:
         reason: { type: string, minLength: 1, maxLength: 2000 }
+    FulfillDecisionConditionRequest:
+      type: object
+      additionalProperties: false
+      required: [note]
+      properties:
+        note: { type: string, minLength: 1, maxLength: 2000 }
     EvaluationCriterion:
       type: object
       additionalProperties: false
