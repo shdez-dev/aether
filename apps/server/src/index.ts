@@ -14,6 +14,7 @@ import {
   TenantService,
   TemporaryAccessGrantService,
   SupportAccessService,
+  ExportService,
 } from "@aether/application";
 import {
   AuthService,
@@ -45,6 +46,7 @@ import {
   PostgresCommentStore,
   PostgresTemporaryAccessGrantStore,
   PostgresSupportAccessGrantStore,
+  PostgresExportJobStore,
 } from "@aether/database";
 import {
   createOperationalMetrics,
@@ -196,6 +198,12 @@ const outboxAdministration = new OutboxAdministrationService({
   clock: { now: () => new Date() },
   ids: { next: randomUUID },
 });
+const exports = new ExportService({
+  store: new PostgresExportJobStore(pool),
+  tenancy: new PostgresTenantStore(pool),
+  ids: { next: randomUUID },
+  clock: { now: () => new Date() },
+});
 const app = await buildServer({
   config,
   auth,
@@ -214,6 +222,7 @@ const app = await buildServer({
   securityAudit: new PostgresSecurityAuditStore(pool),
   productMetrics,
   outboxAdministration,
+  exports,
   metrics,
   readinessCheck: async () => {
     await pool.query("SELECT 1");

@@ -48,6 +48,7 @@ import {
   TemporaryAccessGrantService,
   SupportAccessGrantError,
   SupportAccessService,
+  ExportService,
 } from "@aether/application";
 import {
   CreateInvitationRequestSchema,
@@ -96,6 +97,7 @@ import {
   ProductMetricsQuerySchema,
   OutboxDeadLetterQuerySchema,
   ReplayOutboxDeadLetterRequestSchema,
+  ExportRequestSchema,
 } from "@aether/contracts";
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
@@ -137,6 +139,7 @@ export async function buildServer(input: {
   securityAudit?: SecurityAuditStore;
   productMetrics?: ProductMetricsService;
   outboxAdministration?: OutboxAdministrationService;
+  exports?: ExportService;
   readinessCheck?: () => Promise<void>;
   metrics?: OperationalMetrics;
 }): Promise<FastifyInstance> {
@@ -1937,6 +1940,44 @@ export async function buildServer(input: {
       ...params,
       ...query,
     });
+    app.post(
+      "/v1/organizations/:organizationId/exports",
+      async (request, reply) => {
+        const session = await requireSession(
+          request,
+          reply,
+          input.auth,
+          input.config,
+        );
+        assertRecentAuthentication(session, input.config);
+        if (!input.exports) throw new Error("Export service is not configured");
+        const { organizationId } = z
+          .object({ organizationId: z.string().uuid() })
+          .parse(request.params);
+        const job = await input.exports.request({
+          actorId: session.actorId,
+          organizationId,
+          ...ExportRequestSchema.parse(request.body),
+        });
+        return reply.code(201).send(job);
+      },
+    );
+    app.get(
+      "/v1/organizations/:organizationId/exports",
+      async (request, reply) => {
+        const session = await requireSession(
+          request,
+          reply,
+          input.auth,
+          input.config,
+        );
+        if (!input.exports) throw new Error("Export service is not configured");
+        const { organizationId } = z
+          .object({ organizationId: z.string().uuid() })
+          .parse(request.params);
+        return input.exports.list({ actorId: session.actorId, organizationId });
+      },
+    );
     app.get("/v1/notifications", async (request, reply) => {
       const session = await requireSession(
         request,
