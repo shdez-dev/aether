@@ -92,6 +92,7 @@ import {
   NotificationInboxQuerySchema,
   NotificationPreferenceRequestSchema,
   CreateCommentRequestSchema,
+  EditCommentRequestSchema,
   ProductMetricsQuerySchema,
   OutboxDeadLetterQuerySchema,
   ReplayOutboxDeadLetterRequestSchema,
@@ -2058,8 +2059,45 @@ export async function buildServer(input: {
       return input.comments.resolve({
         actorId: session.actorId,
         commentId,
+        correlationId: correlationId(reply),
         ...(reopen === undefined ? {} : { reopen }),
       });
+    });
+    app.patch("/v1/comments/:commentId", async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      if (!input.comments) throw new Error("Comment service is not configured");
+      const { commentId } = z
+        .object({ commentId: z.string().uuid() })
+        .parse(request.params);
+      return input.comments.edit({
+        actorId: session.actorId,
+        commentId,
+        correlationId: correlationId(reply),
+        ...EditCommentRequestSchema.parse(request.body),
+      });
+    });
+    app.delete("/v1/comments/:commentId", async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      if (!input.comments) throw new Error("Comment service is not configured");
+      const { commentId } = z
+        .object({ commentId: z.string().uuid() })
+        .parse(request.params);
+      await input.comments.delete({
+        actorId: session.actorId,
+        commentId,
+        correlationId: correlationId(reply),
+      });
+      return reply.code(204).send();
     });
     return references.map((reference) => ({
       ...reference,

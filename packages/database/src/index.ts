@@ -42,6 +42,7 @@ import type {
   NotificationPreference,
   CommentStore,
   Comment,
+  CommentAuditEvent,
   EvidenceReferenceStore,
   EvidenceSubjectLookup,
   ProjectClosureStore,
@@ -3428,25 +3429,40 @@ export class PostgresNotificationStore implements NotificationStore {
 }
 export class PostgresCommentStore implements CommentStore {
   constructor(private readonly pool: Pool) {}
-  async create(c: Comment): Promise<void> {
-    await this.pool.query(
-      `INSERT INTO comments (id,organization_id,workspace_id,resource_type,resource_id,body,mentioned_actor_ids,author_actor_id,created_at,edited_at,resolved_at,resolved_by_actor_id,deleted_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-      [
-        c.id,
-        c.organizationId,
-        c.workspaceId,
-        c.resourceType,
-        c.resourceId,
-        c.body,
-        asJson(c.mentionedActorIds),
-        c.authorActorId,
-        c.createdAt,
-        c.editedAt,
-        c.resolvedAt,
-        c.resolvedByActorId,
-        c.deletedAt,
-      ],
-    );
+  async create(input: {
+    comment: Comment;
+    audit: CommentAuditEvent;
+  }): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const c = input.comment;
+      await client.query(
+        `INSERT INTO comments (id,organization_id,workspace_id,resource_type,resource_id,body,mentioned_actor_ids,author_actor_id,created_at,edited_at,resolved_at,resolved_by_actor_id,deleted_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+        [
+          c.id,
+          c.organizationId,
+          c.workspaceId,
+          c.resourceType,
+          c.resourceId,
+          c.body,
+          asJson(c.mentionedActorIds),
+          c.authorActorId,
+          c.createdAt,
+          c.editedAt,
+          c.resolvedAt,
+          c.resolvedByActorId,
+          c.deletedAt,
+        ],
+      );
+      await insertCommentAuditEvent(client, input.audit);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
   async list(i: {
     organizationId: string;
@@ -3466,13 +3482,60 @@ export class PostgresCommentStore implements CommentStore {
     );
     return r.rows[0] ? toComment(r.rows[0]) : null;
   }
-  async update(c: Comment): Promise<boolean> {
-    const r = await this.pool.query(
-      `UPDATE comments SET resolved_at=$2,resolved_by_actor_id=$3 WHERE id=$1 AND deleted_at IS NULL`,
-      [c.id, c.resolvedAt, c.resolvedByActorId],
-    );
-    return r.rowCount === 1;
+  async update(input: {
+    comment: Comment;
+    audit: CommentAuditEvent;
+  }): Promise<boolean> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const c = input.comment;
+      const r = await client.query(
+        `UPDATE comments SET body=$2,edited_at=$3,resolved_at=$4,resolved_by_actor_id=$5,deleted_at=$6 WHERE id=$1 AND deleted_at IS NULL`,
+        [
+          c.id,
+          c.body,
+          c.editedAt,
+          c.resolvedAt,
+          c.resolvedByActorId,
+          c.deletedAt,
+        ],
+      );
+      if (r.rowCount !== 1) {
+        await client.query("ROLLBACK");
+        return false;
+      }
+      await insertCommentAuditEvent(client, input.audit);
+      await client.query("COMMIT");
+      return true;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
+}
+
+async function insertCommentAuditEvent(
+  client: PoolClient,
+  event: CommentAuditEvent,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO comment_audit_events (id,comment_id,organization_id,workspace_id,actor_id,event_type,correlation_id,occurred_at,payload)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+    [
+      event.id,
+      event.commentId,
+      event.organizationId,
+      event.workspaceId,
+      event.actorId,
+      event.eventType,
+      event.correlationId,
+      event.occurredAt,
+      asJson(event.payload),
+    ],
+  );
 }
 
 /** Metadatos de documentos y bitácora insertados atómicamente en PostgreSQL. */

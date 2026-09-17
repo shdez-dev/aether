@@ -1,10 +1,19 @@
-import type { Comment, CommentStore } from "@aether/application";
+import type {
+  Comment,
+  CommentAuditEvent,
+  CommentStore,
+} from "@aether/application";
 
 export class InMemoryCommentStore implements CommentStore {
   readonly comments = new Map<string, Comment>();
+  readonly audits: CommentAuditEvent[] = [];
 
-  async create(comment: Comment): Promise<void> {
-    this.comments.set(comment.id, comment);
+  async create(input: {
+    comment: Comment;
+    audit: CommentAuditEvent;
+  }): Promise<void> {
+    this.comments.set(input.comment.id, input.comment);
+    this.audits.push(input.audit);
   }
 
   async list(input: {
@@ -25,9 +34,13 @@ export class InMemoryCommentStore implements CommentStore {
       );
   }
 
-  async update(comment: Comment): Promise<boolean> {
-    if (!this.comments.has(comment.id)) return false;
-    this.comments.set(comment.id, comment);
+  async update(input: {
+    comment: Comment;
+    audit: CommentAuditEvent;
+  }): Promise<boolean> {
+    if (!this.comments.has(input.comment.id)) return false;
+    this.comments.set(input.comment.id, input.comment);
+    this.audits.push(input.audit);
     return true;
   }
 

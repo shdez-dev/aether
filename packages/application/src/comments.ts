@@ -22,14 +22,33 @@ export type Comment = Readonly<{
   resolvedByActorId: string | null;
   deletedAt: Date | null;
 }>;
+export type CommentAuditEvent = Readonly<{
+  id: string;
+  commentId: string;
+  organizationId: string;
+  workspaceId: string;
+  actorId: string;
+  eventType:
+    | "comment.created.v1"
+    | "comment.edited.v1"
+    | "comment.resolved.v1"
+    | "comment.reopened.v1"
+    | "comment.deleted.v1";
+  correlationId: string;
+  occurredAt: Date;
+  payload: Readonly<Record<string, unknown>>;
+}>;
 export interface CommentStore {
-  create(comment: Comment): Promise<void>;
+  create(input: { comment: Comment; audit: CommentAuditEvent }): Promise<void>;
   list(input: {
     organizationId: string;
     resourceType: DocumentResourceType;
     resourceId: string;
   }): Promise<readonly Comment[]>;
-  update(comment: Comment): Promise<boolean>;
+  update(input: {
+    comment: Comment;
+    audit: CommentAuditEvent;
+  }): Promise<boolean>;
   find(id: string): Promise<Comment | null>;
 }
 export class CommentService {
@@ -59,11 +78,7 @@ export class CommentService {
     );
     await assertWorkspaceWritable(this.d.tenancy, resource.workspaceId);
     for (const actorId of new Set(input.mentionedActorIds))
-      await this.requireAccess(
-        actorId,
-        input.resourceType,
-        input.resourceId,
-      );
+      await this.requireAccess(actorId, input.resourceType, input.resourceId);
     const now = this.d.clock.now();
     const comment: Comment = {
       id: this.d.ids.next(),
@@ -79,7 +94,15 @@ export class CommentService {
       resolvedByActorId: null,
       deletedAt: null,
     };
-    await this.d.store.create(comment);
+    await this.d.store.create({
+      comment,
+      audit: this.auditFor(
+        comment,
+        input.actorId,
+        input.correlationId,
+        "comment.created.v1",
+      ),
+    });
     for (const actorId of comment.mentionedActorIds.filter(
       (id) => id !== input.actorId,
     ))
@@ -114,6 +137,7 @@ export class CommentService {
     actorId: string;
     commentId: string;
     reopen?: boolean;
+    correlationId: string;
   }): Promise<Comment> {
     const comment = await this.d.store.find(input.commentId);
     if (!comment) throw new Error("COMMENT_NOT_FOUND");
@@ -128,9 +152,109 @@ export class CommentService {
       resolvedAt: input.reopen ? null : this.d.clock.now(),
       resolvedByActorId: input.reopen ? null : input.actorId,
     };
-    if (!(await this.d.store.update(updated)))
+    if (
+      !(await this.d.store.update({
+        comment: updated,
+        audit: this.auditFor(
+          updated,
+          input.actorId,
+          input.correlationId,
+          input.reopen ? "comment.reopened.v1" : "comment.resolved.v1",
+        ),
+      }))
+    )
       throw new Error("COMMENT_CONFLICT");
     return updated;
+  }
+  async edit(input: {
+    actorId: string;
+    commentId: string;
+    body: string;
+    correlationId: string;
+  }): Promise<Comment> {
+    const comment = await this.d.store.find(input.commentId);
+    if (!comment) throw new Error("COMMENT_NOT_FOUND");
+    await this.requireAccess(
+      input.actorId,
+      comment.resourceType,
+      comment.resourceId,
+    );
+    if (comment.authorActorId !== input.actorId)
+      throw new AccessDeniedError("workspace:read");
+    await assertWorkspaceWritable(this.d.tenancy, comment.workspaceId);
+    const updated = {
+      ...comment,
+      body: input.body,
+      editedAt: this.d.clock.now(),
+    };
+    if (
+      !(await this.d.store.update({
+        comment: updated,
+        audit: this.auditFor(
+          updated,
+          input.actorId,
+          input.correlationId,
+          "comment.edited.v1",
+        ),
+      }))
+    )
+      throw new Error("COMMENT_CONFLICT");
+    return updated;
+  }
+  async delete(input: {
+    actorId: string;
+    commentId: string;
+    correlationId: string;
+  }): Promise<void> {
+    const comment = await this.d.store.find(input.commentId);
+    if (!comment) throw new Error("COMMENT_NOT_FOUND");
+    await this.requireAccess(
+      input.actorId,
+      comment.resourceType,
+      comment.resourceId,
+    );
+    const role = await this.d.tenancy.findOrganizationRole({
+      actorId: input.actorId,
+      organizationId: comment.organizationId,
+    });
+    if (
+      comment.authorActorId !== input.actorId &&
+      role !== "owner" &&
+      role !== "admin"
+    )
+      throw new AccessDeniedError("workspace:read");
+    await assertWorkspaceWritable(this.d.tenancy, comment.workspaceId);
+    const updated = { ...comment, deletedAt: this.d.clock.now() };
+    if (
+      !(await this.d.store.update({
+        comment: updated,
+        audit: this.auditFor(
+          updated,
+          input.actorId,
+          input.correlationId,
+          "comment.deleted.v1",
+        ),
+      }))
+    )
+      throw new Error("COMMENT_CONFLICT");
+  }
+  private auditFor(
+    comment: Comment,
+    actorId: string,
+    correlationId: string,
+    eventType: CommentAuditEvent["eventType"],
+  ): CommentAuditEvent {
+    return {
+      id: this.d.ids.next(),
+      commentId: comment.id,
+      organizationId: comment.organizationId,
+      workspaceId: comment.workspaceId,
+      actorId,
+      eventType,
+      correlationId,
+      occurredAt: this.d.clock.now(),
+      payload: {},
+    };
   }
   private async requireAccess(
     actorId: string,

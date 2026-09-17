@@ -7,3 +7,6 @@ export const CreateCommentRequestSchema = z.object({
   body: z.string().trim().min(1).max(10000),
   mentionedActorIds: z.array(z.string().min(1).max(255)).max(50),
 });
+export const EditCommentRequestSchema = z.object({
+  body: z.string().trim().min(1).max(10000),
+});

@@ -72,8 +72,9 @@ describe("comments", () => {
       ids,
       clock,
     });
+    const store = new InMemoryCommentStore();
     const comments = new CommentService({
-      store: new InMemoryCommentStore(),
+      store,
       resources,
       tenancy,
       projects,
@@ -110,15 +111,45 @@ describe("comments", () => {
       }),
     ).resolves.toHaveLength(1);
     await expect(
-      comments.resolve({ actorId: "member", commentId: comment.id }),
+      comments.resolve({
+        actorId: "member",
+        commentId: comment.id,
+        correlationId: ids.next(),
+      }),
     ).resolves.toMatchObject({ resolvedByActorId: "member" });
     await expect(
       comments.resolve({
         actorId: "member",
         commentId: comment.id,
         reopen: true,
+        correlationId: ids.next(),
       }),
     ).resolves.toMatchObject({ resolvedAt: null, resolvedByActorId: null });
+    await expect(
+      comments.edit({
+        actorId: "owner",
+        commentId: comment.id,
+        body: "Hito revisado.",
+        correlationId: ids.next(),
+      }),
+    ).resolves.toMatchObject({
+      body: "Hito revisado.",
+      editedAt: expect.any(Date),
+    });
+    await expect(
+      comments.delete({
+        actorId: "owner",
+        commentId: comment.id,
+        correlationId: ids.next(),
+      }),
+    ).resolves.toBeUndefined();
+    expect(store.audits.map((event) => event.eventType)).toEqual([
+      "comment.created.v1",
+      "comment.resolved.v1",
+      "comment.reopened.v1",
+      "comment.edited.v1",
+      "comment.deleted.v1",
+    ]);
 
     projects.participants.delete(`${projectId}:member`);
     await expect(
