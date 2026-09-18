@@ -539,6 +539,47 @@ describe("HTTP authentication boundary", () => {
       payload: { name: "Método", memberActorIds: ["owner"] },
     });
     expect(createdTeam.statusCode).toBe(201);
+    const invitationKey = crypto.randomUUID();
+    const createdInvitation = await app.inject({
+      method: "POST",
+      url: `/v1/organizations/${organization.id}/invitations`,
+      headers: {
+        origin: config.webOrigin,
+        "x-csrf-token": ownerCsrf,
+        "idempotency-key": invitationKey,
+        cookie: `aether_session=${ownerToken}; aether_csrf=${ownerCsrf}`,
+      },
+      payload: {
+        email: "idempotent-invitation@example.test",
+        organizationRole: "member",
+        workspaceIds: [],
+        workspaceRole: "viewer",
+        expiresInDays: 7,
+      },
+    });
+    expect(createdInvitation.statusCode).toBe(201);
+    const replayedInvitation = await app.inject({
+      method: "POST",
+      url: `/v1/organizations/${organization.id}/invitations`,
+      headers: {
+        origin: config.webOrigin,
+        "x-csrf-token": ownerCsrf,
+        "idempotency-key": invitationKey,
+        cookie: `aether_session=${ownerToken}; aether_csrf=${ownerCsrf}`,
+      },
+      payload: {
+        email: "idempotent-invitation@example.test",
+        organizationRole: "member",
+        workspaceIds: [],
+        workspaceRole: "viewer",
+        expiresInDays: 7,
+      },
+    });
+    expect(replayedInvitation.statusCode).toBe(201);
+    expect(replayedInvitation.headers["idempotent-replayed"]).toBe("true");
+    expect(replayedInvitation.json()).toMatchObject({
+      id: createdInvitation.json().id,
+    });
     const invitation = await tenants.invite({
       actorId: "owner",
       organizationId: organization.id,

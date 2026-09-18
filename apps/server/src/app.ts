@@ -1229,16 +1229,28 @@ export async function buildServer(input: {
         .object({ organizationId: z.string().uuid() })
         .parse(request.params);
       const body = CreateInvitationRequestSchema.parse(request.body);
-      const result = await input.tenants.invite({
+      return respondIdempotentlyWhenRequested({
+        request,
+        reply,
+        store: input.idempotency,
         actorId: session.actorId,
-        correlationId: correlationId(reply),
-        ...params,
-        ...body,
-      });
-      // La entrega del token queda delimitada para el adaptador de correo/outbox.
-      return reply.code(201).send({
-        ...result.invitation,
-        expiresAt: result.invitation.expiresAt.toISOString(),
+        operation: `invitation.create:${params.organizationId}`,
+        requestPayload: { params, body },
+        execute: async () => {
+          const result = await input.tenants.invite({
+            actorId: session.actorId,
+            correlationId: correlationId(reply),
+            ...params,
+            ...body,
+          });
+          return {
+            statusCode: 201,
+            body: {
+              ...result.invitation,
+              expiresAt: result.invitation.expiresAt.toISOString(),
+            },
+          };
+        },
       });
     },
   );
