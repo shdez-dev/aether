@@ -1184,14 +1184,23 @@ export async function buildServer(input: {
         })
         .parse(request.params);
       const body = CreateTeamRequestSchema.parse(request.body);
-      return reply.code(201).send(
-        await input.tenants.createTeam({
-          actorId: session.actorId,
-          correlationId: correlationId(reply),
-          ...params,
-          ...body,
+      return respondIdempotentlyWhenRequested({
+        request,
+        reply,
+        store: input.idempotency,
+        actorId: session.actorId,
+        operation: `team.create:${params.organizationId}:${params.workspaceId}`,
+        requestPayload: { params, body },
+        execute: async () => ({
+          statusCode: 201,
+          body: await input.tenants.createTeam({
+            actorId: session.actorId,
+            correlationId: correlationId(reply),
+            ...params,
+            ...body,
+          }),
         }),
-      );
+      });
     },
   );
   app.get(

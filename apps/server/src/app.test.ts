@@ -534,11 +534,26 @@ describe("HTTP authentication boundary", () => {
       headers: {
         origin: config.webOrigin,
         "x-csrf-token": ownerCsrf,
+        "idempotency-key": "create-team-key",
         cookie: `aether_session=${ownerToken}; aether_csrf=${ownerCsrf}`,
       },
       payload: { name: "Método", memberActorIds: ["owner"] },
     });
     expect(createdTeam.statusCode).toBe(201);
+    const replayedTeam = await app.inject({
+      method: "POST",
+      url: `/v1/organizations/${organization.id}/workspaces/${workspace.id}/teams`,
+      headers: {
+        origin: config.webOrigin,
+        "x-csrf-token": ownerCsrf,
+        "idempotency-key": "create-team-key",
+        cookie: `aether_session=${ownerToken}; aether_csrf=${ownerCsrf}`,
+      },
+      payload: { name: "Método", memberActorIds: ["owner"] },
+    });
+    expect(replayedTeam.statusCode).toBe(201);
+    expect(replayedTeam.headers["idempotent-replayed"]).toBe("true");
+    expect(replayedTeam.json()).toMatchObject({ id: createdTeam.json().id });
     const invitationKey = crypto.randomUUID();
     const createdInvitation = await app.inject({
       method: "POST",
