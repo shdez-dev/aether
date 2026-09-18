@@ -673,13 +673,23 @@ export async function buildServer(input: {
       input.config,
     );
     const body = CreateOrganizationRequestSchema.parse(request.body);
-    const organization = await input.tenants.createOrganization({
+    return respondIdempotentlyWhenRequested({
+      request,
+      reply,
+      store: input.idempotency,
       actorId: session.actorId,
-      actorEmail: requireActorEmail(session.actorEmail),
-      correlationId: correlationId(reply),
-      ...body,
+      operation: "organization.create",
+      requestPayload: body,
+      execute: async () => {
+        const organization = await input.tenants.createOrganization({
+          actorId: session.actorId,
+          actorEmail: requireActorEmail(session.actorEmail),
+          correlationId: correlationId(reply),
+          ...body,
+        });
+        return { statusCode: 201, body: organization };
+      },
     });
-    return reply.code(201).send(organization);
   });
   app.get("/v1/organizations", async (request, reply) => {
     const session = await requireSession(
@@ -1003,12 +1013,22 @@ export async function buildServer(input: {
       input.config,
     );
     const body = CreateWorkspaceRequestSchema.parse(request.body);
-    const workspace = await input.tenants.createWorkspace({
+    return respondIdempotentlyWhenRequested({
+      request,
+      reply,
+      store: input.idempotency,
       actorId: session.actorId,
-      correlationId: correlationId(reply),
-      ...body,
+      operation: `workspace.create:${body.organizationId}`,
+      requestPayload: body,
+      execute: async () => {
+        const workspace = await input.tenants.createWorkspace({
+          actorId: session.actorId,
+          correlationId: correlationId(reply),
+          ...body,
+        });
+        return { statusCode: 201, body: workspace };
+      },
     });
-    return reply.code(201).send(workspace);
   });
   app.get("/v1/workspaces/:workspaceId", async (request, reply) => {
     const session = await requireSession(
@@ -3046,7 +3066,7 @@ function csrfCookieOptions(config: ServerConfig) {
   };
 }
 
-async function respondIdempotently(input: {
+type IdempotentResponseInput = {
   request: FastifyRequest;
   reply: FastifyReply;
   store: IdempotencyStore;
@@ -3054,7 +3074,21 @@ async function respondIdempotently(input: {
   operation: string;
   requestPayload: unknown;
   execute: () => Promise<{ statusCode: number; body: unknown }>;
-}): Promise<FastifyReply> {
+};
+
+async function respondIdempotentlyWhenRequested(
+  input: IdempotentResponseInput,
+): Promise<FastifyReply> {
+  if (typeof input.request.headers["idempotency-key"] !== "string") {
+    const response = await input.execute();
+    return input.reply.code(response.statusCode).send(response.body);
+  }
+  return respondIdempotently(input);
+}
+
+async function respondIdempotently(
+  input: IdempotentResponseInput,
+): Promise<FastifyReply> {
   const supplied = input.request.headers["idempotency-key"];
   if (typeof supplied !== "string") throw new IdempotencyKeyRequiredError();
   const key = z.string().trim().min(1).max(255).parse(supplied);

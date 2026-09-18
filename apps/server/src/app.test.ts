@@ -1354,6 +1354,21 @@ describe("HTTP authentication boundary", () => {
     });
     expect(organizationResponse.statusCode).toBe(201);
     const organization = organizationResponse.json() as { id: string };
+    const replayedOrganization = await app.inject({
+      method: "POST",
+      url: "/v1/organizations",
+      headers,
+      payload: {
+        name: "Aether Test",
+        organizationType: "institutional",
+        timezone: "UTC",
+        locale: "es-CL",
+        policy: { dataResidencyRegion: "cl", retentionDays: 365 },
+      },
+    });
+    expect(replayedOrganization.statusCode).toBe(201);
+    expect(replayedOrganization.headers["idempotent-replayed"]).toBe("true");
+    expect(replayedOrganization.json()).toMatchObject({ id: organization.id });
     const suspendedInvitation = await tenants.invite({
       actorId: authenticatedActorId,
       organizationId: organization.id,
@@ -1576,6 +1591,19 @@ describe("HTTP authentication boundary", () => {
     });
     expect(workspaceResponse.statusCode).toBe(201);
     const workspace = workspaceResponse.json() as { id: string };
+    const replayedWorkspace = await app.inject({
+      method: "POST",
+      url: "/v1/workspaces",
+      headers,
+      payload: {
+        organizationId: organization.id,
+        name: "Estrategia",
+        mode: "institutional",
+      },
+    });
+    expect(replayedWorkspace.statusCode).toBe(201);
+    expect(replayedWorkspace.headers["idempotent-replayed"]).toBe("true");
+    expect(replayedWorkspace.json()).toMatchObject({ id: workspace.id });
     const workspacesResponse = await app.inject({
       method: "GET",
       url: `/v1/organizations/${organization.id}/workspaces`,
