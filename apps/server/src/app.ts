@@ -1329,19 +1329,29 @@ export async function buildServer(input: {
         input.config,
       );
       assertRecentAuthentication(session, input.config);
-      const { organizationId } = z
+      const params = z
         .object({ organizationId: z.string().uuid() })
         .parse(request.params);
       const body = TransferOrganizationOwnershipRequestSchema.parse(
         request.body,
       );
-      await input.tenants.transferOwnership({
+      return respondIdempotentlyWhenRequested({
+        request,
+        reply,
+        store: input.idempotency,
         actorId: session.actorId,
-        organizationId,
-        targetActorId: body.targetActorId,
-        correlationId: correlationId(reply),
+        operation: `organization.ownership.transfer:${params.organizationId}`,
+        requestPayload: { params, body },
+        execute: async () => {
+          await input.tenants.transferOwnership({
+            actorId: session.actorId,
+            organizationId: params.organizationId,
+            targetActorId: body.targetActorId,
+            correlationId: correlationId(reply),
+          });
+          return { statusCode: 204, body: {} };
+        },
       });
-      return reply.code(204).send();
     },
   );
   app.delete(

@@ -1227,11 +1227,27 @@ describe("HTTP authentication boundary", () => {
       headers: {
         origin: config.webOrigin,
         "x-csrf-token": csrf,
+        "idempotency-key": "transfer-organization-ownership-key",
         cookie: `aether_session=${session}; aether_csrf=${csrf}`,
       },
       payload: { targetActorId: "next-owner" },
     });
     expect(ownershipTransfer.statusCode).toBe(204);
+    const replayedOwnershipTransfer = await app.inject({
+      method: "POST",
+      url: `/v1/organizations/${organization.json().id}/ownership-transfers`,
+      headers: {
+        origin: config.webOrigin,
+        "x-csrf-token": csrf,
+        "idempotency-key": "transfer-organization-ownership-key",
+        cookie: `aether_session=${session}; aether_csrf=${csrf}`,
+      },
+      payload: { targetActorId: "next-owner" },
+    });
+    expect(replayedOwnershipTransfer.statusCode).toBe(204);
+    expect(replayedOwnershipTransfer.headers["idempotent-replayed"]).toBe(
+      "true",
+    );
     await expect(
       tenants.capabilities({
         actorId: "next-owner",
