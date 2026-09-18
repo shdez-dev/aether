@@ -1139,12 +1139,22 @@ export async function buildServer(input: {
           workspaceId: z.string().uuid(),
         })
         .parse(request.params);
-      await input.tenants.clearWorkspacePolicyOverride({
+      return respondIdempotentlyWhenRequested({
+        request,
+        reply,
+        store: input.idempotency,
         actorId: session.actorId,
-        correlationId: correlationId(reply),
-        ...params,
+        operation: `workspace.policy_override.clear:${params.organizationId}:${params.workspaceId}`,
+        requestPayload: params,
+        execute: async () => {
+          await input.tenants.clearWorkspacePolicyOverride({
+            actorId: session.actorId,
+            correlationId: correlationId(reply),
+            ...params,
+          });
+          return { statusCode: 204, body: {} };
+        },
       });
-      return reply.code(204).send();
     },
   );
   app.put(

@@ -1097,10 +1097,23 @@ describe("HTTP authentication boundary", () => {
       headers: {
         origin: config.webOrigin,
         "x-csrf-token": csrf,
+        "idempotency-key": "clear-workspace-policy-override-key",
         cookie: `aether_session=${session}; aether_csrf=${csrf}`,
       },
     });
     expect(clearedOverride.statusCode).toBe(204);
+    const replayedClearedOverride = await app.inject({
+      method: "DELETE",
+      url: `/v1/organizations/${organization.json().id}/workspaces/${workspace.json().id}/policy-override`,
+      headers: {
+        origin: config.webOrigin,
+        "x-csrf-token": csrf,
+        "idempotency-key": "clear-workspace-policy-override-key",
+        cookie: `aether_session=${session}; aether_csrf=${csrf}`,
+      },
+    });
+    expect(replayedClearedOverride.statusCode).toBe(204);
+    expect(replayedClearedOverride.headers["idempotent-replayed"]).toBe("true");
     const archivedWorkspace = await app.inject({
       method: "POST",
       url: `/v1/organizations/${organization.json().id}/workspaces/${workspace.json().id}/archive`,
