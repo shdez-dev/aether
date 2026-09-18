@@ -734,10 +734,23 @@ describe("HTTP authentication boundary", () => {
       headers: {
         origin: config.webOrigin,
         "x-csrf-token": ownerCsrf,
+        "idempotency-key": "revoke-invitation-key",
         cookie: `aether_session=${ownerToken}; aether_csrf=${ownerCsrf}`,
       },
     });
     expect(revoked.statusCode).toBe(204);
+    const replayedRevocation = await app.inject({
+      method: "DELETE",
+      url: `/v1/organizations/${organization.id}/invitations/${revokedInvitation.invitation.id}`,
+      headers: {
+        origin: config.webOrigin,
+        "x-csrf-token": ownerCsrf,
+        "idempotency-key": "revoke-invitation-key",
+        cookie: `aether_session=${ownerToken}; aether_csrf=${ownerCsrf}`,
+      },
+    });
+    expect(replayedRevocation.statusCode).toBe(204);
+    expect(replayedRevocation.headers["idempotent-replayed"]).toBe("true");
     const otherOrganization = await tenants.createOrganization({
       actorId: "other-owner",
       actorEmail: "other-owner@example.test",

@@ -867,6 +867,7 @@ paths:
           schema: { type: string, format: uuid }
         - $ref: "#/components/parameters/CsrfToken"
         - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "204": { description: Invitación revocada y auditada. }
         "401": { $ref: "#/components/responses/Problem" }
