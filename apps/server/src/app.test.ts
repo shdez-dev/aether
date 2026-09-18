@@ -554,6 +554,31 @@ describe("HTTP authentication boundary", () => {
     expect(replayedTeam.statusCode).toBe(201);
     expect(replayedTeam.headers["idempotent-replayed"]).toBe("true");
     expect(replayedTeam.json()).toMatchObject({ id: createdTeam.json().id });
+    const replaceTeamMembers = await app.inject({
+      method: "PUT",
+      url: `/v1/organizations/${organization.id}/workspaces/${workspace.id}/teams/${createdTeam.json().id}/members`,
+      headers: {
+        origin: config.webOrigin,
+        "x-csrf-token": ownerCsrf,
+        "idempotency-key": "replace-team-members-key",
+        cookie: `aether_session=${ownerToken}; aether_csrf=${ownerCsrf}`,
+      },
+      payload: { memberActorIds: ["owner"] },
+    });
+    expect(replaceTeamMembers.statusCode).toBe(204);
+    const replayedTeamMembers = await app.inject({
+      method: "PUT",
+      url: `/v1/organizations/${organization.id}/workspaces/${workspace.id}/teams/${createdTeam.json().id}/members`,
+      headers: {
+        origin: config.webOrigin,
+        "x-csrf-token": ownerCsrf,
+        "idempotency-key": "replace-team-members-key",
+        cookie: `aether_session=${ownerToken}; aether_csrf=${ownerCsrf}`,
+      },
+      payload: { memberActorIds: ["owner"] },
+    });
+    expect(replayedTeamMembers.statusCode).toBe(204);
+    expect(replayedTeamMembers.headers["idempotent-replayed"]).toBe("true");
     const invitationKey = crypto.randomUUID();
     const createdInvitation = await app.inject({
       method: "POST",

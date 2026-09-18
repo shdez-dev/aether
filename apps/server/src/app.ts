@@ -1141,13 +1141,23 @@ export async function buildServer(input: {
         })
         .parse(request.params);
       const body = ReplaceTeamMembersRequestSchema.parse(request.body);
-      await input.tenants.replaceTeamMembers({
+      return respondIdempotentlyWhenRequested({
+        request,
+        reply,
+        store: input.idempotency,
         actorId: session.actorId,
-        correlationId: correlationId(reply),
-        ...params,
-        ...body,
+        operation: `team.members.replace:${params.organizationId}:${params.workspaceId}:${params.teamId}`,
+        requestPayload: { params, body },
+        execute: async () => {
+          await input.tenants.replaceTeamMembers({
+            actorId: session.actorId,
+            correlationId: correlationId(reply),
+            ...params,
+            ...body,
+          });
+          return { statusCode: 204, body: {} };
+        },
       });
-      return reply.code(204).send();
     },
   );
   app.get(
