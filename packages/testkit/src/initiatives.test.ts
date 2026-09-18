@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   AccessDeniedError,
+  EvaluationConflictOfInterestError,
   EvaluationService,
   InitiativeService,
   InitiativeVersionConflictError,
@@ -182,7 +183,7 @@ describe("initiative vertical slice", () => {
         rationale: "Revisión favorable.",
         evidence: ["Acta."],
       }),
-    ).rejects.toBeInstanceOf(AccessDeniedError);
+    ).rejects.toBeInstanceOf(EvaluationConflictOfInterestError);
     const decided = await evaluations.decide({
       actorId: "owner",
       organizationId: organization.id,

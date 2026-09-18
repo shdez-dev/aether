@@ -1694,10 +1694,37 @@ describe("HTTP authentication boundary", () => {
     });
     expect(activated.statusCode).toBe(204);
 
+    const reviewerInvitation = await tenants.invite({
+      actorId: authenticatedActorId,
+      organizationId: organization.id,
+      email: "reviewer@example.test",
+      organizationRole: "admin",
+      workspaceIds: [],
+      workspaceRole: "viewer",
+      expiresInDays: 7,
+    });
+    await tenants.acceptInvitation({
+      token: reviewerInvitation.deliveryToken,
+      actorId: "reviewer",
+      actorEmail: "reviewer@example.test",
+    });
+    await createAuthenticatedSession(authStore, {
+      token: "independent-reviewer-session",
+      actorId: "reviewer",
+      actorEmail: "reviewer@example.test",
+    });
+    const reviewerCsrf = "independent-reviewer-csrf";
+    const reviewerHeaders = {
+      origin: config.webOrigin,
+      "x-csrf-token": reviewerCsrf,
+      "idempotency-key": crypto.randomUUID(),
+      cookie: `aether_session=independent-reviewer-session; aether_csrf=${reviewerCsrf}`,
+    };
+
     const reviewResponse = await app.inject({
       method: "POST",
       url: `/v1/initiatives/${created.id}/review?organizationId=${organization.id}`,
-      headers,
+      headers: reviewerHeaders,
       payload: {
         expectedVersion: presented.version,
         standardId: standard.id,
@@ -1724,6 +1751,25 @@ describe("HTTP authentication boundary", () => {
     expect(evaluationResponse.json()).toMatchObject({
       id: review.evaluation.id,
       initiativeId: created.id,
+    });
+    const conflictDecisionResponse = await app.inject({
+      method: "POST",
+      url: `/v1/initiatives/${created.id}/decide?organizationId=${organization.id}`,
+      headers: {
+        ...reviewerHeaders,
+        "idempotency-key": crypto.randomUUID(),
+      },
+      payload: {
+        expectedVersion: review.initiative.version,
+        evaluationId: review.evaluation.id,
+        outcome: "approved",
+        rationale: "No debe poder decidir su propia evaluación.",
+        evidence: ["Acta de comité."],
+      },
+    });
+    expect(conflictDecisionResponse.statusCode).toBe(403);
+    expect(conflictDecisionResponse.json()).toMatchObject({
+      code: "CONFLICT_OF_INTEREST",
     });
     const decisionResponse = await app.inject({
       method: "POST",
@@ -1859,10 +1905,20 @@ describe("HTTP authentication boundary", () => {
         }),
       ]),
     );
-    for (const [resourceType, resourceId, action] of [
-      ["initiative", created.id, "initiative.created.v1"],
-      ["evaluation", review.evaluation.id, "initiative.evaluated.v1"],
-      ["decision", decision.decision.id, "initiative.decided.v2"],
+    for (const [resourceType, resourceId, action, actorId] of [
+      ["initiative", created.id, "initiative.created.v1", authenticatedActorId],
+      [
+        "evaluation",
+        review.evaluation.id,
+        "initiative.evaluated.v1",
+        "reviewer",
+      ],
+      [
+        "decision",
+        decision.decision.id,
+        "initiative.decided.v2",
+        authenticatedActorId,
+      ],
     ] as const) {
       const history = await app.inject({
         method: "GET",
@@ -1874,7 +1930,7 @@ describe("HTTP authentication boundary", () => {
         expect.arrayContaining([
           expect.objectContaining({
             action,
-            actorId: authenticatedActorId,
+            actorId,
             result: "succeeded",
           }),
         ]),

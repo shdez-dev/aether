@@ -1153,7 +1153,8 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/FulfillDecisionConditionRequest" }
+            schema:
+              { $ref: "#/components/schemas/FulfillDecisionConditionRequest" }
       responses:
         "200":
           description: Condición cumplida y decisión actualizada.
@@ -3357,6 +3358,7 @@ components:
               INVITATION_INVALID_OR_EXPIRED,
               OIDC_PROVIDER_UNAVAILABLE,
               RECENT_AUTH_REQUIRED,
+              CONFLICT_OF_INTEREST,
               WORKSPACE_ARCHIVED,
               TARGET_MUST_BE_DIFFERENT,
               TARGET_MUST_BE_MEMBER,

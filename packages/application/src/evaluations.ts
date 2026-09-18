@@ -247,11 +247,17 @@ export class EvaluationService {
       | undefined;
     correlationId: string;
   }): Promise<InitiativeDecision> {
-    await this.assertOwner(input.actorId, input.organizationId);
     const initiative = await this.requireInitiative(
       input.initiativeId,
       input.organizationId,
     );
+    const evaluation = await this.dependencies.evaluations.findEvaluation(
+      input.evaluationId,
+    );
+    if (!evaluation) throw new ResourceNotFoundError("INITIATIVE_NOT_FOUND");
+    if (evaluation.evaluatedByActorId === input.actorId)
+      throw new EvaluationConflictOfInterestError();
+    await this.assertOwner(input.actorId, input.organizationId);
     await assertWorkspaceWritable(
       this.dependencies.tenancy,
       initiative.workspaceId,
@@ -260,10 +266,6 @@ export class EvaluationService {
       throw new EvaluationDomainError("EVALUATION_INCOMPLETE");
     if (initiative.version !== input.expectedVersion)
       throw new InitiativeVersionConflictError();
-    const evaluation = await this.dependencies.evaluations.findEvaluation(
-      input.evaluationId,
-    );
-    if (!evaluation) throw new ResourceNotFoundError("INITIATIVE_NOT_FOUND");
     const now = this.dependencies.clock.now();
     for (const condition of input.conditions ?? [])
       await this.assertOrganizationMember(
@@ -514,3 +516,4 @@ export class EvaluationService {
 }
 
 export { EvaluationDomainError };
+export class EvaluationConflictOfInterestError extends Error {}

@@ -1695,6 +1695,20 @@ describe.sequential("PostgreSQL integration", () => {
         actorEmail: "lead@example.test",
         token: invited.deliveryToken,
       });
+      const reviewerInvitation = await tenantService.invite({
+        actorId: owner,
+        organizationId: organization.id,
+        email: "reviewer@example.test",
+        organizationRole: "admin",
+        workspaceIds: [],
+        workspaceRole: "viewer",
+        expiresInDays: 1,
+      });
+      await tenantService.acceptInvitation({
+        actorId: "reviewer@example.test",
+        actorEmail: "reviewer@example.test",
+        token: reviewerInvitation.deliveryToken,
+      });
 
       const draft = await initiativeService.create({
         actorId: owner,
@@ -1742,7 +1756,7 @@ describe.sequential("PostgreSQL integration", () => {
         standardId: standard.id,
       });
       const evaluation = await evaluationService.review({
-        actorId: owner,
+        actorId: "reviewer@example.test",
         organizationId: organization.id,
         initiativeId: draft.id,
         standardId: standard.id,

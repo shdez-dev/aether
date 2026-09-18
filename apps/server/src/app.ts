@@ -22,6 +22,7 @@ import {
   IdempotencyStore,
   ProjectAlreadyExistsError,
   EvaluationService,
+  EvaluationConflictOfInterestError,
   ProjectService,
   ProjectDomainError,
   ProjectVersionConflictError,
@@ -336,6 +337,7 @@ export async function buildServer(input: {
                 ? 409
                 : error instanceof CsrfError ||
                     error instanceof RecentAuthenticationRequiredError ||
+                    error instanceof EvaluationConflictOfInterestError ||
                     error instanceof AccessDeniedError ||
                     error instanceof DocumentAccessDeniedError ||
                     error instanceof IdentityEmailRequiredError ||
@@ -438,64 +440,74 @@ export async function buildServer(input: {
                             ? "ACCOUNT_MANAGEMENT_UNAVAILABLE"
                             : error instanceof BusinessHoursPolicyError
                               ? "BUSINESS_HOURS_ENFORCED"
-                              : error instanceof CsrfError ||
-                                  error instanceof AccessDeniedError ||
-                                  error instanceof DocumentAccessDeniedError ||
-                                  error instanceof IdentityEmailRequiredError ||
-                                  (error instanceof OwnershipTransferError &&
-                                    error.code === "ACTOR_MUST_BE_OWNER") ||
-                                  (error instanceof MembershipStatusError &&
-                                    error.code === "actor_not_manager") ||
-                                  (error instanceof TemporaryAccessGrantError &&
-                                    error.code ===
-                                      "GRANT_SEPARATION_OF_DUTIES") ||
-                                  (error instanceof SupportAccessGrantError &&
-                                    [
-                                      "SUPPORT_OPERATOR_NOT_ELIGIBLE",
-                                      "SUPPORT_ACCESS_SEPARATION_OF_DUTIES",
-                                      "SUPPORT_ACCESS_DENIED",
-                                    ].includes(error.code)) ||
-                                  error instanceof BusinessHoursPolicyError
-                                ? "FORBIDDEN"
-                                : error instanceof ResourceNotFoundError ||
-                                    (error instanceof
-                                      InvitationLifecycleError &&
-                                      error.code === "INVITATION_NOT_FOUND") ||
-                                    error instanceof DocumentNotFoundError ||
+                              : error instanceof
+                                  EvaluationConflictOfInterestError
+                                ? "CONFLICT_OF_INTEREST"
+                                : error instanceof CsrfError ||
+                                    error instanceof AccessDeniedError ||
                                     error instanceof
-                                      OutboxDeadLetterNotFoundError ||
-                                    error instanceof PolicyNotConfiguredError ||
+                                      DocumentAccessDeniedError ||
+                                    error instanceof
+                                      IdentityEmailRequiredError ||
+                                    (error instanceof OwnershipTransferError &&
+                                      error.code === "ACTOR_MUST_BE_OWNER") ||
+                                    (error instanceof MembershipStatusError &&
+                                      error.code === "actor_not_manager") ||
                                     (error instanceof
                                       TemporaryAccessGrantError &&
-                                      error.code === "GRANT_RESOURCE_NOT_FOUND")
-                                  ? "NOT_FOUND"
-                                  : error instanceof TemporaryAccessGrantError
-                                    ? error.code
-                                    : error instanceof SupportAccessGrantError
+                                      error.code ===
+                                        "GRANT_SEPARATION_OF_DUTIES") ||
+                                    (error instanceof SupportAccessGrantError &&
+                                      [
+                                        "SUPPORT_OPERATOR_NOT_ELIGIBLE",
+                                        "SUPPORT_ACCESS_SEPARATION_OF_DUTIES",
+                                        "SUPPORT_ACCESS_DENIED",
+                                      ].includes(error.code)) ||
+                                    error instanceof BusinessHoursPolicyError
+                                  ? "FORBIDDEN"
+                                  : error instanceof ResourceNotFoundError ||
+                                      (error instanceof
+                                        InvitationLifecycleError &&
+                                        error.code ===
+                                          "INVITATION_NOT_FOUND") ||
+                                      error instanceof DocumentNotFoundError ||
+                                      error instanceof
+                                        OutboxDeadLetterNotFoundError ||
+                                      error instanceof
+                                        PolicyNotConfiguredError ||
+                                      (error instanceof
+                                        TemporaryAccessGrantError &&
+                                        error.code ===
+                                          "GRANT_RESOURCE_NOT_FOUND")
+                                    ? "NOT_FOUND"
+                                    : error instanceof TemporaryAccessGrantError
                                       ? error.code
-                                      : error instanceof
-                                            InitiativeVersionConflictError ||
-                                          error instanceof
-                                            ProjectVersionConflictError
-                                        ? "CONFLICT"
+                                      : error instanceof SupportAccessGrantError
+                                        ? error.code
                                         : error instanceof
-                                              InitiativeDomainError ||
+                                              InitiativeVersionConflictError ||
                                             error instanceof
-                                              DocumentValidationError ||
-                                            error instanceof ProjectDomainError
-                                          ? "PRECONDITION_FAILED"
-                                          : error instanceof InvitationError
-                                            ? "INVITATION_INVALID_OR_EXPIRED"
-                                            : error instanceof
-                                                InvitationLifecycleError
-                                              ? error.code
+                                              ProjectVersionConflictError
+                                          ? "CONFLICT"
+                                          : error instanceof
+                                                InitiativeDomainError ||
+                                              error instanceof
+                                                DocumentValidationError ||
+                                              error instanceof
+                                                ProjectDomainError
+                                            ? "PRECONDITION_FAILED"
+                                            : error instanceof InvitationError
+                                              ? "INVITATION_INVALID_OR_EXPIRED"
                                               : error instanceof
-                                                  OwnershipTransferError
+                                                  InvitationLifecycleError
                                                 ? error.code
                                                 : error instanceof
-                                                    MembershipStatusError
-                                                  ? error.code.toUpperCase()
-                                                  : "VALIDATION_ERROR",
+                                                    OwnershipTransferError
+                                                  ? error.code
+                                                  : error instanceof
+                                                      MembershipStatusError
+                                                    ? error.code.toUpperCase()
+                                                    : "VALIDATION_ERROR",
         correlationId: reply.getHeader("X-Correlation-ID"),
         instance: request.url,
       });
