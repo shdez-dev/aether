@@ -394,7 +394,7 @@ export async function buildServer(input: {
       .code(status)
       .type("application/problem+json")
       .send({
-        type: "https://aether.local/problems/authentication",
+        type: problemType(status),
         title:
           status === 413
             ? "Carga demasiado grande"
@@ -3102,4 +3102,24 @@ function canonicalJson(value: unknown): string {
     .sort()
     .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
     .join(",")}}`;
+}
+
+function problemType(status: number): string {
+  const category =
+    status === 401
+      ? "authentication"
+      : status === 403
+        ? "authorization"
+        : status === 404
+          ? "not-found"
+          : status === 409
+            ? "conflict"
+            : status === 413
+              ? "payload-too-large"
+              : status === 429
+                ? "rate-limited"
+                : status === 503
+                  ? "dependency-unavailable"
+                  : "validation";
+  return `https://aether.local/problems/${category}`;
 }

@@ -743,7 +743,11 @@ describe("HTTP authentication boundary", () => {
     expect(deniedWorkspaceProblem).toMatchObject({
       code: "FORBIDDEN",
       detail: "No tiene autorización para realizar esta operación.",
+      type: "https://aether.local/problems/authorization",
     });
+    expect(deniedWorkspaceCreation.headers["content-type"]).toContain(
+      "application/problem+json",
+    );
     expect(deniedWorkspaceProblem.correlationId).toBe(
       deniedWorkspaceCreation.headers["x-correlation-id"],
     );
@@ -762,6 +766,7 @@ describe("HTTP authentication boundary", () => {
       ApiProblemSchema.parse(invalidWorkspaceCreation.json()),
     ).toMatchObject({
       code: "VALIDATION_ERROR",
+      type: "https://aether.local/problems/validation",
       errors: [
         {
           field: "name",
