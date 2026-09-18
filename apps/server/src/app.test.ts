@@ -405,6 +405,7 @@ describe("HTTP authentication boundary", () => {
     expect(response.headers["retry-after"]).toBe("60");
     expect(response.json()).toMatchObject({
       code: "OIDC_PROVIDER_UNAVAILABLE",
+      retryable: true,
     });
     expect(responseCookies(response)).toEqual([]);
     await app.close();
@@ -766,6 +767,7 @@ describe("HTTP authentication boundary", () => {
       ApiProblemSchema.parse(invalidWorkspaceCreation.json()),
     ).toMatchObject({
       code: "VALIDATION_ERROR",
+      retryable: false,
       type: "https://aether.local/problems/validation",
       errors: [
         {

@@ -415,6 +415,10 @@ export async function buildServer(input: {
                           : "Solicitud inválida",
         status,
         detail: safeProblemDetail(status),
+        retryable:
+          rateLimited ||
+          status === 503 ||
+          error instanceof IdempotencyRequestInProgressError,
         ...(error instanceof z.ZodError
           ? { errors: validationFieldViolations(error) }
           : {}),

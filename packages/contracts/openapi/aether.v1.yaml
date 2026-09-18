@@ -3335,7 +3335,7 @@ components:
     ApiProblem:
       type: object
       additionalProperties: false
-      required: [type, title, status, code, detail, correlationId]
+      required: [type, title, status, code, detail, retryable, correlationId]
       properties:
         type: { type: string }
         title: { type: string }
@@ -3360,6 +3360,21 @@ components:
               RECENT_AUTH_REQUIRED,
               CONFLICT_OF_INTEREST,
               WORKSPACE_ARCHIVED,
+              ACCOUNT_MANAGEMENT_UNAVAILABLE,
+              BUSINESS_HOURS_ENFORCED,
+              GRANT_RESOURCE_NOT_FOUND,
+              GRANT_SEPARATION_OF_DUTIES,
+              GRANT_NOT_PENDING,
+              GRANT_NOT_ACTIVE,
+              GRANT_EXPIRED,
+              GRANT_INVALID_REQUEST,
+              SUPPORT_OPERATOR_NOT_ELIGIBLE,
+              SUPPORT_ACCESS_INVALID_REQUEST,
+              SUPPORT_ACCESS_SEPARATION_OF_DUTIES,
+              SUPPORT_ACCESS_NOT_PENDING,
+              SUPPORT_ACCESS_NOT_ACTIVE,
+              SUPPORT_ACCESS_EXPIRED,
+              SUPPORT_ACCESS_DENIED,
               TARGET_MUST_BE_DIFFERENT,
               TARGET_MUST_BE_MEMBER,
               TARGET_NOT_MEMBER,
@@ -3370,6 +3385,7 @@ components:
               INTERNAL_ERROR,
             ]
         detail: { type: string }
+        retryable: { type: boolean }
         instance: { type: string }
         correlationId: { type: string, format: uuid }
         errors:
