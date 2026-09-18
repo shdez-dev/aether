@@ -1056,6 +1056,36 @@ describe("HTTP authentication boundary", () => {
       },
       workspaceOverride: null,
     });
+    const updatedOrganizationPolicy = await app.inject({
+      method: "PUT",
+      url: `/v1/organizations/${organization.json().id}/policy`,
+      headers: {
+        origin: config.webOrigin,
+        "x-csrf-token": csrf,
+        "idempotency-key": "update-organization-policy-key",
+        cookie: `aether_session=${session}; aether_csrf=${csrf}`,
+      },
+      payload: { dataResidencyRegion: "cl", retentionDays: 365 },
+    });
+    expect(updatedOrganizationPolicy.statusCode).toBe(200);
+    const replayedOrganizationPolicy = await app.inject({
+      method: "PUT",
+      url: `/v1/organizations/${organization.json().id}/policy`,
+      headers: {
+        origin: config.webOrigin,
+        "x-csrf-token": csrf,
+        "idempotency-key": "update-organization-policy-key",
+        cookie: `aether_session=${session}; aether_csrf=${csrf}`,
+      },
+      payload: { dataResidencyRegion: "cl", retentionDays: 365 },
+    });
+    expect(replayedOrganizationPolicy.statusCode).toBe(200);
+    expect(replayedOrganizationPolicy.headers["idempotent-replayed"]).toBe(
+      "true",
+    );
+    expect(replayedOrganizationPolicy.json()).toEqual(
+      updatedOrganizationPolicy.json(),
+    );
     const override = await app.inject({
       method: "PUT",
       url: `/v1/organizations/${organization.json().id}/workspaces/${workspace.json().id}/policy-override`,

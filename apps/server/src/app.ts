@@ -738,13 +738,26 @@ export async function buildServer(input: {
         .object({ organizationId: z.string().uuid() })
         .parse(request.params);
       const body = TenancyPolicyValuesSchema.parse(request.body);
-      const policy = await input.tenants.updateOrganizationPolicy({
+      return respondIdempotentlyWhenRequested({
+        request,
+        reply,
+        store: input.idempotency,
         actorId: session.actorId,
-        correlationId: correlationId(reply),
-        ...params,
-        ...body,
+        operation: `organization.policy.update:${params.organizationId}`,
+        requestPayload: { params, body },
+        execute: async () => {
+          const policy = await input.tenants.updateOrganizationPolicy({
+            actorId: session.actorId,
+            correlationId: correlationId(reply),
+            ...params,
+            ...body,
+          });
+          return {
+            statusCode: 200,
+            body: toOrganizationPolicyResponse(policy),
+          };
+        },
       });
-      return toOrganizationPolicyResponse(policy);
     },
   );
   app.post("/v1/admin/support-access-grants", async (request, reply) => {
