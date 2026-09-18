@@ -1092,10 +1092,25 @@ describe("HTTP authentication boundary", () => {
       headers: {
         origin: config.webOrigin,
         "x-csrf-token": csrf,
+        "idempotency-key": "archive-workspace-key",
         cookie: `aether_session=${session}; aether_csrf=${csrf}`,
       },
     });
     expect(archivedWorkspace.statusCode).toBe(204);
+    const replayedArchivedWorkspace = await app.inject({
+      method: "POST",
+      url: `/v1/organizations/${organization.json().id}/workspaces/${workspace.json().id}/archive`,
+      headers: {
+        origin: config.webOrigin,
+        "x-csrf-token": csrf,
+        "idempotency-key": "archive-workspace-key",
+        cookie: `aether_session=${session}; aether_csrf=${csrf}`,
+      },
+    });
+    expect(replayedArchivedWorkspace.statusCode).toBe(204);
+    expect(replayedArchivedWorkspace.headers["idempotent-replayed"]).toBe(
+      "true",
+    );
     const archivedWorkspaceDetail = await app.inject({
       method: "GET",
       url: `/v1/workspaces/${workspace.json().id}?organizationId=${organization.json().id}`,

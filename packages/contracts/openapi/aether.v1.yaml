@@ -716,6 +716,7 @@ paths:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/CsrfToken"
         - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "204": { description: Workspace archivado. }
         "401": { $ref: "#/components/responses/Problem" }
