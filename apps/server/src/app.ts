@@ -122,7 +122,7 @@ const callbackQuery = z.object({
   state: z.string().min(1),
   error: z.string().optional(),
 });
-const publicRoutes = new Set([
+export const PublicHttpRoutes = [
   "/health",
   "/metrics",
   "/ready",
@@ -130,7 +130,8 @@ const publicRoutes = new Set([
   "/auth/account-management/status",
   "/auth/account-management",
   "/auth/callback",
-]);
+] as const;
+const publicRoutes = new Set<string>(PublicHttpRoutes);
 
 export async function buildServer(input: {
   config: ServerConfig;

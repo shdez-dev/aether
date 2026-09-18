@@ -44,7 +44,7 @@ import {
   InMemoryDocumentStore,
 } from "@aether/testkit";
 
-import { buildServer } from "./app.js";
+import { buildServer, PublicHttpRoutes } from "./app.js";
 import type { ServerConfig } from "./config.js";
 
 const testSessionEncryptionKey = Buffer.alloc(32).toString("base64");
@@ -345,6 +345,34 @@ describe("HTTP authentication boundary", () => {
       expect(response.statusCode, `${method.toUpperCase()} ${path}`).toBe(401);
     }
     await app.close();
+  });
+
+  it("keeps public Fastify routes aligned with the OpenAPI security contract", async () => {
+    const spec = parse(
+      await readFile(
+        new URL(
+          "../../../packages/contracts/openapi/aether.v1.yaml",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    ) as {
+      paths: Record<
+        string,
+        Record<string, { security?: readonly Record<string, unknown>[] }>
+      >;
+    };
+    const publiclyReachablePaths = Object.entries(spec.paths).flatMap(
+      ([path, operations]) =>
+        Object.values(operations).some(
+          (operation) =>
+            operation.security?.length === 0 ||
+            operation.security?.some((entry) => "metricsToken" in entry),
+        )
+          ? [path]
+          : [],
+    );
+    expect([...PublicHttpRoutes].sort()).toEqual(publiclyReachablePaths.sort());
   });
 
   it("expone indisponibilidad de OIDC sin iniciar una transacción ni una sesión", async () => {

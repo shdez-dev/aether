@@ -77,6 +77,35 @@ paths:
               schema:
                 $ref: "#/components/schemas/OperationalMetrics"
         "401": { description: Token de infraestructura inválido o ausente. }
+  /ready:
+    get:
+      tags: [Health]
+      operationId: getReadiness
+      summary: Consultar preparación de dependencias requeridas
+      security: []
+      responses:
+        "200":
+          description: Dependencias requeridas disponibles.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    const: ready
+        "503":
+          description: Una dependencia requerida no está disponible.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    const: unavailable
   /auth/login:
     get:
       tags: [Authentication]
