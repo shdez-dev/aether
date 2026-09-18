@@ -1101,13 +1101,26 @@ export async function buildServer(input: {
         })
         .parse(request.params);
       const body = WorkspacePolicyOverrideRequestSchema.parse(request.body);
-      const override = await input.tenants.setWorkspacePolicyOverride({
+      return respondIdempotentlyWhenRequested({
+        request,
+        reply,
+        store: input.idempotency,
         actorId: session.actorId,
-        correlationId: correlationId(reply),
-        ...params,
-        ...body,
+        operation: `workspace.policy_override.set:${params.organizationId}:${params.workspaceId}`,
+        requestPayload: { params, body },
+        execute: async () => {
+          const override = await input.tenants.setWorkspacePolicyOverride({
+            actorId: session.actorId,
+            correlationId: correlationId(reply),
+            ...params,
+            ...body,
+          });
+          return {
+            statusCode: 200,
+            body: toWorkspacePolicyOverrideResponse(override),
+          };
+        },
       });
-      return toWorkspacePolicyOverrideResponse(override);
     },
   );
   app.delete(

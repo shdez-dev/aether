@@ -1062,11 +1062,26 @@ describe("HTTP authentication boundary", () => {
       headers: {
         origin: config.webOrigin,
         "x-csrf-token": csrf,
+        "idempotency-key": "set-workspace-policy-override-key",
         cookie: `aether_session=${session}; aether_csrf=${csrf}`,
       },
       payload: { dataResidencyRegion: "eu", retentionDays: null },
     });
     expect(override.statusCode).toBe(200);
+    const replayedOverride = await app.inject({
+      method: "PUT",
+      url: `/v1/organizations/${organization.json().id}/workspaces/${workspace.json().id}/policy-override`,
+      headers: {
+        origin: config.webOrigin,
+        "x-csrf-token": csrf,
+        "idempotency-key": "set-workspace-policy-override-key",
+        cookie: `aether_session=${session}; aether_csrf=${csrf}`,
+      },
+      payload: { dataResidencyRegion: "eu", retentionDays: null },
+    });
+    expect(replayedOverride.statusCode).toBe(200);
+    expect(replayedOverride.headers["idempotent-replayed"]).toBe("true");
+    expect(replayedOverride.json()).toEqual(override.json());
     const overriddenPolicy = await app.inject({
       method: "GET",
       url: `/v1/organizations/${organization.json().id}/policy?workspaceId=${workspace.json().id}`,
