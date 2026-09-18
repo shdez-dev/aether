@@ -1625,20 +1625,32 @@ describe("HTTP authentication boundary", () => {
     expect(reusedKey.statusCode).toBe(409);
     expect(reusedKey.json()).toMatchObject({ code: "IDEMPOTENCY_KEY_REUSED" });
 
-    const editedResponse = await app.inject({
-      method: "PATCH",
-      url: `/v1/initiatives/${created.id}?organizationId=${organization.id}`,
-      headers,
-      payload: {
-        expectedVersion: created.version,
-        title: "Reducir tiempos de espera en atención",
-        problemStatement: "La atención tarda demasiado.",
-        expectedOutcome: "Reducir la mediana de espera en el piloto.",
-        classification: "internal",
-      },
-    });
-    expect(editedResponse.statusCode).toBe(200);
-    const edited = editedResponse.json() as { version: number };
+    const concurrentEditPayload = {
+      expectedVersion: created.version,
+      title: "Reducir tiempos de espera en atención",
+      problemStatement: "La atención tarda demasiado.",
+      expectedOutcome: "Reducir la mediana de espera en el piloto.",
+      classification: "internal",
+    };
+    const concurrentEdits = await Promise.all(
+      [crypto.randomUUID(), crypto.randomUUID()].map((idempotencyKey) =>
+        app.inject({
+          method: "PATCH",
+          url: `/v1/initiatives/${created.id}?organizationId=${organization.id}`,
+          headers: { ...headers, "idempotency-key": idempotencyKey },
+          payload: concurrentEditPayload,
+        }),
+      ),
+    );
+    expect(
+      concurrentEdits.map((response) => response.statusCode).sort(),
+    ).toEqual([200, 409]);
+    expect(
+      concurrentEdits.find((response) => response.statusCode === 409)?.json(),
+    ).toMatchObject({ code: "CONFLICT" });
+    const edited = concurrentEdits
+      .find((response) => response.statusCode === 200)!
+      .json() as { version: number };
 
     const presentedResponse = await app.inject({
       method: "POST",
