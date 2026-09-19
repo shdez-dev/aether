@@ -1083,6 +1083,31 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
+  /v1/evaluations/{evaluationId}/annulments:
+    post:
+      tags: [Initiatives]
+      operationId: annulEvaluation
+      summary: Anular una evaluación no decidida conservando su historial
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: evaluationId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AnnulEvaluationRequest" }
+      responses:
+        "200":
+          description: Evaluación anulada.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InitiativeEvaluation" }
+        default: { $ref: "#/components/responses/Problem" }
   /v1/decisions/{decisionId}:
     get:
       tags: [Initiatives]
@@ -2551,6 +2576,12 @@ components:
       required: [expectedVersion]
       properties:
         expectedVersion: { type: integer, minimum: 0 }
+    AnnulEvaluationRequest:
+      type: object
+      required: [organizationId, reason]
+      properties:
+        organizationId: { type: string, format: uuid }
+        reason: { type: string, minLength: 1, maxLength: 2000 }
     DecideInitiativeRequest:
       type: object
       additionalProperties: false

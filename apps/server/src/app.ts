@@ -81,6 +81,7 @@ import {
   CreateProjectFromInitiativeRequestSchema,
   PublishEvaluationStandardRequestSchema,
   StartReviewRequestSchema,
+  AnnulEvaluationRequestSchema,
   SubmitInitiativeRequestSchema,
   UpdateInitiativeRequestSchema,
   BeginDocumentUploadRequestSchema,
@@ -1795,6 +1796,40 @@ export async function buildServer(input: {
     });
     return { ...evaluation, evaluatedAt: evaluation.evaluatedAt.toISOString() };
   });
+  app.post(
+    "/v1/evaluations/:evaluationId/annulments",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      const params = z
+        .object({ evaluationId: z.string().uuid() })
+        .parse(request.params);
+      const body = AnnulEvaluationRequestSchema.parse(request.body);
+      return respondIdempotently({
+        request,
+        reply,
+        store: input.idempotency,
+        actorId: session.actorId,
+        operation: `evaluation.annul:${params.evaluationId}`,
+        requestPayload: { params, body },
+        execute: async () => ({
+          statusCode: 200,
+          body: toEvaluationResponse(
+            await input.evaluations.annulEvaluation({
+              actorId: session.actorId,
+              correlationId: correlationId(reply),
+              ...params,
+              ...body,
+            }),
+          ),
+        }),
+      });
+    },
+  );
   app.get("/v1/decisions/:decisionId", async (request, reply) => {
     const session = await requireSession(
       request,

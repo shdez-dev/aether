@@ -46,6 +46,10 @@ export const StartReviewRequestSchema = z.object({
     )
     .max(100),
 });
+export const AnnulEvaluationRequestSchema = z.object({
+  organizationId: UuidSchema,
+  reason: NonEmptyTextSchema.max(2_000),
+});
 
 export const DecisionConditionInputSchema = z.object({
   description: NonEmptyTextSchema.max(2_000),
@@ -211,6 +215,9 @@ export const InitiativeEvaluationResponseSchema = z.object({
     .nullable(),
   evaluatedByActorId: z.string(),
   evaluatedAt: z.string().datetime(),
+  annulledByActorId: z.string().nullable(),
+  annulledAt: z.string().datetime().nullable(),
+  annulmentReason: z.string().nullable(),
 });
 export const InitiativeDecisionResponseSchema = z.object({
   id: UuidSchema,

@@ -41,6 +41,8 @@ export interface EvaluationStandardStore {
 export interface EvaluationStore {
   createEvaluation(evaluation: InitiativeEvaluation): Promise<void>;
   findEvaluation(evaluationId: string): Promise<InitiativeEvaluation | null>;
+  updateEvaluation(evaluation: InitiativeEvaluation): Promise<void>;
+  hasDecisionForEvaluation(evaluationId: string): Promise<boolean>;
   createDecision(decision: InitiativeDecision): Promise<void>;
   findDecision(decisionId: string): Promise<InitiativeDecision | null>;
   updateDecisionCondition(input: {
@@ -158,6 +160,45 @@ export class EvaluationService {
       correlationId: input.correlationId,
     });
     return decision;
+  }
+  async annulEvaluation(input: {
+    actorId: string;
+    organizationId: string;
+    evaluationId: string;
+    reason: string;
+    correlationId: string;
+  }): Promise<InitiativeEvaluation> {
+    await this.assertOwner(input.actorId, input.organizationId);
+    const evaluation = await this.dependencies.evaluations.findEvaluation(
+      input.evaluationId,
+    );
+    if (!evaluation || evaluation.organizationId !== input.organizationId)
+      throw new ResourceNotFoundError("INITIATIVE_NOT_FOUND");
+    if (evaluation.annulledAt)
+      throw new EvaluationDomainError("EVALUATION_ALREADY_ANNULLED");
+    if (await this.dependencies.evaluations.hasDecisionForEvaluation(evaluation.id))
+      throw new EvaluationDomainError("EVALUATION_ALREADY_DECIDED");
+    const initiative = await this.requireInitiative(
+      evaluation.initiativeId,
+      input.organizationId,
+    );
+    const updated = {
+      ...evaluation,
+      annulledByActorId: input.actorId,
+      annulledAt: this.dependencies.clock.now(),
+      annulmentReason: input.reason,
+    };
+    await this.dependencies.evaluations.updateEvaluation(updated);
+    await this.record(
+      initiative,
+      input.actorId,
+      input.correlationId,
+      "initiative.evaluation_annulled.v1",
+      initiative.status,
+      initiative.status,
+      { evaluationId: evaluation.id },
+    );
+    return updated;
   }
 
   async review(input: {

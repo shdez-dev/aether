@@ -53,6 +53,10 @@ resultado registra un criterio, valoración (`met`, `not_met` o
 vacía que justifique la exclusión del denominador. La revisión crea una
 evaluación inmutable y mueve la iniciativa a `under_review`.
 
+Un `owner` puede anular una evaluación no decidida con un motivo. La anulación
+no borra respuestas, cobertura ni calidad: conserva el registro y añade actor,
+fecha y motivo. Una evaluación que ya sustenta una decisión no puede anularse.
+
 ## Decisión
 
 Solo un `owner` puede decidir sobre una iniciativa `under_review`, indicando

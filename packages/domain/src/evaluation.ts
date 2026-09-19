@@ -54,6 +54,9 @@ export type InitiativeEvaluation = Readonly<{
   quality: EvaluationQuality | null;
   evaluatedByActorId: string;
   evaluatedAt: Date;
+  annulledByActorId: string | null;
+  annulledAt: Date | null;
+  annulmentReason: string | null;
 }>;
 export type DecisionOutcome =
   "approved" | "rejected" | "returned" | "cancelled";
@@ -189,6 +192,9 @@ export function evaluateInitiative(input: {
     },
     evaluatedByActorId: input.evaluatedByActorId,
     evaluatedAt: input.evaluatedAt,
+    annulledByActorId: null,
+    annulledAt: null,
+    annulmentReason: null,
   };
 }
 
@@ -279,6 +285,8 @@ export class EvaluationDomainError extends Error {
       | "INVALID_CRITERION_WEIGHT"
       | "INVALID_EVALUATION_CRITERIA"
       | "NOT_APPLICABLE_REQUIRES_JUSTIFICATION"
+      | "EVALUATION_ALREADY_ANNULLED"
+      | "EVALUATION_ALREADY_DECIDED"
       | "EVALUATION_DOES_NOT_MATCH_INITIATIVE"
       | "EVALUATION_INCOMPLETE"
       | "DECISION_CONDITION_NOT_PENDING"

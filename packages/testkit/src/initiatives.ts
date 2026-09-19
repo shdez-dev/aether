@@ -188,6 +188,14 @@ export class InMemoryEvaluationStore implements EvaluationStore {
   ): Promise<InitiativeEvaluation | null> {
     return this.evaluations.get(evaluationId) ?? null;
   }
+  async updateEvaluation(evaluation: InitiativeEvaluation): Promise<void> {
+    this.evaluations.set(evaluation.id, evaluation);
+  }
+  async hasDecisionForEvaluation(evaluationId: string): Promise<boolean> {
+    return [...this.decisions.values()].some(
+      (decision) => decision.evaluationId === evaluationId,
+    );
+  }
   async createDecision(decision: InitiativeDecision): Promise<void> {
     this.decisions.set(decision.id, decision);
   }

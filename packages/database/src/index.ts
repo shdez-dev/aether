@@ -2826,8 +2826,8 @@ export class PostgresEvaluationStore implements EvaluationStore {
   constructor(private readonly pool: Pool) {}
   async createEvaluation(evaluation: InitiativeEvaluation): Promise<void> {
     await this.pool.query(
-      `INSERT INTO initiative_evaluations (id, organization_id, workspace_id, initiative_id, initiative_version, standard_id, standard_version, criteria, coverage, quality, evaluated_by_actor_id, evaluated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+      `INSERT INTO initiative_evaluations (id, organization_id, workspace_id, initiative_id, initiative_version, standard_id, standard_version, criteria, coverage, quality, evaluated_by_actor_id, evaluated_at, annulled_by_actor_id, annulled_at, annulment_reason)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
       [
         evaluation.id,
         evaluation.organizationId,
@@ -2841,6 +2841,9 @@ export class PostgresEvaluationStore implements EvaluationStore {
         asJson(evaluation.quality),
         evaluation.evaluatedByActorId,
         evaluation.evaluatedAt,
+        evaluation.annulledByActorId,
+        evaluation.annulledAt,
+        evaluation.annulmentReason,
       ],
     );
   }
@@ -2848,10 +2851,30 @@ export class PostgresEvaluationStore implements EvaluationStore {
     evaluationId: string,
   ): Promise<InitiativeEvaluation | null> {
     const result = await this.pool.query<InitiativeEvaluationRow>(
-      `SELECT id, organization_id, workspace_id, initiative_id, initiative_version, standard_id, standard_version, criteria, coverage, quality, evaluated_by_actor_id, evaluated_at FROM initiative_evaluations WHERE id = $1`,
+      `SELECT id, organization_id, workspace_id, initiative_id, initiative_version, standard_id, standard_version, criteria, coverage, quality, evaluated_by_actor_id, evaluated_at, annulled_by_actor_id, annulled_at, annulment_reason FROM initiative_evaluations WHERE id = $1`,
       [evaluationId],
     );
     return result.rows[0] ? toInitiativeEvaluation(result.rows[0]) : null;
+  }
+  async updateEvaluation(evaluation: InitiativeEvaluation): Promise<void> {
+    await this.pool.query(
+      `UPDATE initiative_evaluations
+          SET annulled_by_actor_id = $2, annulled_at = $3, annulment_reason = $4
+        WHERE id = $1`,
+      [
+        evaluation.id,
+        evaluation.annulledByActorId,
+        evaluation.annulledAt,
+        evaluation.annulmentReason,
+      ],
+    );
+  }
+  async hasDecisionForEvaluation(evaluationId: string): Promise<boolean> {
+    const result = await this.pool.query(
+      "SELECT 1 FROM initiative_decisions WHERE evaluation_id = $1 LIMIT 1",
+      [evaluationId],
+    );
+    return result.rowCount === 1;
   }
   async createDecision(decision: InitiativeDecision): Promise<void> {
     const client = await this.pool.connect();
@@ -4220,6 +4243,9 @@ type InitiativeEvaluationRow = {
   quality: InitiativeEvaluation["quality"];
   evaluated_by_actor_id: string;
   evaluated_at: Date;
+  annulled_by_actor_id: string | null;
+  annulled_at: Date | null;
+  annulment_reason: string | null;
 };
 type InitiativeDecisionRow = {
   id: string;
@@ -4451,6 +4477,9 @@ function toInitiativeEvaluation(
     quality: row.quality,
     evaluatedByActorId: row.evaluated_by_actor_id,
     evaluatedAt: row.evaluated_at,
+    annulledByActorId: row.annulled_by_actor_id,
+    annulledAt: row.annulled_at,
+    annulmentReason: row.annulment_reason,
   };
 }
 function toInitiativeDecision(row: InitiativeDecisionRow): InitiativeDecision {
