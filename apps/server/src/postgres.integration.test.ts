@@ -1692,7 +1692,7 @@ describe.sequential("PostgreSQL integration", () => {
         organizationId: organization.id,
         email: "lead@example.test",
         organizationRole: "member",
-        workspaceIds: [],
+        workspaceIds: [workspace.id],
         workspaceRole: "member",
         expiresInDays: 1,
       });

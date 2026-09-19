@@ -1160,6 +1160,28 @@ export class PostgresTenantStore implements TenantStore {
         await client.query("ROLLBACK");
         return "replacement_not_active";
       }
+      const replacementWorkspaceAccess = await client.query<{
+        exists: boolean;
+      }>(
+        `SELECT EXISTS (
+           SELECT 1
+             FROM projects
+            WHERE organization_id = $1
+              AND status IN ('planned', 'active', 'blocked')
+              AND lead_actor_id = $2
+              AND NOT EXISTS (
+                SELECT 1
+                  FROM workspace_memberships
+                 WHERE workspace_id = projects.workspace_id
+                   AND actor_id = $3
+              )
+         ) AS exists`,
+        [input.organizationId, input.targetActorId, input.replacementActorId],
+      );
+      if (replacementWorkspaceAccess.rows[0]?.exists) {
+        await client.query("ROLLBACK");
+        return "replacement_not_active";
+      }
       const conflict = await client.query<{ exists: boolean }>(
         `SELECT EXISTS (SELECT 1 FROM projects WHERE organization_id = $1 AND status IN ('planned','active','blocked') AND ((lead_actor_id = $2 AND sponsor_actor_id = $3) OR (sponsor_actor_id = $2 AND lead_actor_id = $3) OR (participants @> jsonb_build_array(jsonb_build_object('actorId',$2)) AND participants @> jsonb_build_array(jsonb_build_object('actorId',$3))))) AS exists`,
         [input.organizationId, input.targetActorId, input.replacementActorId],
