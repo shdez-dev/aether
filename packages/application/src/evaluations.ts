@@ -32,6 +32,9 @@ export interface EvaluationStandardStore {
   activate(input: {
     organizationId: string;
     standardId: string;
+    adoptionId: string;
+    adoptedByActorId: string;
+    adoptedAt: Date;
   }): Promise<void>;
 }
 export interface EvaluationStore {
@@ -100,6 +103,9 @@ export class EvaluationService {
     await this.dependencies.standards.activate({
       organizationId: input.organizationId,
       standardId: input.standardId,
+      adoptionId: this.dependencies.ids.next(),
+      adoptedByActorId: input.actorId,
+      adoptedAt: this.dependencies.clock.now(),
     });
   }
   async listStandards(input: {

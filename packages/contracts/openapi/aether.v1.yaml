@@ -1043,7 +1043,7 @@ paths:
     post:
       tags: [Initiatives]
       operationId: activateEvaluationStandard
-      summary: Activar el estándar de referencia de una organización
+      summary: Adoptar una versión de estándar como referencia organizacional
       security: [{ cookieSession: [] }]
       parameters:
         - name: standardId
@@ -1059,7 +1059,7 @@ paths:
             schema:
               { $ref: "#/components/schemas/ActivateEvaluationStandardRequest" }
       responses:
-        "204": { description: Estándar activado. }
+        "204": { description: Versión adoptada y activada. }
         default: { $ref: "#/components/responses/Problem" }
   /v1/evaluations/{evaluationId}:
     get:

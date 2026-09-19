@@ -135,6 +135,12 @@ function stringPayload(
 
 export class InMemoryEvaluationStandardStore implements EvaluationStandardStore {
   readonly standards = new Map<string, EvaluationStandard>();
+  readonly adoptions: {
+    id: string;
+    standardId: string;
+    adoptedByActorId: string;
+    adoptedAt: Date;
+  }[] = [];
   async create(standard: EvaluationStandard): Promise<void> {
     this.standards.set(standard.id, standard);
   }
@@ -151,6 +157,9 @@ export class InMemoryEvaluationStandardStore implements EvaluationStandardStore 
   async activate(input: {
     organizationId: string;
     standardId: string;
+    adoptionId: string;
+    adoptedByActorId: string;
+    adoptedAt: Date;
   }): Promise<void> {
     for (const [id, standard] of this.standards) {
       if (standard.organizationId === input.organizationId)
@@ -159,6 +168,12 @@ export class InMemoryEvaluationStandardStore implements EvaluationStandardStore 
           isActive: id === input.standardId,
         });
     }
+    this.adoptions.push({
+      id: input.adoptionId,
+      standardId: input.standardId,
+      adoptedByActorId: input.adoptedByActorId,
+      adoptedAt: input.adoptedAt,
+    });
   }
 }
 

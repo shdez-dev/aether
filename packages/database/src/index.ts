@@ -2785,6 +2785,9 @@ export class PostgresEvaluationStandardStore implements EvaluationStandardStore 
   async activate(input: {
     organizationId: string;
     standardId: string;
+    adoptionId: string;
+    adoptedByActorId: string;
+    adoptedAt: Date;
   }): Promise<void> {
     const client = await this.pool.connect();
     try {
@@ -2799,6 +2802,16 @@ export class PostgresEvaluationStandardStore implements EvaluationStandardStore 
       );
       if (updated.rowCount !== 1)
         throw new Error("Evaluation standard not found");
+      await client.query(
+        `INSERT INTO evaluation_standard_adoptions (id, standard_id, adopted_by_actor_id, adopted_at)
+         VALUES ($1, $2, $3, $4)`,
+        [
+          input.adoptionId,
+          input.standardId,
+          input.adoptedByActorId,
+          input.adoptedAt,
+        ],
+      );
       await client.query("COMMIT");
     } catch (error) {
       await client.query("ROLLBACK");

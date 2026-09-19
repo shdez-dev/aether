@@ -1761,6 +1761,18 @@ describe.sequential("PostgreSQL integration", () => {
         organizationId: organization.id,
         standardId: standard.id,
       });
+      const initialAdoptions = await pool.query<{
+        standard_id: string;
+        adopted_by_actor_id: string;
+      }>(
+        `SELECT standard_id, adopted_by_actor_id
+           FROM evaluation_standard_adoptions
+          WHERE standard_id = $1`,
+        [standard.id],
+      );
+      expect(initialAdoptions.rows).toEqual([
+        { standard_id: standard.id, adopted_by_actor_id: owner },
+      ]);
       const concurrentPublications = await Promise.allSettled(
         [0, 1].map(() =>
           evaluationService.publishStandard({
@@ -1823,6 +1835,18 @@ describe.sequential("PostgreSQL integration", () => {
         organizationId: organization.id,
         standardId: replacementStandard.id,
       });
+      const replacementAdoptions = await pool.query<{
+        standard_id: string;
+        adopted_by_actor_id: string;
+      }>(
+        `SELECT standard_id, adopted_by_actor_id
+           FROM evaluation_standard_adoptions
+          WHERE standard_id = $1`,
+        [replacementStandard.id],
+      );
+      expect(replacementAdoptions.rows).toEqual([
+        { standard_id: replacementStandard.id, adopted_by_actor_id: owner },
+      ]);
       const persistedEvaluation = await evaluationsStore.findEvaluation(
         evaluation.id,
       );

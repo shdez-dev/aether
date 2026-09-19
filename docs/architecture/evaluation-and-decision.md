@@ -31,6 +31,11 @@ y activar una versión posterior cambia la referencia para revisiones futuras,
 pero las evaluaciones y decisiones existentes conservan su estándar, criterios
 y métricas originales.
 
+Cada adopción queda registrada de forma durable con la versión adoptada, actor
+y momento. La activación de la referencia y el registro se confirman en la
+misma transacción, por lo que no existe una versión activa sin su adopción
+correspondiente.
+
 Una vez aplicado, PostgreSQL bloquea cambios en la identidad, versión,
 criterios y metadatos de publicación del estándar. El estado de activación se
 mantiene independiente para permitir seleccionar una nueva referencia sin
