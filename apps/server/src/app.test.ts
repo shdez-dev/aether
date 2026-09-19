@@ -642,6 +642,7 @@ describe("HTTP authentication boundary", () => {
       headers: {
         origin: config.webOrigin,
         "x-csrf-token": originalViewerCsrf,
+        "idempotency-key": "accept-invitation-key",
         cookie: `aether_session=${originalViewerToken}; aether_csrf=${originalViewerCsrf}`,
       },
       payload: { token: invitation.deliveryToken },
@@ -659,6 +660,24 @@ describe("HTTP authentication boundary", () => {
     const viewerCsrf = cookieValue(rotatedCookies, "aether_csrf");
     expect(viewerToken).not.toBe(originalViewerToken);
     expect(viewerCsrf).not.toBe(originalViewerCsrf);
+    const replayedInvitationAcceptance = await app.inject({
+      method: "POST",
+      url: "/v1/invitations/accept",
+      headers: {
+        origin: config.webOrigin,
+        "x-csrf-token": viewerCsrf,
+        "idempotency-key": "accept-invitation-key",
+        cookie: `aether_session=${viewerToken}; aether_csrf=${viewerCsrf}`,
+      },
+      payload: { token: invitation.deliveryToken },
+    });
+    expect(replayedInvitationAcceptance.statusCode).toBe(200);
+    expect(replayedInvitationAcceptance.headers["idempotent-replayed"]).toBe(
+      "true",
+    );
+    expect(replayedInvitationAcceptance.json()).toEqual(
+      invitationAccepted.json(),
+    );
     expect(
       (
         await app.inject({

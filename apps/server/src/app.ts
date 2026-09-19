@@ -1623,29 +1623,43 @@ export async function buildServer(input: {
       input.config,
     );
     const body = InvitationTokenRequestSchema.parse(request.body);
-    const invitation = await input.tenants.acceptInvitation({
-      token: body.token,
+    return respondIdempotentlyWhenRequested({
+      request,
+      reply,
+      store: input.idempotency,
       actorId: session.actorId,
-      actorEmail: requireActorEmail(session.actorEmail),
-      correlationId: correlationId(reply),
+      operation: "invitation.accept",
+      requestPayload: body,
+      execute: async () => {
+        const invitation = await input.tenants.acceptInvitation({
+          token: body.token,
+          actorId: session.actorId,
+          actorEmail: requireActorEmail(session.actorEmail),
+          correlationId: correlationId(reply),
+        });
+        const rotated = await input.auth.rotateSession({
+          currentSession: session,
+          correlationId: correlationId(reply),
+        });
+        reply.setCookie(
+          sessionCookie,
+          rotated.sessionToken,
+          sessionCookieOptions(input.config),
+        );
+        reply.setCookie(
+          csrfCookie,
+          randomOpaqueToken(),
+          csrfCookieOptions(input.config),
+        );
+        return {
+          statusCode: 200,
+          body: {
+            ...invitation,
+            expiresAt: invitation.expiresAt.toISOString(),
+          },
+        };
+      },
     });
-    const rotated = await input.auth.rotateSession({
-      currentSession: session,
-      correlationId: correlationId(reply),
-    });
-    reply.setCookie(
-      sessionCookie,
-      rotated.sessionToken,
-      sessionCookieOptions(input.config),
-    );
-    reply.setCookie(
-      csrfCookie,
-      randomOpaqueToken(),
-      csrfCookieOptions(input.config),
-    );
-    return reply
-      .code(200)
-      .send({ ...invitation, expiresAt: invitation.expiresAt.toISOString() });
   });
   app.post("/v1/invitations/reject", async (request, reply) => {
     const session = await requireSession(
