@@ -1761,6 +1761,33 @@ describe.sequential("PostgreSQL integration", () => {
         organizationId: organization.id,
         standardId: standard.id,
       });
+      const concurrentPublications = await Promise.allSettled(
+        [0, 1].map(() =>
+          evaluationService.publishStandard({
+            actorId: owner,
+            organizationId: organization.id,
+            name: "Estándar publicado en paralelo",
+            version: 1,
+            criteria: [
+              {
+                id: randomUUID(),
+                code: "PARALLEL",
+                name: "Publicación concurrente",
+                description: "Sólo una versión puede persistir.",
+                weight: 1,
+              },
+            ],
+          }),
+        ),
+      );
+      expect(
+        concurrentPublications.filter(
+          (result) => result.status === "fulfilled",
+        ),
+      ).toHaveLength(1);
+      expect(
+        concurrentPublications.filter((result) => result.status === "rejected"),
+      ).toHaveLength(1);
       const evaluation = await evaluationService.review({
         actorId: "reviewer@example.test",
         organizationId: organization.id,
@@ -1774,6 +1801,36 @@ describe.sequential("PostgreSQL integration", () => {
             assessment: "met",
             evidence: ["Indicador confirmado."],
           },
+        ],
+      });
+      const replacementStandard = await evaluationService.publishStandard({
+        actorId: owner,
+        organizationId: organization.id,
+        name: standard.name,
+        version: 2,
+        criteria: [
+          {
+            id: randomUUID(),
+            code: "IMPACT_V2",
+            name: "Impacto revisado",
+            description: "Una nueva versión no altera la evaluación previa.",
+            weight: 2,
+          },
+        ],
+      });
+      await evaluationService.activateStandard({
+        actorId: owner,
+        organizationId: organization.id,
+        standardId: replacementStandard.id,
+      });
+      const persistedEvaluation = await evaluationsStore.findEvaluation(
+        evaluation.id,
+      );
+      expect(persistedEvaluation).toMatchObject({
+        standardId: standard.id,
+        standardVersion: 1,
+        criteria: [
+          expect.objectContaining({ criterion: standard.criteria[0] }),
         ],
       });
       const reviewing = await initiativesStore.findById(draft.id);

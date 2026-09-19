@@ -25,6 +25,12 @@ ni determina el resultado (`approved`, `rejected`, `returned` o `cancelled`).
 La madurez requiere una escala y un modelo propios; Aether no la infiere de la
 calidad para evitar presentar una conclusión inexistente.
 
+Una publicación concurrente de la misma organización, nombre y versión queda
+protegida por unicidad en PostgreSQL: sólo una versión puede persistir. Adoptar
+y activar una versión posterior cambia la referencia para revisiones futuras,
+pero las evaluaciones y decisiones existentes conservan su estándar, criterios
+y métricas originales.
+
 Una vez aplicado, PostgreSQL bloquea cambios en la identidad, versión,
 criterios y metadatos de publicación del estándar. El estado de activación se
 mantiene independiente para permitir seleccionar una nueva referencia sin
