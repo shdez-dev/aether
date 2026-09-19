@@ -1948,16 +1948,22 @@ describe.sequential("PostgreSQL integration", () => {
       ]);
       expect(
         projectAttempts.filter((result) => result.status === "fulfilled"),
-      ).toHaveLength(1);
-      expect(
-        projectAttempts.find((result) => result.status === "rejected")?.reason,
-      ).toBeInstanceOf(ProjectAlreadyExistsError);
-      const successfulProject = projectAttempts.find(
-        (result) => result.status === "fulfilled",
+      ).toHaveLength(2);
+      const successfulProjects = projectAttempts.flatMap((result) =>
+        result.status === "fulfilled" ? [result.value] : [],
       );
-      if (!successfulProject || successfulProject.status !== "fulfilled")
-        throw new Error("A project was expected");
-      const project = successfulProject.value;
+      expect(
+        new Set(successfulProjects.map((project) => project.id)).size,
+      ).toBe(1);
+      const project = successfulProjects[0];
+      if (!project) throw new Error("A project was expected");
+      await expect(
+        projectService.createFromInitiative({
+          ...projectInput,
+          name: "Conversión no canónica",
+          correlationId: randomUUID(),
+        }),
+      ).rejects.toBeInstanceOf(ProjectAlreadyExistsError);
 
       const events = await pool.query<{ event_type: string; status: string }>(
         "SELECT event_type, status FROM outbox_events WHERE aggregate_id = $1",

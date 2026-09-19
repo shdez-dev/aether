@@ -181,15 +181,25 @@ export class ProjectService {
         leadActorId: project.leadActorId,
       },
     );
-    if (this.dependencies.projects.createWithEventAndAudit)
-      await this.dependencies.projects.createWithEventAndAudit({
-        project,
-        event,
-        auditEvent,
-      });
-    else if (this.dependencies.projects.createWithEvent)
-      await this.dependencies.projects.createWithEvent({ project, event });
-    else await this.dependencies.projects.create(project);
+    try {
+      if (this.dependencies.projects.createWithEventAndAudit)
+        await this.dependencies.projects.createWithEventAndAudit({
+          project,
+          event,
+          auditEvent,
+        });
+      else if (this.dependencies.projects.createWithEvent)
+        await this.dependencies.projects.createWithEvent({ project, event });
+      else await this.dependencies.projects.create(project);
+    } catch (error) {
+      if (!(error instanceof ProjectAlreadyExistsError)) throw error;
+      const concurrent = await this.dependencies.projects.findByInitiative(
+        initiative.id,
+      );
+      if (concurrent && this.isCanonicalConversion(concurrent, input))
+        return concurrent;
+      throw error;
+    }
     if (!this.dependencies.projects.createWithEventAndAudit)
       await this.dependencies.audit.record(auditEvent);
     return project;

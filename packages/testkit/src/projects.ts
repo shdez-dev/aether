@@ -1,4 +1,5 @@
-import type {
+import {
+  ProjectAlreadyExistsError,
   ProjectAuditEvent,
   ProjectAuditStore,
   ProjectExecutionStore,
@@ -18,6 +19,7 @@ export class InMemoryProjectStore implements ProjectStore {
   readonly projects = new Map<string, Project>();
   readonly durableEvents: DurableDomainEvent[] = [];
   async create(project: Project): Promise<void> {
+    this.assertInitiativeIsUnique(project);
     this.projects.set(project.id, project);
   }
   async findById(projectId: string): Promise<Project | null> {
@@ -53,6 +55,7 @@ export class InMemoryProjectStore implements ProjectStore {
     project: Project;
     event: DurableDomainEvent;
   }): Promise<void> {
+    this.assertInitiativeIsUnique(input.project);
     this.projects.set(input.project.id, input.project);
     this.durableEvents.push(input.event);
   }
@@ -64,6 +67,16 @@ export class InMemoryProjectStore implements ProjectStore {
     const saved = await this.save(input);
     if (saved) this.durableEvents.push(input.event);
     return saved;
+  }
+  private assertInitiativeIsUnique(project: Project): void {
+    if (
+      [...this.projects.values()].some(
+        (existing) =>
+          existing.sourceInitiativeId === project.sourceInitiativeId &&
+          existing.id !== project.id,
+      )
+    )
+      throw new ProjectAlreadyExistsError();
   }
 }
 export class InMemoryProjectExecutionStore implements ProjectExecutionStore {

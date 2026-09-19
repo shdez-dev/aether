@@ -13,6 +13,11 @@ participantes. Todos deben ser miembros de la organización y se registra su rol
 (`sponsor`, `lead`, `contributor` u `observer`); la conversión no asigna roles
 implícitos.
 
+La conversión es canónica por iniciativa: una carrera con los mismos datos
+devuelve el proyecto ya persistido, sin un segundo evento ni auditoría. Si la
+solicitud concurrente cambia decisión, nombre, sponsor, líder o participantes,
+se rechaza con conflicto en vez de reinterpretar el proyecto existente.
+
 ## Ejecución
 
 Los estados son `planned`, `active`, `blocked`, `completed` y `cancelled`.
