@@ -117,6 +117,7 @@ describe("project conversion and execution", () => {
       quality: null,
       decidedByActorId: "owner",
       decidedAt: new Date(),
+      nextReviewOn: null,
       conditions: [
         {
           id: conditionId,

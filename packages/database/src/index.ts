@@ -2946,8 +2946,8 @@ export class PostgresEvaluationStore implements EvaluationStore {
     try {
       await client.query("BEGIN");
       await client.query(
-        `INSERT INTO initiative_decisions (id, organization_id, workspace_id, initiative_id, evaluation_id, outcome, rationale, evidence, standard_id, standard_version, coverage, quality, decided_by_actor_id, decided_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+        `INSERT INTO initiative_decisions (id, organization_id, workspace_id, initiative_id, evaluation_id, outcome, rationale, evidence, standard_id, standard_version, coverage, quality, decided_by_actor_id, decided_at, next_review_on)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
         [
           decision.id,
           decision.organizationId,
@@ -2963,6 +2963,7 @@ export class PostgresEvaluationStore implements EvaluationStore {
           asJson(decision.quality),
           decision.decidedByActorId,
           decision.decidedAt,
+          decision.nextReviewOn,
         ],
       );
       for (const condition of decision.conditions ?? [])
@@ -2977,7 +2978,7 @@ export class PostgresEvaluationStore implements EvaluationStore {
   }
   async findDecision(decisionId: string): Promise<InitiativeDecision | null> {
     const result = await this.pool.query<InitiativeDecisionRow>(
-      `SELECT id, organization_id, workspace_id, initiative_id, evaluation_id, outcome, rationale, evidence, standard_id, standard_version, coverage, quality, decided_by_actor_id, decided_at
+      `SELECT id, organization_id, workspace_id, initiative_id, evaluation_id, outcome, rationale, evidence, standard_id, standard_version, coverage, quality, decided_by_actor_id, decided_at, next_review_on
        FROM initiative_decisions WHERE id = $1`,
       [decisionId],
     );
@@ -4340,6 +4341,7 @@ type InitiativeDecisionRow = {
   quality: InitiativeDecision["quality"];
   decided_by_actor_id: string;
   decided_at: Date;
+  next_review_on: string | null;
 };
 type DecisionConditionRow = {
   id: string;
@@ -4593,6 +4595,7 @@ function toInitiativeDecision(row: InitiativeDecisionRow): InitiativeDecision {
     quality: row.quality,
     decidedByActorId: row.decided_by_actor_id,
     decidedAt: row.decided_at,
+    nextReviewOn: row.next_review_on,
   };
 }
 function toDecisionCondition(row: DecisionConditionRow): DecisionCondition {

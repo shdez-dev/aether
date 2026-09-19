@@ -59,6 +59,7 @@ describe("Evaluation and decision", () => {
         evidence: [],
         decidedByActorId: "owner",
         decidedAt: now,
+        nextReviewOn: null,
         evaluation: incomplete,
       }),
     ).toThrow(EvaluationDomainError);
@@ -96,6 +97,7 @@ describe("Evaluation and decision", () => {
         evidence: [],
         decidedByActorId: "owner",
         decidedAt: now,
+        nextReviewOn: null,
         evaluation,
       }),
     ).toThrow(EvaluationDomainError);

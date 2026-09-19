@@ -90,6 +90,7 @@ export type InitiativeDecision = Readonly<{
   quality: EvaluationQuality | null;
   decidedByActorId: string;
   decidedAt: Date;
+  nextReviewOn: string | null;
   conditions?: readonly DecisionCondition[];
 }>;
 export type DecisionCondition = Readonly<{
@@ -226,6 +227,10 @@ export function decideInitiative(
 ): InitiativeDecision {
   if (input.outcome !== "approved" && (input.conditions?.length ?? 0) > 0)
     throw new EvaluationDomainError("DECISION_CONDITIONS_REQUIRE_APPROVAL");
+  if (input.outcome === "returned" && !input.nextReviewOn)
+    throw new EvaluationDomainError("RETURNED_DECISION_REQUIRES_NEXT_REVIEW");
+  if (input.outcome !== "returned" && input.nextReviewOn)
+    throw new EvaluationDomainError("NEXT_REVIEW_ONLY_FOR_RETURNED_DECISION");
   if (input.evaluation.initiativeId !== input.initiativeId)
     throw new EvaluationDomainError("EVALUATION_DOES_NOT_MATCH_INITIATIVE");
   if (input.evaluation.coverage.percentage !== 100)
@@ -307,6 +312,8 @@ export class EvaluationDomainError extends Error {
       | "EVALUATION_ANNULLED"
       | "EVALUATION_REVIEWER_NOT_ASSIGNED"
       | "EVALUATION_ASSIGNMENT_NOT_ABSTAINED"
+      | "RETURNED_DECISION_REQUIRES_NEXT_REVIEW"
+      | "NEXT_REVIEW_ONLY_FOR_RETURNED_DECISION"
       | "EVALUATION_DOES_NOT_MATCH_INITIATIVE"
       | "EVALUATION_INCOMPLETE"
       | "DECISION_CONDITION_NOT_PENDING"

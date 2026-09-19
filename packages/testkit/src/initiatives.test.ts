@@ -459,6 +459,74 @@ describe("initiative vertical slice", () => {
       reason: "Se solicita definición de comité para continuar.",
     });
     expect(escalationPresented.status).toBe("presented");
+    const returnedDraft = await initiatives.create({
+      actorId: "author",
+      organizationId: organization.id,
+      workspaceId: workspace.id,
+      correlationId: ids.next(),
+      title: "Devolver con próxima revisión",
+      problemStatement: "Falta completar observaciones del diagnóstico.",
+      expectedOutcome: "Entregar una nueva versión en la fecha acordada.",
+      classification: "internal",
+    });
+    const returnedPresented = await initiatives.present({
+      actorId: "author",
+      organizationId: organization.id,
+      initiativeId: returnedDraft.id,
+      correlationId: ids.next(),
+      expectedVersion: returnedDraft.version,
+    });
+    await evaluations.assignReviewer({
+      actorId: "owner",
+      organizationId: organization.id,
+      initiativeId: returnedDraft.id,
+      reviewerActorId: "reviewer",
+      correlationId: ids.next(),
+    });
+    const returnedEvaluation = await evaluations.review({
+      actorId: "reviewer",
+      organizationId: organization.id,
+      initiativeId: returnedDraft.id,
+      correlationId: ids.next(),
+      expectedVersion: returnedPresented.version,
+      standardId: standard.id,
+      results: [
+        {
+          criterionId: standard.criteria[0]!.id,
+          assessment: "met",
+          evidence: ["El criterio se revisó por completo."],
+        },
+      ],
+    });
+    await expect(
+      evaluations.decide({
+        actorId: "owner",
+        organizationId: organization.id,
+        initiativeId: returnedDraft.id,
+        correlationId: ids.next(),
+        expectedVersion: returnedPresented.version + 1,
+        evaluationId: returnedEvaluation.id,
+        outcome: "returned",
+        rationale: "Completar el diagnóstico con las observaciones indicadas.",
+        evidence: ["Acta de devolución."],
+      }),
+    ).rejects.toMatchObject({ code: "RETURNED_DECISION_REQUIRES_NEXT_REVIEW" });
+    const returned = await evaluations.decide({
+      actorId: "owner",
+      organizationId: organization.id,
+      initiativeId: returnedDraft.id,
+      correlationId: ids.next(),
+      expectedVersion: returnedPresented.version + 1,
+      evaluationId: returnedEvaluation.id,
+      outcome: "returned",
+      rationale: "Completar el diagnóstico con las observaciones indicadas.",
+      evidence: ["Acta de devolución."],
+      nextReviewOn: "2026-10-15",
+    });
+    expect(returned).toMatchObject({
+      outcome: "returned",
+      nextReviewOn: "2026-10-15",
+    });
     await tenants.archiveWorkspace({
       actorId: "owner",
       organizationId: organization.id,

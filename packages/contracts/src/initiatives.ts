@@ -80,6 +80,7 @@ export const DecideInitiativeRequestSchema = z
     outcome: z.enum(["approved", "rejected", "returned", "cancelled"]),
     rationale: NonEmptyTextSchema.max(10_000),
     evidence: z.array(NonEmptyTextSchema.max(2_000)).max(50),
+    nextReviewOn: z.string().date().nullable().optional(),
     conditions: z.array(DecisionConditionInputSchema).max(50).optional(),
   })
   .superRefine((value, context) => {
@@ -88,6 +89,18 @@ export const DecideInitiativeRequestSchema = z
         code: z.ZodIssueCode.custom,
         path: ["conditions"],
         message: "Conditions are only allowed for approved decisions",
+      });
+    if (value.outcome === "returned" && !value.nextReviewOn)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["nextReviewOn"],
+        message: "Returned decisions require a next review date",
+      });
+    if (value.outcome !== "returned" && value.nextReviewOn)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["nextReviewOn"],
+        message: "A next review date is only allowed for returned decisions",
       });
   });
 export const ExemptDecisionConditionRequestSchema = z.object({
@@ -283,6 +296,7 @@ export const InitiativeDecisionResponseSchema = z.object({
     .nullable(),
   decidedByActorId: z.string(),
   decidedAt: z.string().datetime(),
+  nextReviewOn: z.string().date().nullable(),
   conditions: z.array(
     z.object({
       id: UuidSchema,

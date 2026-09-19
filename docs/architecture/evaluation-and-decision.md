@@ -73,7 +73,9 @@ la evaluación, fundamento y evidencia. La cobertura debe ser 100 %. La decisió
 almacena quién decidió, fecha, resultado, evaluación, estándar y versión
 aplicados. Sus resultados posibles son `approved`, `rejected`, `returned` y
 `cancelled`; `approved`, `rejected` y `cancelled` son terminales, mientras que
-`returned` habilita una corrección y nueva presentación.
+`returned` habilita una corrección y nueva presentación. Una devolución
+conserva las observaciones en el fundamento y exige `nextReviewOn`; esa fecha
+no puede adjuntarse a ningún otro outcome y PostgreSQL aplica la misma regla.
 
 Cuando hay notificaciones configuradas, el solicitante distinto del decisor
 recibe un aviso neutral asociado a la iniciativa. El aviso no incluye outcome,

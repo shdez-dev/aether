@@ -527,6 +527,7 @@ export class EvaluationService {
     outcome: InitiativeDecision["outcome"];
     rationale: string;
     evidence: readonly string[];
+    nextReviewOn?: string | null | undefined;
     conditions?:
       | readonly {
           description: string;
@@ -574,6 +575,7 @@ export class EvaluationService {
       evidence: [...input.evidence],
       decidedByActorId: input.actorId,
       decidedAt: now,
+      nextReviewOn: input.nextReviewOn ?? null,
       evaluation,
       conditions: (input.conditions ?? []).map((condition) => ({
         id: this.dependencies.ids.next(),

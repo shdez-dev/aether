@@ -2681,9 +2681,24 @@ components:
     StartReviewRequest:
       type: object
       additionalProperties: false
-      required: [expectedVersion]
+      required: [expectedVersion, standardId, results]
       properties:
         expectedVersion: { type: integer, minimum: 0 }
+        standardId: { type: string, format: uuid }
+        results:
+          type: array
+          maxItems: 100
+          items:
+            type: object
+            required: [criterionId, assessment, evidence]
+            properties:
+              criterionId: { type: string, format: uuid }
+              assessment:
+                {
+                  type: [string, "null"],
+                  enum: [met, not_met, not_applicable, null],
+                }
+              evidence: { type: array, items: { type: string }, maxItems: 50 }
     AnnulEvaluationRequest:
       type: object
       required: [organizationId, reason]
@@ -2730,6 +2745,7 @@ components:
           { type: string, enum: [approved, rejected, returned, cancelled] }
         rationale: { type: string, minLength: 1, maxLength: 10000 }
         evidence: { type: array, items: { type: string }, maxItems: 50 }
+        nextReviewOn: { type: [string, "null"], format: date }
         conditions:
           type: array
           maxItems: 50
@@ -2914,6 +2930,7 @@ components:
           quality,
           decidedByActorId,
           decidedAt,
+          nextReviewOn,
           conditions,
         ]
       properties:
@@ -2954,6 +2971,7 @@ components:
             percentage: { type: integer, minimum: 0, maximum: 100 }
         decidedByActorId: { type: string }
         decidedAt: { type: string, format: date-time }
+        nextReviewOn: { type: [string, "null"], format: date }
         conditions:
           type: array
           items: { $ref: "#/components/schemas/DecisionCondition" }
