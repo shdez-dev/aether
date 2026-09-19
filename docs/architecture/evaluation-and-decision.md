@@ -18,6 +18,13 @@ publicarse y, como defensa frente a datos heredados o escrituras inválidas, una
 evaluación sin criterios aplicables informa `0 %`, nunca `100 %`; por tanto no
 puede formalizar una decisión.
 
+La calidad ponderada es independiente: suma el peso de criterios `met` y lo
+divide por el peso de criterios aplicables ya evaluados (`met` o `not_met`).
+Se conserva junto a la evaluación y la decisión, pero no sustituye cobertura
+ni determina el resultado (`approved`, `rejected`, `returned` o `cancelled`).
+La madurez requiere una escala y un modelo propios; Aether no la infiere de la
+calidad para evitar presentar una conclusión inexistente.
+
 Una vez aplicado, PostgreSQL bloquea cambios en la identidad, versión,
 criterios y metadatos de publicación del estándar. El estado de activación se
 mantiene independiente para permitir seleccionar una nueva referencia sin

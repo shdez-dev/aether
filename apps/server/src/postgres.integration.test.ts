@@ -1840,6 +1840,21 @@ describe.sequential("PostgreSQL integration", () => {
       if (!successfulDecision || successfulDecision.status !== "fulfilled")
         throw new Error("An approved decision was expected");
       const decision = successfulDecision.value;
+      const persistedQuality = await pool.query<{
+        evaluation_quality: typeof evaluation.quality;
+        decision_quality: typeof decision.quality;
+      }>(
+        `SELECT evaluation.quality AS evaluation_quality,
+                decision.quality AS decision_quality
+           FROM initiative_evaluations evaluation
+           JOIN initiative_decisions decision ON decision.evaluation_id = evaluation.id
+          WHERE decision.id = $1`,
+        [decision.id],
+      );
+      expect(persistedQuality.rows[0]).toEqual({
+        evaluation_quality: evaluation.quality,
+        decision_quality: decision.quality,
+      });
       await expect(
         pool.query(
           `INSERT INTO initiative_decisions (id, organization_id, workspace_id, initiative_id, evaluation_id, outcome, rationale, evidence, standard_id, standard_version, coverage, decided_by_actor_id, decided_at)

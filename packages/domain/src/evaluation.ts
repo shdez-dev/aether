@@ -35,6 +35,12 @@ export type EvaluationCoverage = Readonly<{
   notApplicableCriteria: number;
   percentage: number;
 }>;
+export type EvaluationQuality = Readonly<{
+  applicableWeight: number;
+  assessedWeight: number;
+  metWeight: number;
+  percentage: number;
+}>;
 export type InitiativeEvaluation = Readonly<{
   id: string;
   organizationId: string;
@@ -45,6 +51,7 @@ export type InitiativeEvaluation = Readonly<{
   standardVersion: number;
   criteria: readonly EvaluationCriterionResult[];
   coverage: EvaluationCoverage;
+  quality: EvaluationQuality | null;
   evaluatedByActorId: string;
   evaluatedAt: Date;
 }>;
@@ -62,6 +69,7 @@ export type InitiativeDecision = Readonly<{
   standardId: string;
   standardVersion: number;
   coverage: EvaluationCoverage;
+  quality: EvaluationQuality | null;
   decidedByActorId: string;
   decidedAt: Date;
   conditions?: readonly DecisionCondition[];
@@ -133,6 +141,18 @@ export function evaluateInitiative(input: {
   ).length;
   const totalCriteria = criteria.length;
   const applicableCriteria = totalCriteria - notApplicableCriteria;
+  const applicableWeight = criteria
+    .filter((criterion) => criterion.assessment !== "not_applicable")
+    .reduce((total, criterion) => total + criterion.criterion.weight, 0);
+  const assessedWeight = criteria
+    .filter(
+      (criterion) =>
+        criterion.assessment === "met" || criterion.assessment === "not_met",
+    )
+    .reduce((total, criterion) => total + criterion.criterion.weight, 0);
+  const metWeight = criteria
+    .filter((criterion) => criterion.assessment === "met")
+    .reduce((total, criterion) => total + criterion.criterion.weight, 0);
   return {
     id: input.id,
     organizationId: input.organizationId,
@@ -152,6 +172,13 @@ export function evaluateInitiative(input: {
           ? 0
           : Math.round((assessedCriteria / applicableCriteria) * 100),
     },
+    quality: {
+      applicableWeight,
+      assessedWeight,
+      metWeight,
+      percentage:
+        assessedWeight === 0 ? 0 : Math.round((metWeight / assessedWeight) * 100),
+    },
     evaluatedByActorId: input.evaluatedByActorId,
     evaluatedAt: input.evaluatedAt,
   };
@@ -160,7 +187,7 @@ export function evaluateInitiative(input: {
 export function decideInitiative(
   input: Omit<
     InitiativeDecision,
-    "coverage" | "standardId" | "standardVersion"
+    "coverage" | "quality" | "standardId" | "standardVersion"
   > & {
     evaluation: InitiativeEvaluation;
     conditions?: readonly DecisionCondition[];
@@ -177,6 +204,7 @@ export function decideInitiative(
     standardId: input.evaluation.standardId,
     standardVersion: input.evaluation.standardVersion,
     coverage: input.evaluation.coverage,
+    quality: input.evaluation.quality,
     conditions: input.conditions ?? [],
   };
 }

@@ -885,6 +885,13 @@ export default function AetherPage() {
                       {evaluation.coverage.applicableCriteria} aplicables;{" "}
                       {evaluation.coverage.notApplicableCriteria} no aplicables)
                     </p>
+                    {evaluation.quality ? (
+                      <p>
+                        Calidad ponderada: {evaluation.quality.percentage}% (
+                        {evaluation.quality.metWeight}/
+                        {evaluation.quality.assessedWeight} de peso evaluado)
+                      </p>
+                    ) : null}
                   </section>
                 ) : null}
                 {decision ? (

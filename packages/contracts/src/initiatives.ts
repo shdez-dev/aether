@@ -201,6 +201,14 @@ export const InitiativeEvaluationResponseSchema = z.object({
     notApplicableCriteria: z.number().int(),
     percentage: z.number().int(),
   }),
+  quality: z
+    .object({
+      applicableWeight: z.number().nonnegative(),
+      assessedWeight: z.number().nonnegative(),
+      metWeight: z.number().nonnegative(),
+      percentage: z.number().int().min(0).max(100),
+    })
+    .nullable(),
   evaluatedByActorId: z.string(),
   evaluatedAt: z.string().datetime(),
 });
@@ -222,6 +230,14 @@ export const InitiativeDecisionResponseSchema = z.object({
     notApplicableCriteria: z.number().int(),
     percentage: z.number().int(),
   }),
+  quality: z
+    .object({
+      applicableWeight: z.number().nonnegative(),
+      assessedWeight: z.number().nonnegative(),
+      metWeight: z.number().nonnegative(),
+      percentage: z.number().int().min(0).max(100),
+    })
+    .nullable(),
   decidedByActorId: z.string(),
   decidedAt: z.string().datetime(),
   conditions: z.array(

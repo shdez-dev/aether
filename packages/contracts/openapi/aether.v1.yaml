@@ -2696,6 +2696,14 @@ components:
             assessedCriteria: { type: integer }
             notApplicableCriteria: { type: integer }
             percentage: { type: integer, minimum: 0, maximum: 100 }
+        quality:
+          type: [object, "null"]
+          required: [applicableWeight, assessedWeight, metWeight, percentage]
+          properties:
+            applicableWeight: { type: number, minimum: 0 }
+            assessedWeight: { type: number, minimum: 0 }
+            metWeight: { type: number, minimum: 0 }
+            percentage: { type: integer, minimum: 0, maximum: 100 }
         evaluatedByActorId: { type: string }
         evaluatedAt: { type: string, format: date-time }
     InitiativeDecision:
@@ -2713,6 +2721,7 @@ components:
           standardId,
           standardVersion,
           coverage,
+          quality,
           decidedByActorId,
           decidedAt,
           conditions,
@@ -2744,6 +2753,14 @@ components:
             applicableCriteria: { type: integer }
             assessedCriteria: { type: integer }
             notApplicableCriteria: { type: integer }
+            percentage: { type: integer, minimum: 0, maximum: 100 }
+        quality:
+          type: [object, "null"]
+          required: [applicableWeight, assessedWeight, metWeight, percentage]
+          properties:
+            applicableWeight: { type: number, minimum: 0 }
+            assessedWeight: { type: number, minimum: 0 }
+            metWeight: { type: number, minimum: 0 }
             percentage: { type: integer, minimum: 0, maximum: 100 }
         decidedByActorId: { type: string }
         decidedAt: { type: string, format: date-time }

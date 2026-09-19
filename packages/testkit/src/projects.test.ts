@@ -114,6 +114,7 @@ describe("project conversion and execution", () => {
         notApplicableCriteria: 0,
         percentage: 100,
       },
+      quality: null,
       decidedByActorId: "owner",
       decidedAt: new Date(),
       conditions: [

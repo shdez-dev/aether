@@ -142,6 +142,12 @@ describe("Evaluation and decision", () => {
       notApplicableCriteria: 1,
       percentage: 100,
     });
+    expect(evaluation.quality).toEqual({
+      applicableWeight: 1,
+      assessedWeight: 1,
+      metWeight: 1,
+      percentage: 100,
+    });
   });
 
   it("permite devolución y cancelación como transiciones explícitas", () => {
