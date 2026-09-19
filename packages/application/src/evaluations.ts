@@ -22,6 +22,7 @@ import {
   type TenantStore,
 } from "./tenancy.js";
 import type { TemporaryAccessGrantAuthorizer } from "./access-grants.js";
+import type { NotificationService } from "./notifications.js";
 
 export interface EvaluationStandardStore {
   create(standard: EvaluationStandard): Promise<void>;
@@ -63,6 +64,7 @@ export class EvaluationService {
       audit: InitiativeAuditStore;
       tenancy: TenantStore;
       accessGrants?: TemporaryAccessGrantAuthorizer;
+      notifications?: NotificationService;
       ids: EvaluationIdGenerator;
       clock: EvaluationClock;
     },
@@ -324,6 +326,16 @@ export class EvaluationService {
         evidenceCount: decision.evidence.length,
       },
     );
+    if (initiative.createdByActorId !== input.actorId)
+      await this.dependencies.notifications?.notify({
+        organizationId: initiative.organizationId,
+        workspaceId: initiative.workspaceId,
+        recipientActorId: initiative.createdByActorId,
+        eventKey: `initiative.decision:${decision.id}:requester`,
+        resourceType: "initiative",
+        resourceId: initiative.id,
+        title: "Hay una nueva decisión para una iniciativa.",
+      });
     return decision;
   }
 

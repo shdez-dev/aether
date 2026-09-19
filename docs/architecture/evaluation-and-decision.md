@@ -62,6 +62,11 @@ aplicados. Sus resultados posibles son `approved`, `rejected`, `returned` y
 `cancelled`; `approved`, `rejected` y `cancelled` son terminales, mientras que
 `returned` habilita una corrección y nueva presentación.
 
+Cuando hay notificaciones configuradas, el solicitante distinto del decisor
+recibe un aviso neutral asociado a la iniciativa. El aviso no incluye outcome,
+fundamento ni evidencia; el buzón revalida la pertenencia organizacional y de
+workspace antes de hacerlo visible.
+
 PostgreSQL revalida que la decisión conserve la misma organización, workspace,
 iniciativa, estándar y versión de estándar de la evaluación referenciada. Así,
 una escritura directa no puede reinterpretar retrospectivamente qué expediente
