@@ -1669,13 +1669,23 @@ export async function buildServer(input: {
       input.config,
     );
     const body = InvitationTokenRequestSchema.parse(request.body);
-    await input.tenants.rejectInvitation({
-      token: body.token,
+    return respondIdempotentlyWhenRequested({
+      request,
+      reply,
+      store: input.idempotency,
       actorId: session.actorId,
-      actorEmail: requireActorEmail(session.actorEmail),
-      correlationId: correlationId(reply),
+      operation: "invitation.reject",
+      requestPayload: body,
+      execute: async () => {
+        await input.tenants.rejectInvitation({
+          token: body.token,
+          actorId: session.actorId,
+          actorEmail: requireActorEmail(session.actorEmail),
+          correlationId: correlationId(reply),
+        });
+        return { statusCode: 204, body: {} };
+      },
     });
-    return reply.code(204).send();
   });
   app.post("/v1/initiatives", async (request, reply) => {
     const session = await requireSession(

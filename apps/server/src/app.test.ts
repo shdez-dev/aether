@@ -709,11 +709,25 @@ describe("HTTP authentication boundary", () => {
       headers: {
         origin: config.webOrigin,
         "x-csrf-token": rejectingCsrf,
+        "idempotency-key": "reject-invitation-key",
         cookie: `aether_session=${rejectingToken}; aether_csrf=${rejectingCsrf}`,
       },
       payload: { token: rejectedInvitation.deliveryToken },
     });
     expect(rejected.statusCode).toBe(204);
+    const replayedRejection = await app.inject({
+      method: "POST",
+      url: "/v1/invitations/reject",
+      headers: {
+        origin: config.webOrigin,
+        "x-csrf-token": rejectingCsrf,
+        "idempotency-key": "reject-invitation-key",
+        cookie: `aether_session=${rejectingToken}; aether_csrf=${rejectingCsrf}`,
+      },
+      payload: { token: rejectedInvitation.deliveryToken },
+    });
+    expect(replayedRejection.statusCode).toBe(204);
+    expect(replayedRejection.headers["idempotent-replayed"]).toBe("true");
     const rejectedAcceptance = await app.inject({
       method: "POST",
       url: "/v1/invitations/accept",
