@@ -11,6 +11,7 @@ import {
   type InitiativeDecision,
   type InitiativeEvaluation,
   type EvaluationStandard,
+  type EvaluationReviewerAssignment,
 } from "@aether/domain";
 
 import type { InitiativeAuditStore, InitiativeStore } from "./initiatives.js";
@@ -39,6 +40,18 @@ export interface EvaluationStandardStore {
   }): Promise<void>;
 }
 export interface EvaluationStore {
+  createReviewerAssignment(
+    assignment: EvaluationReviewerAssignment,
+  ): Promise<void>;
+  findReviewerAssignment(
+    assignmentId: string,
+  ): Promise<EvaluationReviewerAssignment | null>;
+  findActiveReviewerAssignment(
+    initiativeId: string,
+  ): Promise<EvaluationReviewerAssignment | null>;
+  updateReviewerAssignment(
+    assignment: EvaluationReviewerAssignment,
+  ): Promise<void>;
   createEvaluation(evaluation: InitiativeEvaluation): Promise<void>;
   findEvaluation(evaluationId: string): Promise<InitiativeEvaluation | null>;
   updateEvaluation(evaluation: InitiativeEvaluation): Promise<void>;
@@ -140,6 +153,212 @@ export class EvaluationService {
     });
     return evaluation;
   }
+  async assignReviewer(input: {
+    actorId: string;
+    organizationId: string;
+    initiativeId: string;
+    reviewerActorId: string;
+    correlationId: string;
+  }): Promise<EvaluationReviewerAssignment> {
+    await this.assertOwner(input.actorId, input.organizationId);
+    await this.assertOrganizationManager(
+      input.reviewerActorId,
+      input.organizationId,
+    );
+    const initiative = await this.requireInitiative(
+      input.initiativeId,
+      input.organizationId,
+    );
+    await assertWorkspaceWritable(
+      this.dependencies.tenancy,
+      initiative.workspaceId,
+    );
+    if (initiative.status !== "presented")
+      throw new EvaluationDomainError("EVALUATION_INCOMPLETE");
+    if (
+      await this.dependencies.evaluations.findActiveReviewerAssignment(
+        initiative.id,
+      )
+    )
+      throw new EvaluationDomainError("EVALUATION_REVIEWER_NOT_ASSIGNED");
+    const now = this.dependencies.clock.now();
+    const assignment: EvaluationReviewerAssignment = {
+      id: this.dependencies.ids.next(),
+      organizationId: initiative.organizationId,
+      workspaceId: initiative.workspaceId,
+      initiativeId: initiative.id,
+      assignedActorId: input.reviewerActorId,
+      assignedByActorId: input.actorId,
+      assignedAt: now,
+      status: "assigned",
+      statusChangedAt: now,
+      statusChangedByActorId: input.actorId,
+      reason: null,
+    };
+    await this.dependencies.evaluations.createReviewerAssignment(assignment);
+    await this.record(
+      initiative,
+      input.actorId,
+      input.correlationId,
+      "initiative.evaluation_reviewer_assigned.v1",
+      initiative.status,
+      initiative.status,
+      {
+        assignmentId: assignment.id,
+        reviewerActorId: assignment.assignedActorId,
+      },
+    );
+    return assignment;
+  }
+  async abstainFromReview(input: {
+    actorId: string;
+    organizationId: string;
+    assignmentId: string;
+    reason: string;
+    correlationId: string;
+  }): Promise<EvaluationReviewerAssignment> {
+    const assignment = await this.requireReviewerAssignment(
+      input.assignmentId,
+      input.organizationId,
+    );
+    if (
+      assignment.status !== "assigned" ||
+      assignment.assignedActorId !== input.actorId
+    )
+      throw new EvaluationDomainError("EVALUATION_REVIEWER_NOT_ASSIGNED");
+    await this.assertOrganizationManager(input.actorId, input.organizationId);
+    const initiative = await this.requireInitiative(
+      assignment.initiativeId,
+      input.organizationId,
+    );
+    await assertWorkspaceWritable(
+      this.dependencies.tenancy,
+      initiative.workspaceId,
+    );
+    const updated: EvaluationReviewerAssignment = {
+      ...assignment,
+      status: "abstained",
+      statusChangedAt: this.dependencies.clock.now(),
+      statusChangedByActorId: input.actorId,
+      reason: input.reason,
+    };
+    await this.dependencies.evaluations.updateReviewerAssignment(updated);
+    await this.record(
+      initiative,
+      input.actorId,
+      input.correlationId,
+      "initiative.evaluation_reviewer_abstained.v1",
+      initiative.status,
+      initiative.status,
+      { assignmentId: assignment.id },
+    );
+    return updated;
+  }
+  async reassignReview(input: {
+    actorId: string;
+    organizationId: string;
+    assignmentId: string;
+    reviewerActorId: string;
+    reason: string;
+    correlationId: string;
+  }): Promise<EvaluationReviewerAssignment> {
+    await this.assertOwner(input.actorId, input.organizationId);
+    await this.assertOrganizationManager(
+      input.reviewerActorId,
+      input.organizationId,
+    );
+    const assignment = await this.requireReviewerAssignment(
+      input.assignmentId,
+      input.organizationId,
+    );
+    if (assignment.status !== "abstained")
+      throw new EvaluationDomainError("EVALUATION_ASSIGNMENT_NOT_ABSTAINED");
+    const initiative = await this.requireInitiative(
+      assignment.initiativeId,
+      input.organizationId,
+    );
+    await assertWorkspaceWritable(
+      this.dependencies.tenancy,
+      initiative.workspaceId,
+    );
+    const now = this.dependencies.clock.now();
+    await this.dependencies.evaluations.updateReviewerAssignment({
+      ...assignment,
+      status: "reassigned",
+      statusChangedAt: now,
+      statusChangedByActorId: input.actorId,
+      reason: input.reason,
+    });
+    const reassignment: EvaluationReviewerAssignment = {
+      id: this.dependencies.ids.next(),
+      organizationId: initiative.organizationId,
+      workspaceId: initiative.workspaceId,
+      initiativeId: initiative.id,
+      assignedActorId: input.reviewerActorId,
+      assignedByActorId: input.actorId,
+      assignedAt: now,
+      status: "assigned",
+      statusChangedAt: now,
+      statusChangedByActorId: input.actorId,
+      reason: null,
+    };
+    await this.dependencies.evaluations.createReviewerAssignment(reassignment);
+    await this.record(
+      initiative,
+      input.actorId,
+      input.correlationId,
+      "initiative.evaluation_reviewer_reassigned.v1",
+      initiative.status,
+      initiative.status,
+      {
+        assignmentId: assignment.id,
+        reassignmentId: reassignment.id,
+        reviewerActorId: reassignment.assignedActorId,
+      },
+    );
+    return reassignment;
+  }
+  async escalateReviewAbstention(input: {
+    actorId: string;
+    organizationId: string;
+    assignmentId: string;
+    reason: string;
+    correlationId: string;
+  }): Promise<EvaluationReviewerAssignment> {
+    await this.assertOwner(input.actorId, input.organizationId);
+    const assignment = await this.requireReviewerAssignment(
+      input.assignmentId,
+      input.organizationId,
+    );
+    if (assignment.status !== "abstained")
+      throw new EvaluationDomainError("EVALUATION_ASSIGNMENT_NOT_ABSTAINED");
+    const initiative = await this.requireInitiative(
+      assignment.initiativeId,
+      input.organizationId,
+    );
+    await assertWorkspaceWritable(
+      this.dependencies.tenancy,
+      initiative.workspaceId,
+    );
+    const updated: EvaluationReviewerAssignment = {
+      ...assignment,
+      status: "escalated",
+      statusChangedAt: this.dependencies.clock.now(),
+      statusChangedByActorId: input.actorId,
+      reason: input.reason,
+    };
+    await this.dependencies.evaluations.updateReviewerAssignment(updated);
+    await this.record(
+      initiative,
+      input.actorId,
+      input.correlationId,
+      "initiative.evaluation_reviewer_abstention_escalated.v1",
+      initiative.status,
+      initiative.status,
+      { assignmentId: assignment.id },
+    );
+    return updated;
+  }
   async getDecision(input: {
     actorId: string;
     organizationId: string;
@@ -176,7 +395,11 @@ export class EvaluationService {
       throw new ResourceNotFoundError("INITIATIVE_NOT_FOUND");
     if (evaluation.annulledAt)
       throw new EvaluationDomainError("EVALUATION_ALREADY_ANNULLED");
-    if (await this.dependencies.evaluations.hasDecisionForEvaluation(evaluation.id))
+    if (
+      await this.dependencies.evaluations.hasDecisionForEvaluation(
+        evaluation.id,
+      )
+    )
       throw new EvaluationDomainError("EVALUATION_ALREADY_DECIDED");
     const initiative = await this.requireInitiative(
       evaluation.initiativeId,
@@ -229,6 +452,12 @@ export class EvaluationService {
     );
     if (initiative.status !== "presented")
       throw new EvaluationDomainError("EVALUATION_INCOMPLETE");
+    const assignment =
+      await this.dependencies.evaluations.findActiveReviewerAssignment(
+        initiative.id,
+      );
+    if (!assignment || assignment.assignedActorId !== input.actorId)
+      throw new EvaluationDomainError("EVALUATION_REVIEWER_NOT_ASSIGNED");
     if (initiative.version !== input.expectedVersion)
       throw new InitiativeVersionConflictError();
     const standard = await this.dependencies.standards.findById(
@@ -261,6 +490,13 @@ export class EvaluationService {
     )
       throw new InitiativeVersionConflictError();
     await this.dependencies.evaluations.createEvaluation(evaluation);
+    await this.dependencies.evaluations.updateReviewerAssignment({
+      ...assignment,
+      status: "completed",
+      statusChangedAt: now,
+      statusChangedByActorId: input.actorId,
+      reason: null,
+    });
     await this.record(
       reviewing,
       input.actorId,
@@ -496,6 +732,16 @@ export class EvaluationService {
     if (!initiative || initiative.organizationId !== organizationId)
       throw new ResourceNotFoundError("INITIATIVE_NOT_FOUND");
     return initiative;
+  }
+  private async requireReviewerAssignment(
+    assignmentId: string,
+    organizationId: string,
+  ): Promise<EvaluationReviewerAssignment> {
+    const assignment =
+      await this.dependencies.evaluations.findReviewerAssignment(assignmentId);
+    if (!assignment || assignment.organizationId !== organizationId)
+      throw new ResourceNotFoundError("INITIATIVE_NOT_FOUND");
+    return assignment;
   }
   private async assertOrganizationManager(
     actorId: string,

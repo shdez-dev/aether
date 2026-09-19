@@ -1800,6 +1800,29 @@ describe.sequential("PostgreSQL integration", () => {
       expect(
         concurrentPublications.filter((result) => result.status === "rejected"),
       ).toHaveLength(1);
+      await evaluationService.assignReviewer({
+        actorId: owner,
+        organizationId: organization.id,
+        initiativeId: draft.id,
+        reviewerActorId: "reviewer@example.test",
+        correlationId: randomUUID(),
+      });
+      await expect(
+        pool.query(
+          `INSERT INTO initiative_evaluation_reviewer_assignments (id, organization_id, workspace_id, initiative_id, assigned_actor_id, assigned_by_actor_id, assigned_at, status, status_changed_at, status_changed_by_actor_id, reason)
+           VALUES ($1,$2,$3,$4,$5,$6,NOW(),'assigned',NOW(),$6,NULL)`,
+          [
+            randomUUID(),
+            organization.id,
+            otherWorkspace.id,
+            draft.id,
+            "reviewer@example.test",
+            owner,
+          ],
+        ),
+      ).rejects.toThrow(
+        "evaluation reviewer assignment must preserve initiative scope",
+      );
       const evaluation = await evaluationService.review({
         actorId: "reviewer@example.test",
         organizationId: organization.id,
@@ -1873,6 +1896,13 @@ describe.sequential("PostgreSQL integration", () => {
         initiativeId: annulmentDraft.id,
         correlationId: randomUUID(),
         expectedVersion: annulmentDraft.version,
+      });
+      await evaluationService.assignReviewer({
+        actorId: owner,
+        organizationId: organization.id,
+        initiativeId: annulmentDraft.id,
+        reviewerActorId: "reviewer@example.test",
+        correlationId: randomUUID(),
       });
       const annulmentEvaluation = await evaluationService.review({
         actorId: "reviewer@example.test",

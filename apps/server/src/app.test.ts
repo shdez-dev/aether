@@ -2126,6 +2126,48 @@ describe("HTTP authentication boundary", () => {
       "idempotency-key": crypto.randomUUID(),
       cookie: `aether_session=independent-reviewer-session; aether_csrf=${reviewerCsrf}`,
     };
+    const assignmentResponse = await app.inject({
+      method: "POST",
+      url: `/v1/initiatives/${created.id}/review-assignments`,
+      headers: { ...headers, "idempotency-key": crypto.randomUUID() },
+      payload: {
+        organizationId: organization.id,
+        reviewerActorId: "reviewer",
+      },
+    });
+    expect(assignmentResponse.statusCode).toBe(201);
+    const assignment = assignmentResponse.json() as { id: string };
+    expect(assignment).toMatchObject({
+      initiativeId: created.id,
+      assignedActorId: "reviewer",
+      status: "assigned",
+    });
+    const abstentionResponse = await app.inject({
+      method: "POST",
+      url: `/v1/evaluation-review-assignments/${assignment.id}/abstentions`,
+      headers: { ...reviewerHeaders, "idempotency-key": crypto.randomUUID() },
+      payload: {
+        organizationId: organization.id,
+        reason: "Debo abstenerme de esta revisión.",
+      },
+    });
+    expect(abstentionResponse.statusCode).toBe(200);
+    expect(abstentionResponse.json()).toMatchObject({ status: "abstained" });
+    const reassignmentResponse = await app.inject({
+      method: "POST",
+      url: `/v1/evaluation-review-assignments/${assignment.id}/reassignments`,
+      headers: { ...headers, "idempotency-key": crypto.randomUUID() },
+      payload: {
+        organizationId: organization.id,
+        reviewerActorId: "reviewer",
+        reason: "La revisión se reasigna después de resolver la abstención.",
+      },
+    });
+    expect(reassignmentResponse.statusCode).toBe(200);
+    expect(reassignmentResponse.json()).toMatchObject({
+      assignedActorId: "reviewer",
+      status: "assigned",
+    });
 
     const reviewResponse = await app.inject({
       method: "POST",

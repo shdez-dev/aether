@@ -41,6 +41,21 @@ export type EvaluationQuality = Readonly<{
   metWeight: number;
   percentage: number;
 }>;
+export type EvaluationReviewerAssignmentStatus =
+  "assigned" | "abstained" | "reassigned" | "escalated" | "completed";
+export type EvaluationReviewerAssignment = Readonly<{
+  id: string;
+  organizationId: string;
+  workspaceId: string;
+  initiativeId: string;
+  assignedActorId: string;
+  assignedByActorId: string;
+  assignedAt: Date;
+  status: EvaluationReviewerAssignmentStatus;
+  statusChangedAt: Date;
+  statusChangedByActorId: string;
+  reason: string | null;
+}>;
 export type InitiativeEvaluation = Readonly<{
   id: string;
   organizationId: string;
@@ -188,7 +203,9 @@ export function evaluateInitiative(input: {
       assessedWeight,
       metWeight,
       percentage:
-        assessedWeight === 0 ? 0 : Math.round((metWeight / assessedWeight) * 100),
+        assessedWeight === 0
+          ? 0
+          : Math.round((metWeight / assessedWeight) * 100),
     },
     evaluatedByActorId: input.evaluatedByActorId,
     evaluatedAt: input.evaluatedAt,
@@ -288,6 +305,8 @@ export class EvaluationDomainError extends Error {
       | "EVALUATION_ALREADY_ANNULLED"
       | "EVALUATION_ALREADY_DECIDED"
       | "EVALUATION_ANNULLED"
+      | "EVALUATION_REVIEWER_NOT_ASSIGNED"
+      | "EVALUATION_ASSIGNMENT_NOT_ABSTAINED"
       | "EVALUATION_DOES_NOT_MATCH_INITIATIVE"
       | "EVALUATION_INCOMPLETE"
       | "DECISION_CONDITION_NOT_PENDING"

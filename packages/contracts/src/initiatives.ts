@@ -50,6 +50,23 @@ export const AnnulEvaluationRequestSchema = z.object({
   organizationId: UuidSchema,
   reason: NonEmptyTextSchema.max(2_000),
 });
+export const AssignEvaluationReviewerRequestSchema = z.object({
+  organizationId: UuidSchema,
+  reviewerActorId: z.string().min(1).max(255),
+});
+export const AbstainFromEvaluationReviewRequestSchema = z.object({
+  organizationId: UuidSchema,
+  reason: NonEmptyTextSchema.max(2_000),
+});
+export const ReassignEvaluationReviewRequestSchema = z.object({
+  organizationId: UuidSchema,
+  reviewerActorId: z.string().min(1).max(255),
+  reason: NonEmptyTextSchema.max(2_000),
+});
+export const EscalateEvaluationReviewAbstentionRequestSchema = z.object({
+  organizationId: UuidSchema,
+  reason: NonEmptyTextSchema.max(2_000),
+});
 
 export const DecisionConditionInputSchema = z.object({
   description: NonEmptyTextSchema.max(2_000),
@@ -219,6 +236,25 @@ export const InitiativeEvaluationResponseSchema = z.object({
   annulledAt: z.string().datetime().nullable(),
   annulmentReason: z.string().nullable(),
 });
+export const EvaluationReviewerAssignmentResponseSchema = z.object({
+  id: UuidSchema,
+  organizationId: UuidSchema,
+  workspaceId: UuidSchema,
+  initiativeId: UuidSchema,
+  assignedActorId: z.string(),
+  assignedByActorId: z.string(),
+  assignedAt: z.string().datetime(),
+  status: z.enum([
+    "assigned",
+    "abstained",
+    "reassigned",
+    "escalated",
+    "completed",
+  ]),
+  statusChangedAt: z.string().datetime(),
+  statusChangedByActorId: z.string(),
+  reason: z.string().nullable(),
+});
 export const InitiativeDecisionResponseSchema = z.object({
   id: UuidSchema,
   organizationId: UuidSchema,
@@ -286,6 +322,18 @@ export type UpdateInitiativeRequest = z.infer<
   typeof UpdateInitiativeRequestSchema
 >;
 export type StartReviewRequest = z.infer<typeof StartReviewRequestSchema>;
+export type AssignEvaluationReviewerRequest = z.infer<
+  typeof AssignEvaluationReviewerRequestSchema
+>;
+export type AbstainFromEvaluationReviewRequest = z.infer<
+  typeof AbstainFromEvaluationReviewRequestSchema
+>;
+export type ReassignEvaluationReviewRequest = z.infer<
+  typeof ReassignEvaluationReviewRequestSchema
+>;
+export type EscalateEvaluationReviewAbstentionRequest = z.infer<
+  typeof EscalateEvaluationReviewAbstentionRequestSchema
+>;
 export type DecideInitiativeRequest = z.infer<
   typeof DecideInitiativeRequestSchema
 >;

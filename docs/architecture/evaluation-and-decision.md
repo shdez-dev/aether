@@ -47,8 +47,14 @@ recargar de forma determinista la decisión que ya avanzó la iniciativa.
 
 ## Revisión
 
-Un `owner` o `admin` organizacional revisa una iniciativa `presented`. Cada
-resultado registra un criterio, valoración (`met`, `not_met` o
+Un `owner` asigna primero la revisión de una iniciativa `presented` a un
+`owner` o `admin` de la organización. Sólo esa asignación activa puede publicar
+la evaluación. El revisor puede abstenerse con motivo; un `owner` conserva el
+historial al reasignarla a otro revisor o al escalar la abstención. PostgreSQL
+mantiene una sola asignación activa por iniciativa y comprueba que conserva el
+alcance de la iniciativa.
+
+El revisor asignado registra cada resultado como valoración (`met`, `not_met` o
 `not_applicable`) y evidencia. Declarar `not_applicable` exige una evidencia no
 vacía que justifique la exclusión del denominador. La revisión crea una
 evaluación inmutable y mueve la iniciativa a `under_review`.

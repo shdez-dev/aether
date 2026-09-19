@@ -166,6 +166,30 @@ describe("initiative vertical slice", () => {
       organizationId: organization.id,
       standardId: standard.id,
     });
+    await evaluations.assignReviewer({
+      actorId: "owner",
+      organizationId: organization.id,
+      initiativeId: created.id,
+      reviewerActorId: "reviewer",
+      correlationId: ids.next(),
+    });
+    await expect(
+      evaluations.review({
+        actorId: "owner",
+        organizationId: organization.id,
+        initiativeId: created.id,
+        correlationId: ids.next(),
+        expectedVersion: presented.version,
+        standardId: standard.id,
+        results: [
+          {
+            criterionId: standard.criteria[0]!.id,
+            assessment: "met",
+            evidence: ["No corresponde al revisor asignado."],
+          },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: "EVALUATION_REVIEWER_NOT_ASSIGNED" });
     const evaluation = await evaluations.review({
       actorId: "reviewer",
       organizationId: organization.id,
@@ -227,10 +251,12 @@ describe("initiative vertical slice", () => {
         correlationId: ids.next(),
       }),
     ).rejects.toMatchObject({ code: "EVALUATION_ALREADY_DECIDED" });
-    expect(await notificationStore.list({
-      actorId: "author",
-      organizationId: organization.id,
-    })).toEqual([
+    expect(
+      await notificationStore.list({
+        actorId: "author",
+        organizationId: organization.id,
+      }),
+    ).toEqual([
       expect.objectContaining({
         recipientActorId: "author",
         resourceType: "initiative",
@@ -296,6 +322,7 @@ describe("initiative vertical slice", () => {
       "initiative.created.v1",
       "initiative.edited.v1",
       "initiative.presented.v1",
+      "initiative.evaluation_reviewer_assigned.v1",
       "initiative.evaluated.v1",
       "initiative.decided.v2",
       "initiative.decision_condition_fulfilled.v1",
@@ -318,8 +345,38 @@ describe("initiative vertical slice", () => {
       correlationId: ids.next(),
       expectedVersion: annulmentDraft.version,
     });
-    const annulmentEvaluation = await evaluations.review({
+    const abstentionAssignment = await evaluations.assignReviewer({
+      actorId: "owner",
+      organizationId: organization.id,
+      initiativeId: annulmentDraft.id,
+      reviewerActorId: "reviewer",
+      correlationId: ids.next(),
+    });
+    const abstained = await evaluations.abstainFromReview({
       actorId: "reviewer",
+      organizationId: organization.id,
+      assignmentId: abstentionAssignment.id,
+      reason: "Debo abstenerme por cercanía con la evidencia presentada.",
+      correlationId: ids.next(),
+    });
+    expect(abstained).toMatchObject({
+      status: "abstained",
+      reason: "Debo abstenerme por cercanía con la evidencia presentada.",
+    });
+    const reassignment = await evaluations.reassignReview({
+      actorId: "owner",
+      organizationId: organization.id,
+      assignmentId: abstentionAssignment.id,
+      reviewerActorId: "owner",
+      reason: "Se reasigna a un owner independiente.",
+      correlationId: ids.next(),
+    });
+    expect(reassignment).toMatchObject({
+      status: "assigned",
+      assignedActorId: "owner",
+    });
+    const annulmentEvaluation = await evaluations.review({
+      actorId: "owner",
       organizationId: organization.id,
       initiativeId: annulmentDraft.id,
       correlationId: ids.next(),
@@ -359,6 +416,49 @@ describe("initiative vertical slice", () => {
         evidence: ["Acta."],
       }),
     ).rejects.toMatchObject({ code: "EVALUATION_ANNULLED" });
+    const escalationDraft = await initiatives.create({
+      actorId: "author",
+      organizationId: organization.id,
+      workspaceId: workspace.id,
+      correlationId: ids.next(),
+      title: "Escalar una abstención",
+      problemStatement: "La abstención requiere intervención de gobierno.",
+      expectedOutcome: "Definir el siguiente revisor institucional.",
+      classification: "internal",
+    });
+    const escalationPresented = await initiatives.present({
+      actorId: "author",
+      organizationId: organization.id,
+      initiativeId: escalationDraft.id,
+      correlationId: ids.next(),
+      expectedVersion: escalationDraft.version,
+    });
+    const escalationAssignment = await evaluations.assignReviewer({
+      actorId: "owner",
+      organizationId: organization.id,
+      initiativeId: escalationDraft.id,
+      reviewerActorId: "reviewer",
+      correlationId: ids.next(),
+    });
+    await evaluations.abstainFromReview({
+      actorId: "reviewer",
+      organizationId: organization.id,
+      assignmentId: escalationAssignment.id,
+      reason: "La revisión debe resolverse por una instancia superior.",
+      correlationId: ids.next(),
+    });
+    const escalated = await evaluations.escalateReviewAbstention({
+      actorId: "owner",
+      organizationId: organization.id,
+      assignmentId: escalationAssignment.id,
+      reason: "Se solicita definición de comité para continuar.",
+      correlationId: ids.next(),
+    });
+    expect(escalated).toMatchObject({
+      status: "escalated",
+      reason: "Se solicita definición de comité para continuar.",
+    });
+    expect(escalationPresented.status).toBe("presented");
     await tenants.archiveWorkspace({
       actorId: "owner",
       organizationId: organization.id,

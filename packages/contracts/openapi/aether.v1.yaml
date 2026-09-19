@@ -1061,6 +1061,114 @@ paths:
       responses:
         "204": { description: Versión adoptada y activada. }
         default: { $ref: "#/components/responses/Problem" }
+  /v1/initiatives/{initiativeId}/review-assignments:
+    post:
+      tags: [Initiatives]
+      operationId: assignEvaluationReviewer
+      summary: Asignar un revisor a una iniciativa presentada
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: initiativeId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              { $ref: "#/components/schemas/AssignEvaluationReviewerRequest" }
+      responses:
+        "201":
+          description: Revisor asignado.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EvaluationReviewerAssignment" }
+        default: { $ref: "#/components/responses/Problem" }
+  /v1/evaluation-review-assignments/{assignmentId}/abstentions:
+    post:
+      tags: [Initiatives]
+      operationId: abstainFromEvaluationReview
+      summary: Declarar abstención de una revisión asignada
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: assignmentId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              { $ref: "#/components/schemas/AbstainFromEvaluationReviewRequest" }
+      responses:
+        "200":
+          description: Abstención registrada.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EvaluationReviewerAssignment" }
+        default: { $ref: "#/components/responses/Problem" }
+  /v1/evaluation-review-assignments/{assignmentId}/reassignments:
+    post:
+      tags: [Initiatives]
+      operationId: reassignEvaluationReview
+      summary: Reasignar una abstención de evaluación
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: assignmentId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              { $ref: "#/components/schemas/ReassignEvaluationReviewRequest" }
+      responses:
+        "200":
+          description: Nueva asignación creada.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EvaluationReviewerAssignment" }
+        default: { $ref: "#/components/responses/Problem" }
+  /v1/evaluation-review-assignments/{assignmentId}/escalations:
+    post:
+      tags: [Initiatives]
+      operationId: escalateEvaluationReviewAbstention
+      summary: Escalar una abstención de evaluación
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: assignmentId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              { $ref: "#/components/schemas/EscalateEvaluationReviewAbstentionRequest" }
+      responses:
+        "200":
+          description: Abstención escalada.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EvaluationReviewerAssignment" }
+        default: { $ref: "#/components/responses/Problem" }
   /v1/evaluations/{evaluationId}:
     get:
       tags: [Initiatives]
@@ -2582,6 +2690,35 @@ components:
       properties:
         organizationId: { type: string, format: uuid }
         reason: { type: string, minLength: 1, maxLength: 2000 }
+    AssignEvaluationReviewerRequest:
+      type: object
+      additionalProperties: false
+      required: [organizationId, reviewerActorId]
+      properties:
+        organizationId: { type: string, format: uuid }
+        reviewerActorId: { type: string, minLength: 1, maxLength: 255 }
+    AbstainFromEvaluationReviewRequest:
+      type: object
+      additionalProperties: false
+      required: [organizationId, reason]
+      properties:
+        organizationId: { type: string, format: uuid }
+        reason: { type: string, minLength: 1, maxLength: 2000 }
+    ReassignEvaluationReviewRequest:
+      type: object
+      additionalProperties: false
+      required: [organizationId, reviewerActorId, reason]
+      properties:
+        organizationId: { type: string, format: uuid }
+        reviewerActorId: { type: string, minLength: 1, maxLength: 255 }
+        reason: { type: string, minLength: 1, maxLength: 2000 }
+    EscalateEvaluationReviewAbstentionRequest:
+      type: object
+      additionalProperties: false
+      required: [organizationId, reason]
+      properties:
+        organizationId: { type: string, format: uuid }
+        reason: { type: string, minLength: 1, maxLength: 2000 }
     DecideInitiativeRequest:
       type: object
       additionalProperties: false
@@ -2743,6 +2880,22 @@ components:
         annulledByActorId: { type: [string, "null"] }
         annulledAt: { type: [string, "null"], format: date-time }
         annulmentReason: { type: [string, "null"] }
+    EvaluationReviewerAssignment:
+      type: object
+      required:
+        [id, organizationId, workspaceId, initiativeId, assignedActorId, assignedByActorId, assignedAt, status, statusChangedAt, statusChangedByActorId, reason]
+      properties:
+        id: { type: string, format: uuid }
+        organizationId: { type: string, format: uuid }
+        workspaceId: { type: string, format: uuid }
+        initiativeId: { type: string, format: uuid }
+        assignedActorId: { type: string }
+        assignedByActorId: { type: string }
+        assignedAt: { type: string, format: date-time }
+        status: { type: string, enum: [assigned, abstained, reassigned, escalated, completed] }
+        statusChangedAt: { type: string, format: date-time }
+        statusChangedByActorId: { type: string }
+        reason: { type: [string, "null"] }
     InitiativeDecision:
       type: object
       required:

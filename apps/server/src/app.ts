@@ -74,6 +74,10 @@ import {
   ExemptDecisionConditionRequestSchema,
   FulfillDecisionConditionRequestSchema,
   ActivateEvaluationStandardRequestSchema,
+  AssignEvaluationReviewerRequestSchema,
+  AbstainFromEvaluationReviewRequestSchema,
+  ReassignEvaluationReviewRequestSchema,
+  EscalateEvaluationReviewAbstentionRequestSchema,
   AuditHistoryQuerySchema,
   AddProjectMilestoneRequestSchema,
   AddProjectNextActionRequestSchema,
@@ -1797,6 +1801,144 @@ export async function buildServer(input: {
     return toEvaluationResponse(evaluation);
   });
   app.post(
+    "/v1/initiatives/:initiativeId/review-assignments",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      const params = z
+        .object({ initiativeId: z.string().uuid() })
+        .parse(request.params);
+      const body = AssignEvaluationReviewerRequestSchema.parse(request.body);
+      return respondIdempotently({
+        request,
+        reply,
+        store: input.idempotency,
+        actorId: session.actorId,
+        operation: `initiative.review-assignment:${params.initiativeId}`,
+        requestPayload: { params, body },
+        execute: async () => ({
+          statusCode: 201,
+          body: toEvaluationReviewerAssignmentResponse(
+            await input.evaluations.assignReviewer({
+              actorId: session.actorId,
+              correlationId: correlationId(reply),
+              ...params,
+              ...body,
+            }),
+          ),
+        }),
+      });
+    },
+  );
+  app.post(
+    "/v1/evaluation-review-assignments/:assignmentId/abstentions",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      const params = z
+        .object({ assignmentId: z.string().uuid() })
+        .parse(request.params);
+      const body = AbstainFromEvaluationReviewRequestSchema.parse(request.body);
+      return respondIdempotently({
+        request,
+        reply,
+        store: input.idempotency,
+        actorId: session.actorId,
+        operation: `evaluation-review-assignment.abstain:${params.assignmentId}`,
+        requestPayload: { params, body },
+        execute: async () => ({
+          statusCode: 200,
+          body: toEvaluationReviewerAssignmentResponse(
+            await input.evaluations.abstainFromReview({
+              actorId: session.actorId,
+              correlationId: correlationId(reply),
+              ...params,
+              ...body,
+            }),
+          ),
+        }),
+      });
+    },
+  );
+  app.post(
+    "/v1/evaluation-review-assignments/:assignmentId/reassignments",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      const params = z
+        .object({ assignmentId: z.string().uuid() })
+        .parse(request.params);
+      const body = ReassignEvaluationReviewRequestSchema.parse(request.body);
+      return respondIdempotently({
+        request,
+        reply,
+        store: input.idempotency,
+        actorId: session.actorId,
+        operation: `evaluation-review-assignment.reassign:${params.assignmentId}`,
+        requestPayload: { params, body },
+        execute: async () => ({
+          statusCode: 200,
+          body: toEvaluationReviewerAssignmentResponse(
+            await input.evaluations.reassignReview({
+              actorId: session.actorId,
+              correlationId: correlationId(reply),
+              ...params,
+              ...body,
+            }),
+          ),
+        }),
+      });
+    },
+  );
+  app.post(
+    "/v1/evaluation-review-assignments/:assignmentId/escalations",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      const params = z
+        .object({ assignmentId: z.string().uuid() })
+        .parse(request.params);
+      const body = EscalateEvaluationReviewAbstentionRequestSchema.parse(
+        request.body,
+      );
+      return respondIdempotently({
+        request,
+        reply,
+        store: input.idempotency,
+        actorId: session.actorId,
+        operation: `evaluation-review-assignment.escalate:${params.assignmentId}`,
+        requestPayload: { params, body },
+        execute: async () => ({
+          statusCode: 200,
+          body: toEvaluationReviewerAssignmentResponse(
+            await input.evaluations.escalateReviewAbstention({
+              actorId: session.actorId,
+              correlationId: correlationId(reply),
+              ...params,
+              ...body,
+            }),
+          ),
+        }),
+      });
+    },
+  );
+  app.post(
     "/v1/evaluations/:evaluationId/annulments",
     async (request, reply) => {
       const session = await requireSession(
@@ -2965,6 +3107,18 @@ function toEvaluationResponse(
     ...evaluation,
     evaluatedAt: evaluation.evaluatedAt.toISOString(),
     annulledAt: evaluation.annulledAt?.toISOString() ?? null,
+  };
+}
+function toEvaluationReviewerAssignmentResponse(
+  assignment: {
+    assignedAt: Date;
+    statusChangedAt: Date;
+  } & Record<string, unknown>,
+) {
+  return {
+    ...assignment,
+    assignedAt: assignment.assignedAt.toISOString(),
+    statusChangedAt: assignment.statusChangedAt.toISOString(),
   };
 }
 function toDecisionResponse(

@@ -13,6 +13,7 @@ import type {
   Initiative,
   InitiativeDecision,
   InitiativeEvaluation,
+  EvaluationReviewerAssignment,
 } from "@aether/domain";
 
 export class InMemoryInitiativeStore implements InitiativeStore {
@@ -178,8 +179,40 @@ export class InMemoryEvaluationStandardStore implements EvaluationStandardStore 
 }
 
 export class InMemoryEvaluationStore implements EvaluationStore {
+  readonly reviewerAssignments = new Map<
+    string,
+    EvaluationReviewerAssignment
+  >();
   readonly evaluations = new Map<string, InitiativeEvaluation>();
   readonly decisions = new Map<string, InitiativeDecision>();
+  async createReviewerAssignment(
+    assignment: EvaluationReviewerAssignment,
+  ): Promise<void> {
+    if (await this.findActiveReviewerAssignment(assignment.initiativeId))
+      throw new Error("Active evaluation reviewer assignment already exists");
+    this.reviewerAssignments.set(assignment.id, assignment);
+  }
+  async findReviewerAssignment(
+    assignmentId: string,
+  ): Promise<EvaluationReviewerAssignment | null> {
+    return this.reviewerAssignments.get(assignmentId) ?? null;
+  }
+  async findActiveReviewerAssignment(
+    initiativeId: string,
+  ): Promise<EvaluationReviewerAssignment | null> {
+    return (
+      [...this.reviewerAssignments.values()].find(
+        (assignment) =>
+          assignment.initiativeId === initiativeId &&
+          assignment.status === "assigned",
+      ) ?? null
+    );
+  }
+  async updateReviewerAssignment(
+    assignment: EvaluationReviewerAssignment,
+  ): Promise<void> {
+    this.reviewerAssignments.set(assignment.id, assignment);
+  }
   async createEvaluation(evaluation: InitiativeEvaluation): Promise<void> {
     this.evaluations.set(evaluation.id, evaluation);
   }

@@ -72,6 +72,7 @@ import type {
   InitiativeStatus,
   EvaluationStandard,
   InitiativeEvaluation,
+  EvaluationReviewerAssignment,
   InitiativeDecision,
   DecisionCondition,
   Project,
@@ -2824,6 +2825,70 @@ export class PostgresEvaluationStandardStore implements EvaluationStandardStore 
 
 export class PostgresEvaluationStore implements EvaluationStore {
   constructor(private readonly pool: Pool) {}
+  async createReviewerAssignment(
+    assignment: EvaluationReviewerAssignment,
+  ): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO initiative_evaluation_reviewer_assignments (id, organization_id, workspace_id, initiative_id, assigned_actor_id, assigned_by_actor_id, assigned_at, status, status_changed_at, status_changed_by_actor_id, reason)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [
+        assignment.id,
+        assignment.organizationId,
+        assignment.workspaceId,
+        assignment.initiativeId,
+        assignment.assignedActorId,
+        assignment.assignedByActorId,
+        assignment.assignedAt,
+        assignment.status,
+        assignment.statusChangedAt,
+        assignment.statusChangedByActorId,
+        assignment.reason,
+      ],
+    );
+  }
+  async findReviewerAssignment(
+    assignmentId: string,
+  ): Promise<EvaluationReviewerAssignment | null> {
+    const result = await this.pool.query<EvaluationReviewerAssignmentRow>(
+      `SELECT id, organization_id, workspace_id, initiative_id, assigned_actor_id, assigned_by_actor_id, assigned_at, status, status_changed_at, status_changed_by_actor_id, reason
+         FROM initiative_evaluation_reviewer_assignments WHERE id = $1`,
+      [assignmentId],
+    );
+    return result.rows[0]
+      ? toEvaluationReviewerAssignment(result.rows[0])
+      : null;
+  }
+  async findActiveReviewerAssignment(
+    initiativeId: string,
+  ): Promise<EvaluationReviewerAssignment | null> {
+    const result = await this.pool.query<EvaluationReviewerAssignmentRow>(
+      `SELECT id, organization_id, workspace_id, initiative_id, assigned_actor_id, assigned_by_actor_id, assigned_at, status, status_changed_at, status_changed_by_actor_id, reason
+         FROM initiative_evaluation_reviewer_assignments
+        WHERE initiative_id = $1 AND status = 'assigned'`,
+      [initiativeId],
+    );
+    return result.rows[0]
+      ? toEvaluationReviewerAssignment(result.rows[0])
+      : null;
+  }
+  async updateReviewerAssignment(
+    assignment: EvaluationReviewerAssignment,
+  ): Promise<void> {
+    const result = await this.pool.query(
+      `UPDATE initiative_evaluation_reviewer_assignments
+          SET status = $2, status_changed_at = $3, status_changed_by_actor_id = $4, reason = $5
+        WHERE id = $1`,
+      [
+        assignment.id,
+        assignment.status,
+        assignment.statusChangedAt,
+        assignment.statusChangedByActorId,
+        assignment.reason,
+      ],
+    );
+    if (result.rowCount !== 1)
+      throw new Error("Evaluation reviewer assignment not found");
+  }
   async createEvaluation(evaluation: InitiativeEvaluation): Promise<void> {
     await this.pool.query(
       `INSERT INTO initiative_evaluations (id, organization_id, workspace_id, initiative_id, initiative_version, standard_id, standard_version, criteria, coverage, quality, evaluated_by_actor_id, evaluated_at, annulled_by_actor_id, annulled_at, annulment_reason)
@@ -4247,6 +4312,19 @@ type InitiativeEvaluationRow = {
   annulled_at: Date | null;
   annulment_reason: string | null;
 };
+type EvaluationReviewerAssignmentRow = {
+  id: string;
+  organization_id: string;
+  workspace_id: string;
+  initiative_id: string;
+  assigned_actor_id: string;
+  assigned_by_actor_id: string;
+  assigned_at: Date;
+  status: EvaluationReviewerAssignment["status"];
+  status_changed_at: Date;
+  status_changed_by_actor_id: string;
+  reason: string | null;
+};
 type InitiativeDecisionRow = {
   id: string;
   organization_id: string;
@@ -4480,6 +4558,23 @@ function toInitiativeEvaluation(
     annulledByActorId: row.annulled_by_actor_id,
     annulledAt: row.annulled_at,
     annulmentReason: row.annulment_reason,
+  };
+}
+function toEvaluationReviewerAssignment(
+  row: EvaluationReviewerAssignmentRow,
+): EvaluationReviewerAssignment {
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    workspaceId: row.workspace_id,
+    initiativeId: row.initiative_id,
+    assignedActorId: row.assigned_actor_id,
+    assignedByActorId: row.assigned_by_actor_id,
+    assignedAt: row.assigned_at,
+    status: row.status,
+    statusChangedAt: row.status_changed_at,
+    statusChangedByActorId: row.status_changed_by_actor_id,
+    reason: row.reason,
   };
 }
 function toInitiativeDecision(row: InitiativeDecisionRow): InitiativeDecision {
