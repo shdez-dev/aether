@@ -22,6 +22,7 @@ import {
   IdempotencyStore,
   ProjectAlreadyExistsError,
   EvaluationService,
+  TriageService,
   EvaluationConflictOfInterestError,
   ProjectService,
   ProjectDomainError,
@@ -85,6 +86,9 @@ import {
   ChangeProjectStatusRequestSchema,
   CreateProjectFromInitiativeRequestSchema,
   PublishEvaluationStandardRequestSchema,
+  PublishTriageStandardRequestSchema,
+  ActivateTriageStandardRequestSchema,
+  TriageInitiativeRequestSchema,
   StartReviewRequestSchema,
   AnnulEvaluationRequestSchema,
   SubmitInitiativeRequestSchema,
@@ -148,6 +152,7 @@ export async function buildServer(input: {
   supportAccess?: SupportAccessService;
   initiatives: InitiativeService;
   evaluations: EvaluationService;
+  triage?: TriageService;
   projects: ProjectService;
   documents?: DocumentService;
   evidence?: EvidenceService;
@@ -1780,6 +1785,111 @@ export async function buildServer(input: {
       publishedAt: standard.publishedAt.toISOString(),
     }));
   });
+  app.post("/v1/triage-standards", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    if (!input.triage) throw new Error("Triage service is not configured");
+    const body = PublishTriageStandardRequestSchema.parse(request.body);
+    return respondIdempotently({
+      request,
+      reply,
+      store: input.idempotency,
+      actorId: session.actorId,
+      operation: "triage-standard.publish",
+      requestPayload: body,
+      execute: async () => {
+        const standard = await input.triage!.publishStandard({
+          actorId: session.actorId,
+          ...body,
+        });
+        return {
+          statusCode: 201,
+          body: {
+            ...standard,
+            publishedAt: standard.publishedAt.toISOString(),
+          },
+        };
+      },
+    });
+  });
+  app.get("/v1/triage-standards", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    if (!input.triage) throw new Error("Triage service is not configured");
+    const { organizationId } = z
+      .object({ organizationId: z.string().uuid() })
+      .parse(request.query);
+    const standards = await input.triage.listStandards({
+      actorId: session.actorId,
+      organizationId,
+    });
+    return standards.map((standard) => ({
+      ...standard,
+      publishedAt: standard.publishedAt.toISOString(),
+    }));
+  });
+  app.post(
+    "/v1/triage-standards/:standardId/activate",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      if (!input.triage) throw new Error("Triage service is not configured");
+      const params = z
+        .object({ standardId: z.string().uuid() })
+        .parse(request.params);
+      const body = ActivateTriageStandardRequestSchema.parse(request.body);
+      return respondIdempotently({
+        request,
+        reply,
+        store: input.idempotency,
+        actorId: session.actorId,
+        operation: `triage-standard.activate:${params.standardId}`,
+        requestPayload: { params, body },
+        execute: async () => {
+          await input.triage!.activateStandard({
+            actorId: session.actorId,
+            ...params,
+            ...body,
+          });
+          return { statusCode: 204, body: {} };
+        },
+      });
+    },
+  );
+  app.get("/v1/triage-results/:triageId", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    if (!input.triage) throw new Error("Triage service is not configured");
+    const params = z
+      .object({ triageId: z.string().uuid() })
+      .parse(request.params);
+    const { organizationId } = z
+      .object({ organizationId: z.string().uuid() })
+      .parse(request.query);
+    return toTriageResponse(
+      await input.triage.getTriage({
+        actorId: session.actorId,
+        ...params,
+        organizationId,
+      }),
+    );
+  });
   app.get("/v1/evaluations/:evaluationId", async (request, reply) => {
     const session = await requireSession(
       request,
@@ -2790,6 +2900,42 @@ export async function buildServer(input: {
       },
     });
   });
+  app.post("/v1/initiatives/:initiativeId/triage", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    if (!input.triage) throw new Error("Triage service is not configured");
+    const params = z
+      .object({ initiativeId: z.string().uuid() })
+      .parse(request.params);
+    const query = z
+      .object({ organizationId: z.string().uuid() })
+      .parse(request.query);
+    const body = TriageInitiativeRequestSchema.parse(request.body);
+    return respondIdempotently({
+      request,
+      reply,
+      store: input.idempotency,
+      actorId: session.actorId,
+      operation: `initiative.triage:${params.initiativeId}`,
+      requestPayload: { query, body },
+      execute: async () => ({
+        statusCode: 201,
+        body: toTriageResponse(
+          await input.triage!.triage({
+            actorId: session.actorId,
+            correlationId: correlationId(reply),
+            ...params,
+            ...query,
+            ...body,
+          }),
+        ),
+      }),
+    });
+  });
   app.post("/v1/initiatives/:initiativeId/review", async (request, reply) => {
     const session = await requireSession(
       request,
@@ -3153,6 +3299,11 @@ function toEvaluationResponse(
     evaluatedAt: evaluation.evaluatedAt.toISOString(),
     annulledAt: evaluation.annulledAt?.toISOString() ?? null,
   };
+}
+function toTriageResponse(
+  triage: { assessedAt: Date } & Record<string, unknown>,
+) {
+  return { ...triage, assessedAt: triage.assessedAt.toISOString() };
 }
 function toEvaluationReviewerAssignmentResponse(
   assignment: {

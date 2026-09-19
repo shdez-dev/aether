@@ -7,6 +7,7 @@ import { PostgreSqlContainer } from "@testcontainers/postgresql";
 import {
   AccessDeniedError,
   EvaluationService,
+  TriageService,
   InitiativeVersionConflictError,
   InitiativeService,
   NotificationService,
@@ -26,6 +27,8 @@ import {
   PostgresAuthStore,
   PostgresEvaluationStandardStore,
   PostgresEvaluationStore,
+  PostgresTriageStandardStore,
+  PostgresTriageStore,
   PostgresInitiativeAuditStore,
   PostgresInitiativeStore,
   PostgresIdempotencyStore,
@@ -1759,6 +1762,94 @@ describe.sequential("PostgreSQL integration", () => {
         correlationId: randomUUID(),
         expectedVersion: reprioritized.version,
       });
+      const triageStore = new PostgresTriageStore(pool);
+      const triageStandardStore = new PostgresTriageStandardStore(pool);
+      const triageService = new TriageService({
+        standards: triageStandardStore,
+        triages: triageStore,
+        initiatives: initiativesStore,
+        audit: initiativeAudit,
+        tenancy: tenantStore,
+        ids,
+        clock,
+      });
+      const triageCriterionId = randomUUID();
+      const triageStandard = await triageService.publishStandard({
+        actorId: owner,
+        organizationId: organization.id,
+        name: "Triage inicial",
+        version: 1,
+        criteria: [
+          {
+            id: triageCriterionId,
+            code: "SCOPE",
+            name: "Alcance",
+            description: "Alcance institucional verificable.",
+            required: true,
+          },
+        ],
+      });
+      await triageService.activateStandard({
+        actorId: owner,
+        organizationId: organization.id,
+        standardId: triageStandard.id,
+      });
+      const triage = await triageService.triage({
+        actorId: owner,
+        organizationId: organization.id,
+        initiativeId: draft.id,
+        expectedVersion: presented.version,
+        standardId: triageStandard.id,
+        results: [
+          {
+            criterionId: triageCriterionId,
+            assessment: "pass",
+            justification: ["El alcance está delimitado."],
+          },
+        ],
+        correlationId: randomUUID(),
+      });
+      expect(await triageStore.findById(triage.id)).toMatchObject({
+        initiativeVersion: presented.version,
+        standardId: triageStandard.id,
+        standardVersion: 1,
+      });
+      await expect(
+        pool.query(
+          `UPDATE triage_standards SET criteria = $1::jsonb WHERE id = $2`,
+          [
+            JSON.stringify([
+              {
+                id: randomUUID(),
+                code: "ALTERED",
+                name: "Criterio alterado",
+                description: "No debe reescribir el triage existente.",
+                required: true,
+              },
+            ]),
+            triageStandard.id,
+          ],
+        ),
+      ).rejects.toThrow("a triage standard cannot change after it is applied");
+      await expect(
+        pool.query(
+          `INSERT INTO initiative_triages
+           (id, organization_id, workspace_id, initiative_id, initiative_version,
+            standard_id, standard_version, criteria, assessed_by_actor_id, assessed_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,NOW())`,
+          [
+            randomUUID(),
+            organization.id,
+            otherWorkspace.id,
+            draft.id,
+            presented.version,
+            triageStandard.id,
+            triageStandard.version,
+            JSON.stringify([]),
+            owner,
+          ],
+        ),
+      ).rejects.toThrow("triage scope does not match initiative and standard");
       const standard = await evaluationService.publishStandard({
         actorId: owner,
         organizationId: organization.id,

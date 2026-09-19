@@ -1061,6 +1061,114 @@ paths:
       responses:
         "204": { description: Versión adoptada y activada. }
         default: { $ref: "#/components/responses/Problem" }
+  /v1/triage-standards:
+    get:
+      tags: [Initiatives]
+      operationId: listTriageStandards
+      summary: Listar estándares de triage de una organización
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationContextId"
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: Estándares de triage disponibles, incluyendo cuál está activo.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/TriageStandard" }
+        default: { $ref: "#/components/responses/Problem" }
+    post:
+      tags: [Initiatives]
+      operationId: publishTriageStandard
+      summary: Publicar un estándar de triage inmutable
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PublishTriageStandardRequest" }
+      responses:
+        "201":
+          description: Estándar de triage publicado.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TriageStandard" }
+        default: { $ref: "#/components/responses/Problem" }
+  /v1/triage-standards/{standardId}/activate:
+    post:
+      tags: [Initiatives]
+      operationId: activateTriageStandard
+      summary: Adoptar una versión de triage como referencia organizacional
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: standardId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ActivateTriageStandardRequest" }
+      responses:
+        "204": { description: Versión de triage adoptada y activada. }
+        default: { $ref: "#/components/responses/Problem" }
+  /v1/triage-results/{triageId}:
+    get:
+      tags: [Initiatives]
+      operationId: getInitiativeTriage
+      summary: Obtener un resultado de triage autorizado
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: triageId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/OrganizationContextId"
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: Resultado de triage versionado.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InitiativeTriage" }
+        default: { $ref: "#/components/responses/Problem" }
+  /v1/initiatives/{initiativeId}/triage:
+    post:
+      tags: [Initiatives]
+      operationId: triageInitiative
+      summary: Evaluar una iniciativa contra el estándar de triage activo
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: initiativeId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/OrganizationContextId"
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TriageInitiativeRequest" }
+      responses:
+        "201":
+          description: Resultado de triage asociado a la versión exacta de la iniciativa.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InitiativeTriage" }
+        default: { $ref: "#/components/responses/Problem" }
   /v1/initiatives/{initiativeId}/review-assignments:
     post:
       tags: [Initiatives]
@@ -2851,6 +2959,90 @@ components:
       required: [organizationId]
       properties:
         organizationId: { type: string, format: uuid }
+    TriageCriterion:
+      type: object
+      additionalProperties: false
+      required: [id, code, name, description, required]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string, minLength: 1, maxLength: 64 }
+        name: { type: string, minLength: 1, maxLength: 255 }
+        description: { type: string, minLength: 1, maxLength: 2000 }
+        required: { type: boolean }
+    PublishTriageStandardRequest:
+      type: object
+      additionalProperties: false
+      required: [organizationId, name, version, criteria]
+      properties:
+        organizationId: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 255 }
+        version: { type: integer, minimum: 1 }
+        criteria:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items: { $ref: "#/components/schemas/TriageCriterion" }
+    ActivateTriageStandardRequest:
+      type: object
+      additionalProperties: false
+      required: [organizationId]
+      properties:
+        organizationId: { type: string, format: uuid }
+    TriageInitiativeRequest:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion, standardId, results]
+      properties:
+        expectedVersion: { type: integer, minimum: 0 }
+        standardId: { type: string, format: uuid }
+        results:
+          type: array
+          maxItems: 100
+          items:
+            type: object
+            required: [criterionId, assessment, justification]
+            properties:
+              criterionId: { type: string, format: uuid }
+              assessment:
+                { type: [string, "null"], enum: [pass, fail, not_applicable, null] }
+              justification: { type: array, items: { type: string }, maxItems: 50 }
+    TriageStandard:
+      type: object
+      required: [id, organizationId, name, version, criteria, isActive, publishedAt, publishedByActorId]
+      properties:
+        id: { type: string, format: uuid }
+        organizationId: { type: string, format: uuid }
+        name: { type: string }
+        version: { type: integer }
+        criteria:
+          type: array
+          items: { $ref: "#/components/schemas/TriageCriterion" }
+        isActive: { type: boolean }
+        publishedAt: { type: string, format: date-time }
+        publishedByActorId: { type: string }
+    InitiativeTriage:
+      type: object
+      required: [id, organizationId, workspaceId, initiativeId, initiativeVersion, standardId, standardVersion, criteria, assessedByActorId, assessedAt]
+      properties:
+        id: { type: string, format: uuid }
+        organizationId: { type: string, format: uuid }
+        workspaceId: { type: string, format: uuid }
+        initiativeId: { type: string, format: uuid }
+        initiativeVersion: { type: integer, minimum: 0 }
+        standardId: { type: string, format: uuid }
+        standardVersion: { type: integer, minimum: 1 }
+        criteria:
+          type: array
+          items:
+            type: object
+            required: [criterion, assessment, justification]
+            properties:
+              criterion: { $ref: "#/components/schemas/TriageCriterion" }
+              assessment:
+                { type: [string, "null"], enum: [pass, fail, not_applicable, null] }
+              justification: { type: array, items: { type: string } }
+        assessedByActorId: { type: string }
+        assessedAt: { type: string, format: date-time }
     EvaluationStandard:
       type: object
       required:

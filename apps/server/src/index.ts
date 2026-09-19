@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import {
   EvaluationService,
+  TriageService,
   DocumentService,
   EvidenceService,
   NotificationService,
@@ -37,6 +38,8 @@ import {
   PostgresProjectStore,
   PostgresEvaluationStandardStore,
   PostgresEvaluationStore,
+  PostgresTriageStandardStore,
+  PostgresTriageStore,
   PostgresTenantStore,
   PostgresDocumentStore,
   PostgresDocumentProjectAccess,
@@ -126,6 +129,15 @@ const evaluations = new EvaluationService({
   ids: { next: randomUUID },
   clock: { now: () => new Date() },
 });
+const triage = new TriageService({
+  standards: new PostgresTriageStandardStore(pool),
+  triages: new PostgresTriageStore(pool),
+  initiatives: new PostgresInitiativeStore(pool),
+  audit: new PostgresInitiativeAuditStore(pool),
+  tenancy: new PostgresTenantStore(pool),
+  ids: { next: randomUUID },
+  clock: { now: () => new Date() },
+});
 const documentStore = new PostgresDocumentStore(pool);
 const projects = new ProjectService({
   projects: new PostgresProjectStore(pool),
@@ -212,6 +224,7 @@ const app = await buildServer({
   supportAccess,
   initiatives,
   evaluations,
+  triage,
   projects,
   documents,
   evidence,

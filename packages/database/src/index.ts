@@ -10,6 +10,8 @@ import type {
   InitiativeAuditEvent,
   InitiativeAuditStore,
   InitiativeStore,
+  TriageStandardStore,
+  TriageStore,
   EvaluationStandardStore,
   EvaluationStore,
   ProjectAuditEvent,
@@ -72,6 +74,8 @@ import type {
   InitiativePriority,
   InitiativeStatus,
   EvaluationStandard,
+  TriageStandard,
+  InitiativeTriage,
   InitiativeEvaluation,
   EvaluationReviewerAssignment,
   InitiativeDecision,
@@ -2850,6 +2854,117 @@ export class PostgresEvaluationStandardStore implements EvaluationStandardStore 
   }
 }
 
+export class PostgresTriageStandardStore implements TriageStandardStore {
+  constructor(private readonly pool: Pool) {}
+  async create(standard: TriageStandard): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO triage_standards (id, organization_id, name, version, criteria, is_active, published_at, published_by_actor_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        standard.id,
+        standard.organizationId,
+        standard.name,
+        standard.version,
+        asJson(standard.criteria),
+        standard.isActive,
+        standard.publishedAt,
+        standard.publishedByActorId,
+      ],
+    );
+  }
+  async findById(standardId: string): Promise<TriageStandard | null> {
+    const result = await this.pool.query<TriageStandardRow>(
+      `SELECT id, organization_id, name, version, criteria, is_active, published_at, published_by_actor_id
+       FROM triage_standards WHERE id = $1`,
+      [standardId],
+    );
+    return result.rows[0] ? toTriageStandard(result.rows[0]) : null;
+  }
+  async list(input: {
+    organizationId: string;
+  }): Promise<readonly TriageStandard[]> {
+    const result = await this.pool.query<TriageStandardRow>(
+      `SELECT id, organization_id, name, version, criteria, is_active, published_at, published_by_actor_id
+       FROM triage_standards WHERE organization_id = $1
+       ORDER BY is_active DESC, name, version DESC`,
+      [input.organizationId],
+    );
+    return result.rows.map(toTriageStandard);
+  }
+  async activate(input: {
+    organizationId: string;
+    standardId: string;
+    adoptionId: string;
+    adoptedByActorId: string;
+    adoptedAt: Date;
+  }): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        "UPDATE triage_standards SET is_active = FALSE WHERE organization_id = $1 AND is_active",
+        [input.organizationId],
+      );
+      const updated = await client.query(
+        "UPDATE triage_standards SET is_active = TRUE WHERE id = $1 AND organization_id = $2",
+        [input.standardId, input.organizationId],
+      );
+      if (updated.rowCount !== 1) throw new Error("Triage standard not found");
+      await client.query(
+        `INSERT INTO triage_standard_adoptions
+         (id, standard_id, adopted_by_actor_id, adopted_at)
+         VALUES ($1, $2, $3, $4)`,
+        [
+          input.adoptionId,
+          input.standardId,
+          input.adoptedByActorId,
+          input.adoptedAt,
+        ],
+      );
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+}
+
+export class PostgresTriageStore implements TriageStore {
+  constructor(private readonly pool: Pool) {}
+  async create(triage: InitiativeTriage): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO initiative_triages
+       (id, organization_id, workspace_id, initiative_id, initiative_version,
+        standard_id, standard_version, criteria, assessed_by_actor_id, assessed_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      [
+        triage.id,
+        triage.organizationId,
+        triage.workspaceId,
+        triage.initiativeId,
+        triage.initiativeVersion,
+        triage.standardId,
+        triage.standardVersion,
+        asJson(triage.criteria),
+        triage.assessedByActorId,
+        triage.assessedAt,
+      ],
+    );
+  }
+  async findById(triageId: string): Promise<InitiativeTriage | null> {
+    const result = await this.pool.query<InitiativeTriageRow>(
+      `SELECT id, organization_id, workspace_id, initiative_id,
+              initiative_version, standard_id, standard_version, criteria,
+              assessed_by_actor_id, assessed_at
+       FROM initiative_triages WHERE id = $1`,
+      [triageId],
+    );
+    return result.rows[0] ? toInitiativeTriage(result.rows[0]) : null;
+  }
+}
+
 export class PostgresEvaluationStore implements EvaluationStore {
   constructor(private readonly pool: Pool) {}
   async createReviewerAssignment(
@@ -4327,6 +4442,28 @@ type EvaluationStandardRow = {
   published_at: Date;
   published_by_actor_id: string;
 };
+type TriageStandardRow = {
+  id: string;
+  organization_id: string;
+  name: string;
+  version: number;
+  criteria: TriageStandard["criteria"];
+  is_active: boolean;
+  published_at: Date;
+  published_by_actor_id: string;
+};
+type InitiativeTriageRow = {
+  id: string;
+  organization_id: string;
+  workspace_id: string;
+  initiative_id: string;
+  initiative_version: number;
+  standard_id: string;
+  standard_version: number;
+  criteria: InitiativeTriage["criteria"];
+  assessed_by_actor_id: string;
+  assessed_at: Date;
+};
 type InitiativeEvaluationRow = {
   id: string;
   organization_id: string;
@@ -4570,6 +4707,32 @@ function toEvaluationStandard(row: EvaluationStandardRow): EvaluationStandard {
     isActive: row.is_active,
     publishedAt: row.published_at,
     publishedByActorId: row.published_by_actor_id,
+  };
+}
+function toTriageStandard(row: TriageStandardRow): TriageStandard {
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    name: row.name,
+    version: row.version,
+    criteria: row.criteria,
+    isActive: row.is_active,
+    publishedAt: row.published_at,
+    publishedByActorId: row.published_by_actor_id,
+  };
+}
+function toInitiativeTriage(row: InitiativeTriageRow): InitiativeTriage {
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    workspaceId: row.workspace_id,
+    initiativeId: row.initiative_id,
+    initiativeVersion: row.initiative_version,
+    standardId: row.standard_id,
+    standardVersion: row.standard_version,
+    criteria: row.criteria,
+    assessedByActorId: row.assessed_by_actor_id,
+    assessedAt: row.assessed_at,
   };
 }
 function toInitiativeEvaluation(

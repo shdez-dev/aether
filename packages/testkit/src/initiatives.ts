@@ -1,4 +1,6 @@
 import type {
+  TriageStandardStore,
+  TriageStore,
   EvaluationStandardStore,
   EvaluationStore,
   AuditEvent,
@@ -10,6 +12,8 @@ import type {
 } from "@aether/application";
 import type {
   EvaluationStandard,
+  InitiativeTriage,
+  TriageStandard,
   Initiative,
   InitiativeDecision,
   InitiativeEvaluation,
@@ -247,5 +251,59 @@ export class InMemoryEvaluationStore implements EvaluationStore {
         condition.id === input.condition.id ? input.condition : condition,
       ),
     });
+  }
+}
+
+export class InMemoryTriageStandardStore implements TriageStandardStore {
+  readonly standards = new Map<string, TriageStandard>();
+  readonly adoptions: {
+    id: string;
+    standardId: string;
+    adoptedByActorId: string;
+    adoptedAt: Date;
+  }[] = [];
+  async create(standard: TriageStandard): Promise<void> {
+    this.standards.set(standard.id, standard);
+  }
+  async findById(standardId: string): Promise<TriageStandard | null> {
+    return this.standards.get(standardId) ?? null;
+  }
+  async list(input: {
+    organizationId: string;
+  }): Promise<readonly TriageStandard[]> {
+    return [...this.standards.values()].filter(
+      (standard) => standard.organizationId === input.organizationId,
+    );
+  }
+  async activate(input: {
+    organizationId: string;
+    standardId: string;
+    adoptionId: string;
+    adoptedByActorId: string;
+    adoptedAt: Date;
+  }): Promise<void> {
+    for (const [id, standard] of this.standards) {
+      if (standard.organizationId === input.organizationId)
+        this.standards.set(id, {
+          ...standard,
+          isActive: id === input.standardId,
+        });
+    }
+    this.adoptions.push({
+      id: input.adoptionId,
+      standardId: input.standardId,
+      adoptedByActorId: input.adoptedByActorId,
+      adoptedAt: input.adoptedAt,
+    });
+  }
+}
+
+export class InMemoryTriageStore implements TriageStore {
+  readonly triages = new Map<string, InitiativeTriage>();
+  async create(triage: InitiativeTriage): Promise<void> {
+    this.triages.set(triage.id, triage);
+  }
+  async findById(triageId: string): Promise<InitiativeTriage | null> {
+    return this.triages.get(triageId) ?? null;
   }
 }

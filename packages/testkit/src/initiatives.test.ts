@@ -4,6 +4,7 @@ import {
   AccessDeniedError,
   EvaluationConflictOfInterestError,
   EvaluationService,
+  TriageService,
   InitiativeService,
   InitiativeVersionConflictError,
   NotificationService,
@@ -16,11 +17,129 @@ import {
   InMemoryEvaluationStandardStore,
   InMemoryEvaluationStore,
   InMemoryInitiativeStore,
+  InMemoryTriageStandardStore,
+  InMemoryTriageStore,
 } from "./initiatives.js";
 import { InMemoryNotificationStore } from "./notifications.js";
 import { InMemoryTenantStore } from "./tenancy.js";
 
 describe("initiative vertical slice", () => {
+  it("publica, adopta y aplica un triage versionado antes de la evaluación formal", async () => {
+    const ids = { next: () => crypto.randomUUID() };
+    const clock = { now: () => new Date("2026-09-19T00:00:00.000Z") };
+    const tenantStore = new InMemoryTenantStore();
+    const tenants = new TenantService({
+      store: tenantStore,
+      ids,
+      tokens: {
+        generate: () => "x".repeat(43),
+        hash: (value: string) => `hash:${value}`,
+      },
+      clock,
+    });
+    const organization = await tenants.createOrganization({
+      actorId: "owner",
+      actorEmail: "owner@example.test",
+      name: "Triage Org",
+      timezone: "UTC",
+      locale: "es-CL",
+    });
+    const workspace = await tenants.createWorkspace({
+      actorId: "owner",
+      organizationId: organization.id,
+      name: "Ideas",
+      mode: "team",
+    });
+    const initiativesStore = new InMemoryInitiativeStore();
+    const audit = new InMemoryInitiativeAuditStore();
+    const initiatives = new InitiativeService({
+      store: initiativesStore,
+      audit,
+      tenancy: tenantStore,
+      ids,
+      clock,
+    });
+    const initiative = await initiatives.create({
+      actorId: "owner",
+      organizationId: organization.id,
+      workspaceId: workspace.id,
+      correlationId: ids.next(),
+      title: "Iniciativa triage",
+      problemStatement: "Problema",
+      expectedOutcome: "Resultado",
+      classification: "internal",
+      requestedPriority: "medium",
+    });
+    const presented = await initiatives.present({
+      actorId: "owner",
+      organizationId: organization.id,
+      initiativeId: initiative.id,
+      correlationId: ids.next(),
+      expectedVersion: initiative.version,
+    });
+    const standards = new InMemoryTriageStandardStore();
+    const triages = new InMemoryTriageStore();
+    const service = new TriageService({
+      standards,
+      triages,
+      initiatives: initiativesStore,
+      audit,
+      tenancy: tenantStore,
+      ids,
+      clock,
+    });
+    const criterionId = ids.next();
+    const standard = await service.publishStandard({
+      actorId: "owner",
+      organizationId: organization.id,
+      name: "Triage inicial",
+      version: 1,
+      criteria: [
+        {
+          id: criterionId,
+          code: "SCOPE",
+          name: "Alcance",
+          description: "Alcance verificable",
+          required: true,
+        },
+      ],
+    });
+    await service.activateStandard({
+      actorId: "owner",
+      organizationId: organization.id,
+      standardId: standard.id,
+    });
+    const triage = await service.triage({
+      actorId: "owner",
+      organizationId: organization.id,
+      initiativeId: initiative.id,
+      expectedVersion: presented.version,
+      standardId: standard.id,
+      results: [
+        {
+          criterionId,
+          assessment: "pass",
+          justification: ["El alcance está delimitado."],
+        },
+      ],
+      correlationId: ids.next(),
+    });
+    expect(triage).toMatchObject({
+      initiativeId: initiative.id,
+      initiativeVersion: presented.version,
+      standardId: standard.id,
+      standardVersion: 1,
+    });
+    expect(audit.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          eventType: "initiative.triaged.v1",
+          payload: expect.objectContaining({ triageId: triage.id }),
+        }),
+      ]),
+    );
+  });
+
   it("autoriza creador, reviewer y decision maker de forma explícita y auditable", async () => {
     let sequence = 0;
     const ids = {

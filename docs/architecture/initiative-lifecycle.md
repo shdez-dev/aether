@@ -28,10 +28,16 @@ draft -----------------> cancelled
 presented -------------> cancelled
 ```
 
+Mientras permanece `presented`, la iniciativa puede recibir un resultado de
+triage versionado; ese resultado no introduce un estado adicional ni muta la
+transición de la iniciativa.
+
 `approved`, `rejected` y `cancelled` son terminales. `returned` permite editar
 y presentar nuevamente; no se confunde con una aprobación pendiente.
 No existen estados de "aprobación pendiente", "proyecto" o equivalentes: la
-conversión a proyecto es una decisión posterior y explícita (ADR-0003).
+conversión a proyecto es una decisión posterior y explícita (ADR-0003). El
+triage es un resultado versionado previo a `under_review`, no un estado nuevo
+ni una evaluación formal.
 
 ## Responsabilidades explícitas
 

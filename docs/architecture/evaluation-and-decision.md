@@ -1,5 +1,27 @@
 # Evaluación y decisión institucional
 
+## Triage previo
+
+El triage es una etapa de intake separada de la evaluación formal. Un estándar
+de triage publicado contiene criterios con código, descripción y marca de
+obligatoriedad; sus versiones son inmutables y el `owner` adopta explícitamente
+una única versión activa por organización. Cada adopción queda registrada con
+actor y fecha.
+
+Una iniciativa `presented` puede recibir un resultado de triage contra el
+estándar activo. El resultado conserva la versión exacta de la iniciativa, el
+estándar y su versión, además del snapshot de cada criterio, resultado
+(`pass`, `fail` o `not_applicable`), justificación, actor y fecha. Los criterios
+obligatorios deben estar presentes y `not_applicable` exige una justificación
+no vacía. El triage no cambia por sí mismo el estado de la iniciativa ni crea
+una evaluación formal; ambos registros permanecen separados.
+
+PostgreSQL impone unicidad por iniciativa, versión de iniciativa, estándar y
+versión; valida organización, workspace y versiones al insertar; y bloquea la
+mutación de un estándar ya aplicado. Los comandos HTTP de publicación,
+adopción y triage aceptan `Idempotency-Key`, y el evento
+`initiative.triaged.v1` conserva la operación en la auditoría de la iniciativa.
+
 ## Estándar y cobertura
 
 Un estándar publicado contiene criterios con código, descripción y peso. El

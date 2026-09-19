@@ -15,6 +15,7 @@ import { ApiProblemSchema } from "@aether/contracts";
 import { parse } from "yaml";
 import {
   EvaluationService,
+  TriageService,
   AuditHistoryService,
   InitiativeService,
   DocumentService,
@@ -42,6 +43,8 @@ import {
   InMemoryDocumentObjectStore,
   InMemoryDocumentProjectAccess,
   InMemoryDocumentStore,
+  InMemoryTriageStandardStore,
+  InMemoryTriageStore,
 } from "@aether/testkit";
 
 import { buildServer, PublicHttpRoutes } from "./app.js";
@@ -1584,6 +1587,15 @@ describe("HTTP authentication boundary", () => {
       ids: { next: () => crypto.randomUUID() },
       clock: { now: () => new Date() },
     });
+    const triage = new TriageService({
+      standards: new InMemoryTriageStandardStore(),
+      triages: new InMemoryTriageStore(),
+      initiatives: initiativeStore,
+      audit: auditStore,
+      tenancy: tenancyStore,
+      ids: { next: () => crypto.randomUUID() },
+      clock: { now: () => new Date() },
+    });
     const authStore = new InMemoryAuthStore();
     const auth = new AuthService({
       store: authStore,
@@ -1638,6 +1650,7 @@ describe("HTTP authentication boundary", () => {
       tenants,
       initiatives,
       evaluations,
+      triage,
       projects: {} as ProjectService,
       idempotency: new InMemoryIdempotencyStore(),
       auditHistory,
@@ -2123,6 +2136,87 @@ describe("HTTP authentication boundary", () => {
       payload: { organizationId: organization.id },
     });
     expect(activated.statusCode).toBe(204);
+
+    const triageCriterionId = crypto.randomUUID();
+    const triageStandardResponse = await app.inject({
+      method: "POST",
+      url: "/v1/triage-standards",
+      headers: { ...headers, "idempotency-key": "publish-triage-standard" },
+      payload: {
+        organizationId: organization.id,
+        name: "Triage inicial",
+        version: 1,
+        criteria: [
+          {
+            id: triageCriterionId,
+            code: "SCOPE",
+            name: "Alcance",
+            description: "La iniciativa tiene alcance verificable.",
+            required: true,
+          },
+        ],
+      },
+    });
+    expect(triageStandardResponse.statusCode).toBe(201);
+    const triageStandard = triageStandardResponse.json() as { id: string };
+    const triageActivation = await app.inject({
+      method: "POST",
+      url: `/v1/triage-standards/${triageStandard.id}/activate`,
+      headers: { ...headers, "idempotency-key": "activate-triage-standard" },
+      payload: { organizationId: organization.id },
+    });
+    expect(triageActivation.statusCode).toBe(204);
+    const triageResponse = await app.inject({
+      method: "POST",
+      url: `/v1/initiatives/${created.id}/triage?organizationId=${organization.id}`,
+      headers: { ...headers, "idempotency-key": "triage-initiative" },
+      payload: {
+        expectedVersion: presented.version,
+        standardId: triageStandard.id,
+        results: [
+          {
+            criterionId: triageCriterionId,
+            assessment: "pass",
+            justification: ["El alcance está delimitado."],
+          },
+        ],
+      },
+    });
+    expect(triageResponse.statusCode).toBe(201);
+    const triageResult = triageResponse.json() as {
+      id: string;
+      initiativeVersion: number;
+      standardVersion: number;
+    };
+    expect(triageResult).toMatchObject({
+      initiativeVersion: presented.version,
+      standardVersion: 1,
+    });
+    const triageReplay = await app.inject({
+      method: "POST",
+      url: `/v1/initiatives/${created.id}/triage?organizationId=${organization.id}`,
+      headers: { ...headers, "idempotency-key": "triage-initiative" },
+      payload: {
+        expectedVersion: presented.version,
+        standardId: triageStandard.id,
+        results: [
+          {
+            criterionId: triageCriterionId,
+            assessment: "pass",
+            justification: ["El alcance está delimitado."],
+          },
+        ],
+      },
+    });
+    expect(triageReplay.statusCode).toBe(201);
+    expect(triageReplay.headers["idempotent-replayed"]).toBe("true");
+    const triageGet = await app.inject({
+      method: "GET",
+      url: `/v1/triage-results/${triageResult.id}?organizationId=${organization.id}`,
+      headers: { cookie: headers.cookie },
+    });
+    expect(triageGet.statusCode).toBe(200);
+    expect(triageGet.json()).toMatchObject({ id: triageResult.id });
 
     const reviewerInvitation = await tenants.invite({
       actorId: authenticatedActorId,

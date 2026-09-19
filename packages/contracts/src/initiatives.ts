@@ -131,6 +131,35 @@ export const PublishEvaluationStandardRequestSchema = z.object({
   version: z.number().int().positive(),
   criteria: z.array(EvaluationCriterionInputSchema).min(1).max(100),
 });
+export const TriageCriterionInputSchema = z.object({
+  id: UuidSchema,
+  code: z.string().min(1).max(64),
+  name: NonEmptyTextSchema.max(255),
+  description: NonEmptyTextSchema.max(2_000),
+  required: z.boolean(),
+});
+export const PublishTriageStandardRequestSchema = z.object({
+  organizationId: UuidSchema,
+  name: NonEmptyTextSchema.max(255),
+  version: z.number().int().positive(),
+  criteria: z.array(TriageCriterionInputSchema).min(1).max(100),
+});
+export const ActivateTriageStandardRequestSchema = z.object({
+  organizationId: UuidSchema,
+});
+export const TriageInitiativeRequestSchema = z.object({
+  expectedVersion: z.number().int().nonnegative(),
+  standardId: UuidSchema,
+  results: z
+    .array(
+      z.object({
+        criterionId: UuidSchema,
+        assessment: z.enum(["pass", "fail", "not_applicable"]).nullable(),
+        justification: z.array(NonEmptyTextSchema.max(2_000)).max(50),
+      }),
+    )
+    .max(100),
+});
 export const ActivateEvaluationStandardRequestSchema = z.object({
   organizationId: UuidSchema,
 });
@@ -222,6 +251,34 @@ export const EvaluationStandardResponseSchema = z.object({
   isActive: z.boolean(),
   publishedAt: z.string().datetime(),
   publishedByActorId: z.string(),
+});
+export const TriageStandardResponseSchema = z.object({
+  id: UuidSchema,
+  organizationId: UuidSchema,
+  name: z.string(),
+  version: z.number().int().positive(),
+  criteria: z.array(TriageCriterionInputSchema),
+  isActive: z.boolean(),
+  publishedAt: z.string().datetime(),
+  publishedByActorId: z.string(),
+});
+export const InitiativeTriageResponseSchema = z.object({
+  id: UuidSchema,
+  organizationId: UuidSchema,
+  workspaceId: UuidSchema,
+  initiativeId: UuidSchema,
+  initiativeVersion: z.number().int().nonnegative(),
+  standardId: UuidSchema,
+  standardVersion: z.number().int().positive(),
+  criteria: z.array(
+    z.object({
+      criterion: TriageCriterionInputSchema,
+      assessment: z.enum(["pass", "fail", "not_applicable"]).nullable(),
+      justification: z.array(z.string()),
+    }),
+  ),
+  assessedByActorId: z.string(),
+  assessedAt: z.string().datetime(),
 });
 export const InitiativeEvaluationResponseSchema = z.object({
   id: UuidSchema,
@@ -373,10 +430,22 @@ export type FulfillDecisionConditionRequest = z.infer<
 export type PublishEvaluationStandardRequest = z.infer<
   typeof PublishEvaluationStandardRequestSchema
 >;
+export type PublishTriageStandardRequest = z.infer<
+  typeof PublishTriageStandardRequestSchema
+>;
+export type TriageInitiativeRequest = z.infer<
+  typeof TriageInitiativeRequestSchema
+>;
 export type InitiativeResponse = z.infer<typeof InitiativeResponseSchema>;
 export type InitiativeAuditEvent = z.infer<typeof InitiativeAuditEventSchema>;
 export type EvaluationStandardResponse = z.infer<
   typeof EvaluationStandardResponseSchema
+>;
+export type TriageStandardResponse = z.infer<
+  typeof TriageStandardResponseSchema
+>;
+export type InitiativeTriageResponse = z.infer<
+  typeof InitiativeTriageResponseSchema
 >;
 export type InitiativeEvaluationResponse = z.infer<
   typeof InitiativeEvaluationResponseSchema
