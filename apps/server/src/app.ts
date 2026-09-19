@@ -1435,7 +1435,7 @@ export async function buildServer(input: {
         input.config,
       );
       assertRecentAuthentication(session, input.config);
-      const { organizationId, actorId } = z
+      const params = z
         .object({
           organizationId: z.string().uuid(),
           actorId: z.string().min(1).max(255),
@@ -1444,14 +1444,24 @@ export async function buildServer(input: {
       const body = ReassignMemberResponsibilitiesRequestSchema.parse(
         request.body,
       );
-      await input.tenants.reassignMemberResponsibilities({
+      return respondIdempotentlyWhenRequested({
+        request,
+        reply,
+        store: input.idempotency,
         actorId: session.actorId,
-        organizationId,
-        targetActorId: actorId,
-        replacementActorId: body.replacementActorId,
-        correlationId: correlationId(reply),
+        operation: `organization.membership.reassign:${params.organizationId}:${params.actorId}`,
+        requestPayload: { params, body },
+        execute: async () => {
+          await input.tenants.reassignMemberResponsibilities({
+            actorId: session.actorId,
+            organizationId: params.organizationId,
+            targetActorId: params.actorId,
+            replacementActorId: body.replacementActorId,
+            correlationId: correlationId(reply),
+          });
+          return { statusCode: 204, body: {} };
+        },
       });
-      return reply.code(204).send();
     },
   );
   app.post("/v1/documents/:documentId/replacements", async (request, reply) => {

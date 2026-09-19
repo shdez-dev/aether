@@ -1306,6 +1306,31 @@ describe("HTTP authentication boundary", () => {
     expect(staleReassignment.json()).toMatchObject({
       code: "RECENT_AUTH_REQUIRED",
     });
+    const reassignment = await app.inject({
+      method: "POST",
+      url: `/v1/organizations/${organization.json().id}/members/suspended-member/reassignments`,
+      headers: {
+        origin: config.webOrigin,
+        "x-csrf-token": csrf,
+        "idempotency-key": "reassign-member-responsibilities-key",
+        cookie: `aether_session=${session}; aether_csrf=${csrf}`,
+      },
+      payload: { replacementActorId: "next-owner" },
+    });
+    expect(reassignment.statusCode).toBe(204);
+    const replayedReassignment = await app.inject({
+      method: "POST",
+      url: `/v1/organizations/${organization.json().id}/members/suspended-member/reassignments`,
+      headers: {
+        origin: config.webOrigin,
+        "x-csrf-token": csrf,
+        "idempotency-key": "reassign-member-responsibilities-key",
+        cookie: `aether_session=${session}; aether_csrf=${csrf}`,
+      },
+      payload: { replacementActorId: "next-owner" },
+    });
+    expect(replayedReassignment.statusCode).toBe(204);
+    expect(replayedReassignment.headers["idempotent-replayed"]).toBe("true");
     const staleSuspension = await app.inject({
       method: "PATCH",
       url: `/v1/organizations/${organization.json().id}/members/suspended-member/status`,

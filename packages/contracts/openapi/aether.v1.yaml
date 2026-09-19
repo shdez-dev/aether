@@ -297,6 +297,7 @@ paths:
       parameters:
         - $ref: "#/components/parameters/CsrfToken"
         - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
