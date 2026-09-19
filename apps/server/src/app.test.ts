@@ -2647,6 +2647,96 @@ describe("HTTP authentication boundary", () => {
   });
 });
 
+describe("Project conversion idempotency", () => {
+  it("rechaza una misma clave con un payload de conversión distinto", async () => {
+    const authStore = new InMemoryAuthStore();
+    const auth = new AuthService({
+      store: authStore,
+      cipher: createAesGcmCipher(config.sessionEncryptionKey),
+      oidc,
+      issuer: config.oidcIssuerUrl,
+      sessionTtlSeconds: config.sessionTtlSeconds,
+      sessionRenewalWindowSeconds: config.sessionRenewalWindowSeconds,
+    });
+    const organizationId = crypto.randomUUID();
+    const workspaceId = crypto.randomUUID();
+    const initiativeId = crypto.randomUUID();
+    const decisionId = crypto.randomUUID();
+    const calls: unknown[] = [];
+    const app = await buildServer({
+      config,
+      auth,
+      tenants: {} as TenantService,
+      initiatives: {} as InitiativeService,
+      evaluations: {} as EvaluationService,
+      projects: {
+        async createFromInitiative(input) {
+          calls.push(input);
+          return {
+            id: crypto.randomUUID(),
+            organizationId,
+            workspaceId,
+            sourceInitiativeId: initiativeId,
+            sourceDecisionId: decisionId,
+            name: input.name,
+            sponsorActorId: input.sponsorActorId,
+            leadActorId: input.leadActorId,
+            participants: input.participants,
+            status: "planned",
+            version: 0,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          };
+        },
+      } as ProjectService,
+      idempotency: new InMemoryIdempotencyStore(),
+    });
+    await createAuthenticatedSession(authStore, {
+      token: "project-idempotency-session",
+      actorId: "owner",
+      actorEmail: "owner@example.test",
+    });
+    const headers = {
+      origin: config.webOrigin,
+      "x-csrf-token": "project-idempotency-csrf",
+      "idempotency-key": "project-conversion-key",
+      cookie:
+        "aether_session=project-idempotency-session; aether_csrf=project-idempotency-csrf",
+    };
+    const payload = {
+      organizationId,
+      initiativeId,
+      decisionId,
+      name: "Proyecto inicial",
+      sponsorActorId: "sponsor",
+      leadActorId: "lead",
+      participants: [
+        { actorId: "sponsor", role: "sponsor" as const },
+        { actorId: "lead", role: "lead" as const },
+      ],
+    };
+    const created = await app.inject({
+      method: "POST",
+      url: "/v1/projects",
+      headers,
+      payload,
+    });
+    expect(created.statusCode).toBe(201);
+
+    const conflicting = await app.inject({
+      method: "POST",
+      url: "/v1/projects",
+      headers,
+      payload: { ...payload, name: "Proyecto alterado" },
+    });
+    expect(conflicting.statusCode).toBe(409);
+    expect(conflicting.json()).toMatchObject({
+      code: "IDEMPOTENCY_KEY_REUSED",
+    });
+    expect(calls).toHaveLength(1);
+  });
+});
+
 describe("document relocation endpoint", () => {
   it("requires recent authentication and exposes only a same-workspace relocation", async () => {
     const ids = { next: () => crypto.randomUUID() };

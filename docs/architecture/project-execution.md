@@ -23,6 +23,11 @@ devuelve el proyecto ya persistido, sin un segundo evento ni auditoría. Si la
 solicitud concurrente cambia decisión, nombre, sponsor, líder o participantes,
 se rechaza con conflicto en vez de reinterpretar el proyecto existente.
 
+La conversión también usa `Idempotency-Key`, acotada al actor y a la iniciativa.
+Un reintento con el mismo payload devuelve la respuesta original; reutilizar la
+misma clave con un payload distinto devuelve `409 IDEMPOTENCY_KEY_REUSED` y no
+ejecuta una segunda conversión.
+
 ## Ejecución
 
 Los estados son `planned`, `active`, `blocked`, `completed` y `cancelled`.
