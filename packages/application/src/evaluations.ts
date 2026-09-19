@@ -262,10 +262,10 @@ export class EvaluationService {
       this.dependencies.tenancy,
       initiative.workspaceId,
     );
-    if (initiative.status !== "under_review")
-      throw new EvaluationDomainError("EVALUATION_INCOMPLETE");
     if (initiative.version !== input.expectedVersion)
       throw new InitiativeVersionConflictError();
+    if (initiative.status !== "under_review")
+      throw new EvaluationDomainError("EVALUATION_INCOMPLETE");
     const now = this.dependencies.clock.now();
     for (const condition of input.conditions ?? [])
       await this.assertOrganizationMember(

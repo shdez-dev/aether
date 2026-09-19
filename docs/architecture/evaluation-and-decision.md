@@ -9,6 +9,15 @@ identificador, versión y snapshot de cada criterio junto a la cobertura:
 criterios totales, evaluados y porcentaje. Por ello una activación posterior no
 puede modificar ni reinterpretar una evaluación existente.
 
+Una vez aplicado, PostgreSQL bloquea cambios en la identidad, versión,
+criterios y metadatos de publicación del estándar. El estado de activación se
+mantiene independiente para permitir seleccionar una nueva referencia sin
+alterar versiones que ya sustentan evaluaciones.
+
+En decisiones concurrentes, una versión esperada desactualizada se informa
+como conflicto antes de validar el estado de revisión. Así el cliente puede
+recargar de forma determinista la decisión que ya avanzó la iniciativa.
+
 ## Revisión
 
 Un `owner` o `admin` organizacional revisa una iniciativa `presented`. Cada
