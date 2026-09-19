@@ -20,6 +20,11 @@ Solo el líder, un `admin` o el `owner` cambian el estado o añaden hitos y
 próximas acciones. Un hito registra título y vencimiento; una próxima acción
 registra responsable y vencimiento.
 
+La designación histórica de líder no sobrevive a una suspensión o revocación:
+cada operación de ejecución vuelve a resolver la membresía organizacional
+activa. Los grants temporales siguen su propio flujo de autorización y también
+deben denegarse si la revocación aplicable los invalida.
+
 Creación, cambios de estado, hitos y acciones producen eventos de auditoría con
 actor, correlación y fecha. La migración `0005_projects_and_execution.sql`
 persiste el agregado, ejecución y bitácora.

@@ -504,7 +504,11 @@ export class ProjectService {
       actorId,
       organizationId: project.organizationId,
     });
-    if (actorId === project.leadActorId || role === "owner" || role === "admin")
+    if (
+      (actorId === project.leadActorId && role !== null) ||
+      role === "owner" ||
+      role === "admin"
+    )
       return;
     if (
       await this.dependencies.accessGrants?.authorize({

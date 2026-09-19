@@ -1635,7 +1635,7 @@ describe.sequential("PostgreSQL integration", () => {
       const tenantService = new TenantService({
         store: tenantStore,
         ids,
-        tokens: { generate: () => "token", hash: (value) => `hash:${value}` },
+        tokens: { generate: randomUUID, hash: (value) => `hash:${value}` },
         clock,
       });
       const initiativeService = new InitiativeService({
