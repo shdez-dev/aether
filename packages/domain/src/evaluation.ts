@@ -124,6 +124,14 @@ export function evaluateInitiative(input: {
     )
   )
     throw new EvaluationDomainError("INVALID_EVALUATION_CRITERIA");
+  if (
+    input.results.some(
+      (result) =>
+        result.assessment === "not_applicable" &&
+        !result.evidence.some((item) => item.trim().length > 0),
+    )
+  )
+    throw new EvaluationDomainError("NOT_APPLICABLE_REQUIRES_JUSTIFICATION");
   const criteria = input.standard.criteria.map((criterion) => {
     const result = resultById.get(criterion.id);
     return {
@@ -270,6 +278,7 @@ export class EvaluationDomainError extends Error {
       | "DUPLICATE_CRITERION_CODE"
       | "INVALID_CRITERION_WEIGHT"
       | "INVALID_EVALUATION_CRITERIA"
+      | "NOT_APPLICABLE_REQUIRES_JUSTIFICATION"
       | "EVALUATION_DOES_NOT_MATCH_INITIATIVE"
       | "EVALUATION_INCOMPLETE"
       | "DECISION_CONDITION_NOT_PENDING"

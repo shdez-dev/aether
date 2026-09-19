@@ -150,6 +150,30 @@ describe("Evaluation and decision", () => {
     });
   });
 
+  it("exige justificación para declarar un criterio no aplicable", () => {
+    expect(() =>
+      evaluateInitiative({
+        id: "00000000-0000-4000-8000-000000000021",
+        organizationId: standard.organizationId,
+        workspaceId: "00000000-0000-4000-8000-000000000014",
+        initiativeId: "00000000-0000-4000-8000-000000000015",
+        initiativeVersion: 4,
+        standard,
+        results: [
+          {
+            criterionId: standard.criteria[0]!.id,
+            assessment: "not_applicable",
+            evidence: ["  "],
+          },
+        ],
+        evaluatedByActorId: "reviewer",
+        evaluatedAt: now,
+      }),
+    ).toThrow(
+      new EvaluationDomainError("NOT_APPLICABLE_REQUIRES_JUSTIFICATION"),
+    );
+  });
+
   it("permite devolución y cancelación como transiciones explícitas", () => {
     const initiative = createInitiative({
       id: "00000000-0000-4000-8000-000000000020",

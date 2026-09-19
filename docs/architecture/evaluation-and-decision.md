@@ -49,8 +49,9 @@ recargar de forma determinista la decisión que ya avanzó la iniciativa.
 
 Un `owner` o `admin` organizacional revisa una iniciativa `presented`. Cada
 resultado registra un criterio, valoración (`met`, `not_met` o
-`not_applicable`) y evidencia. La revisión crea una evaluación inmutable y
-mueve la iniciativa a `under_review`.
+`not_applicable`) y evidencia. Declarar `not_applicable` exige una evidencia no
+vacía que justifique la exclusión del denominador. La revisión crea una
+evaluación inmutable y mueve la iniciativa a `under_review`.
 
 ## Decisión
 
