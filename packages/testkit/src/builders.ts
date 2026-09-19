@@ -44,6 +44,7 @@ export function initiativeDraftBuilder(
     expectedOutcome:
       "Reducir el tiempo mediano de espera en un piloto verificable.",
     classification: "internal",
+    requestedPriority: "medium",
     ...overrides,
   };
 }

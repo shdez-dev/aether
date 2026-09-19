@@ -6,6 +6,14 @@ Una iniciativa describe una necesidad que la institución puede evaluar: título
 problema, resultado esperado, clasificación, organización y workspace. El
 agregado conserva quién la creó, versión optimista y sus marcas de tiempo.
 
+La prioridad solicitada (`low`, `medium` o `high`) se registra al crear la
+iniciativa y conserva la urgencia expresada por quien la propone. La prioridad
+operativa es independiente, inicialmente nula y sólo puede fijarla o cambiarla
+un `owner` o `admin` de organización. Cada cambio operativo exige versión,
+queda auditado y no altera la solicitud original. Los registros previos a esta
+capacidad conservan prioridad solicitada nula, en vez de inventar un dato
+histórico.
+
 El workspace y la organización siempre se validan juntos; una iniciativa no
 puede leerse ni modificarse desde otro contexto.
 

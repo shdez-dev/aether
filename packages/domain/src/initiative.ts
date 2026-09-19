@@ -9,6 +9,8 @@ export const InitiativeStatuses = [
 ] as const;
 export type InitiativeStatus = (typeof InitiativeStatuses)[number];
 export type InitiativeClassification = "internal" | "confidential";
+export const InitiativePriorities = ["low", "medium", "high"] as const;
+export type InitiativePriority = (typeof InitiativePriorities)[number];
 
 export type Initiative = Readonly<{
   id: string;
@@ -19,6 +21,10 @@ export type Initiative = Readonly<{
   problemStatement: string;
   expectedOutcome: string;
   classification: InitiativeClassification;
+  /** La urgencia declarada por quien plantea la iniciativa; no la modifica gestión. */
+  requestedPriority: InitiativePriority | null;
+  /** Priorización institucional independiente de la solicitud original. */
+  operationalPriority: InitiativePriority | null;
   status: InitiativeStatus;
   version: number;
   createdAt: Date;
@@ -72,6 +78,21 @@ export function transitionInitiative(
   return {
     ...initiative,
     status: target,
+    version: initiative.version + 1,
+    updatedAt,
+  };
+}
+
+export function setInitiativeOperationalPriority(
+  initiative: Initiative,
+  operationalPriority: InitiativePriority,
+  updatedAt: Date,
+): Initiative {
+  if (["approved", "rejected", "cancelled"].includes(initiative.status))
+    throw new InitiativeDomainError("INITIATIVE_NOT_EDITABLE");
+  return {
+    ...initiative,
+    operationalPriority,
     version: initiative.version + 1,
     updatedAt,
   };

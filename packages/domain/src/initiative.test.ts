@@ -17,6 +17,8 @@ const draft = createInitiative({
   problemStatement: "Problema",
   expectedOutcome: "Resultado",
   classification: "internal",
+  requestedPriority: "medium",
+  operationalPriority: null,
   createdAt,
   updatedAt: createdAt,
 });

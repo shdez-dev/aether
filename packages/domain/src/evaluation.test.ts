@@ -186,6 +186,8 @@ describe("Evaluation and decision", () => {
       problemStatement: "Problema",
       expectedOutcome: "Resultado",
       classification: "internal",
+      requestedPriority: "medium",
+      operationalPriority: null,
       createdAt: now,
       updatedAt: now,
     });

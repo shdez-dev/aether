@@ -1953,6 +1953,7 @@ describe("HTTP authentication boundary", () => {
         problemStatement: "La atención tarda demasiado.",
         expectedOutcome: "Reducir la mediana de espera en el piloto.",
         classification: "internal",
+        requestedPriority: "high",
       },
     });
     expect(createdResponse.statusCode).toBe(201);
@@ -1968,6 +1969,7 @@ describe("HTTP authentication boundary", () => {
         problemStatement: "La atención tarda demasiado.",
         expectedOutcome: "Reducir la mediana de espera en el piloto.",
         classification: "internal",
+        requestedPriority: "high",
       },
     });
     expect(replayedCreate.statusCode).toBe(201);
@@ -1984,13 +1986,35 @@ describe("HTTP authentication boundary", () => {
         problemStatement: "Otro problema.",
         expectedOutcome: "Otro resultado.",
         classification: "internal",
+        requestedPriority: "high",
       },
     });
     expect(reusedKey.statusCode).toBe(409);
     expect(reusedKey.json()).toMatchObject({ code: "IDEMPOTENCY_KEY_REUSED" });
 
+    const priorityResponse = await app.inject({
+      method: "POST",
+      url: `/v1/initiatives/${created.id}/operational-priority`,
+      headers: { ...headers, "idempotency-key": crypto.randomUUID() },
+      payload: {
+        organizationId: organization.id,
+        expectedVersion: created.version,
+        operationalPriority: "high",
+      },
+    });
+    expect(priorityResponse.statusCode).toBe(200);
+    const prioritized = priorityResponse.json() as {
+      requestedPriority: string;
+      operationalPriority: string | null;
+      version: number;
+    };
+    expect(prioritized).toMatchObject({
+      requestedPriority: "high",
+      operationalPriority: "high",
+    });
+
     const concurrentEditPayload = {
-      expectedVersion: created.version,
+      expectedVersion: prioritized.version,
       title: "Reducir tiempos de espera en atención",
       problemStatement: "La atención tarda demasiado.",
       expectedOutcome: "Reducir la mediana de espera en el piloto.",

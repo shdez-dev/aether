@@ -11,6 +11,7 @@ export const InitiativeStatusSchema = z.enum([
   "rejected",
   "cancelled",
 ]);
+export const InitiativePrioritySchema = z.enum(["low", "medium", "high"]);
 
 export const CreateInitiativeDraftRequestSchema = z.object({
   organizationId: UuidSchema,
@@ -19,6 +20,13 @@ export const CreateInitiativeDraftRequestSchema = z.object({
   problemStatement: NonEmptyTextSchema.max(10_000),
   expectedOutcome: NonEmptyTextSchema.max(10_000),
   classification: z.enum(["internal", "confidential"]),
+  requestedPriority: InitiativePrioritySchema,
+});
+
+export const SetInitiativeOperationalPriorityRequestSchema = z.object({
+  organizationId: UuidSchema,
+  expectedVersion: z.number().int().nonnegative(),
+  operationalPriority: InitiativePrioritySchema,
 });
 
 export const SubmitInitiativeRequestSchema = z.object({
@@ -183,6 +191,8 @@ export const InitiativeResponseSchema = z.object({
   problemStatement: z.string(),
   expectedOutcome: z.string(),
   classification: z.enum(["internal", "confidential"]),
+  requestedPriority: InitiativePrioritySchema.nullable(),
+  operationalPriority: InitiativePrioritySchema.nullable(),
   status: InitiativeStatusSchema,
   version: z.number().int().nonnegative(),
   createdAt: z.string().datetime(),
@@ -334,6 +344,9 @@ export type SubmitInitiativeRequest = z.infer<
 >;
 export type UpdateInitiativeRequest = z.infer<
   typeof UpdateInitiativeRequestSchema
+>;
+export type SetInitiativeOperationalPriorityRequest = z.infer<
+  typeof SetInitiativeOperationalPriorityRequestSchema
 >;
 export type StartReviewRequest = z.infer<typeof StartReviewRequestSchema>;
 export type AssignEvaluationReviewerRequest = z.infer<

@@ -94,6 +94,8 @@ describe("project conversion and execution", () => {
       problemStatement: "Problema",
       expectedOutcome: "Resultado",
       classification: "internal",
+      requestedPriority: "medium",
+      operationalPriority: null,
       createdAt: new Date(),
       updatedAt: new Date(),
     });

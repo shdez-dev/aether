@@ -99,6 +99,7 @@ describe("initiative vertical slice", () => {
       problemStatement: "Proceso lento",
       expectedOutcome: "Menos tiempo",
       classification: "internal",
+      requestedPriority: "high",
     });
     const edited = await initiatives.edit({
       actorId: "author",
@@ -337,6 +338,7 @@ describe("initiative vertical slice", () => {
       problemStatement: "La evidencia de soporte está incompleta.",
       expectedOutcome: "Completar la revisión antes de decidir.",
       classification: "internal",
+      requestedPriority: "medium",
     });
     const annulmentPresented = await initiatives.present({
       actorId: "author",
@@ -425,6 +427,7 @@ describe("initiative vertical slice", () => {
       problemStatement: "La abstención requiere intervención de gobierno.",
       expectedOutcome: "Definir el siguiente revisor institucional.",
       classification: "internal",
+      requestedPriority: "medium",
     });
     const escalationPresented = await initiatives.present({
       actorId: "author",
@@ -468,6 +471,7 @@ describe("initiative vertical slice", () => {
       problemStatement: "Falta completar observaciones del diagnóstico.",
       expectedOutcome: "Entregar una nueva versión en la fecha acordada.",
       classification: "internal",
+      requestedPriority: "medium",
     });
     const returnedPresented = await initiatives.present({
       actorId: "author",
@@ -526,6 +530,45 @@ describe("initiative vertical slice", () => {
     expect(returned).toMatchObject({
       outcome: "returned",
       nextReviewOn: "2026-10-15",
+    });
+    const returnedDetail = await initiatives.detail({
+      actorId: "owner",
+      organizationId: organization.id,
+      initiativeId: returnedDraft.id,
+    });
+    await expect(
+      initiatives.setOperationalPriority({
+        actorId: "author",
+        organizationId: organization.id,
+        initiativeId: returnedDraft.id,
+        correlationId: ids.next(),
+        expectedVersion: returnedDetail.initiative.version,
+        operationalPriority: "high",
+      }),
+    ).rejects.toBeInstanceOf(AccessDeniedError);
+    const reprioritized = await initiatives.setOperationalPriority({
+      actorId: "owner",
+      organizationId: organization.id,
+      initiativeId: returnedDraft.id,
+      correlationId: ids.next(),
+      expectedVersion: returnedDetail.initiative.version,
+      operationalPriority: "high",
+    });
+    expect(reprioritized).toMatchObject({
+      requestedPriority: "medium",
+      operationalPriority: "high",
+    });
+    expect(
+      (
+        await initiatives.auditTrail({
+          actorId: "owner",
+          organizationId: organization.id,
+          initiativeId: returnedDraft.id,
+        })
+      ).at(-1),
+    ).toMatchObject({
+      eventType: "initiative.operational_priority_set.v1",
+      payload: { operationalPriority: "high" },
     });
     await tenants.archiveWorkspace({
       actorId: "owner",

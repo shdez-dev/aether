@@ -7,9 +7,11 @@ import {
   editInitiative,
   isActionAllowed,
   transitionInitiative,
+  setInitiativeOperationalPriority,
   type Initiative,
   type InitiativeAction,
   type InitiativeClassification,
+  type InitiativePriority,
   type InitiativeStatus,
 } from "@aether/domain";
 
@@ -87,6 +89,7 @@ export class InitiativeService {
     problemStatement: string;
     expectedOutcome: string;
     classification: InitiativeClassification;
+    requestedPriority: InitiativePriority;
   }): Promise<Initiative> {
     await assertWorkspaceWritable(this.dependencies.tenancy, input.workspaceId);
     await this.assertCreateAllowed(
@@ -105,6 +108,8 @@ export class InitiativeService {
       problemStatement: input.problemStatement,
       expectedOutcome: input.expectedOutcome,
       classification: input.classification,
+      requestedPriority: input.requestedPriority,
+      operationalPriority: null,
       createdAt: now,
       updatedAt: now,
     });
@@ -293,6 +298,53 @@ export class InitiativeService {
       organizationId: input.organizationId,
       initiativeId: input.initiativeId,
     });
+  }
+
+  async setOperationalPriority(input: {
+    actorId: string;
+    organizationId: string;
+    initiativeId: string;
+    correlationId: string;
+    expectedVersion: number;
+    operationalPriority: InitiativePriority;
+  }): Promise<Initiative> {
+    const current = await this.requireInitiative(
+      input.initiativeId,
+      input.organizationId,
+    );
+    await assertWorkspaceWritable(
+      this.dependencies.tenancy,
+      current.workspaceId,
+    );
+    const { organizationRole, workspaceRole } = await this.rolesFor(
+      input.actorId,
+      current.organizationId,
+      current.workspaceId,
+    );
+    if (
+      !isActionAllowed(
+        "organization:manage",
+        calculateCapabilities({ organizationRole, workspaceRole }),
+      )
+    )
+      throw new AccessDeniedError("organization:manage");
+    this.assertVersion(current, input.expectedVersion);
+    const updated = setInitiativeOperationalPriority(
+      current,
+      input.operationalPriority,
+      this.dependencies.clock.now(),
+    );
+    await this.save(updated, current.version);
+    await this.record(
+      updated,
+      input.actorId,
+      input.correlationId,
+      "initiative.operational_priority_set.v1",
+      current.status,
+      updated.status,
+      { operationalPriority: updated.operationalPriority },
+    );
+    return updated;
   }
 
   private async changeState(

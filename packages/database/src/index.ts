@@ -69,6 +69,7 @@ import type {
 import type {
   Initiative,
   InitiativeClassification,
+  InitiativePriority,
   InitiativeStatus,
   EvaluationStandard,
   InitiativeEvaluation,
@@ -2676,8 +2677,8 @@ export class PostgresInitiativeStore implements InitiativeStore {
 
   async create(initiative: Initiative): Promise<void> {
     await this.pool.query(
-      `INSERT INTO initiatives (id, organization_id, workspace_id, created_by_actor_id, title, problem_statement, expected_outcome, classification, status, version, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+      `INSERT INTO initiatives (id, organization_id, workspace_id, created_by_actor_id, title, problem_statement, expected_outcome, classification, requested_priority, operational_priority, status, version, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
       [
         initiative.id,
         initiative.organizationId,
@@ -2687,6 +2688,8 @@ export class PostgresInitiativeStore implements InitiativeStore {
         initiative.problemStatement,
         initiative.expectedOutcome,
         initiative.classification,
+        initiative.requestedPriority,
+        initiative.operationalPriority,
         initiative.status,
         initiative.version,
         initiative.createdAt,
@@ -2696,7 +2699,7 @@ export class PostgresInitiativeStore implements InitiativeStore {
   }
   async findById(initiativeId: string): Promise<Initiative | null> {
     const result = await this.pool.query<InitiativeRow>(
-      `SELECT id, organization_id, workspace_id, created_by_actor_id, title, problem_statement, expected_outcome, classification, status, version, created_at, updated_at
+      `SELECT id, organization_id, workspace_id, created_by_actor_id, title, problem_statement, expected_outcome, classification, requested_priority, operational_priority, status, version, created_at, updated_at
        FROM initiatives WHERE id = $1`,
       [initiativeId],
     );
@@ -2707,7 +2710,7 @@ export class PostgresInitiativeStore implements InitiativeStore {
     workspaceId: string;
   }): Promise<readonly Initiative[]> {
     const result = await this.pool.query<InitiativeRow>(
-      `SELECT id, organization_id, workspace_id, created_by_actor_id, title, problem_statement, expected_outcome, classification, status, version, created_at, updated_at
+      `SELECT id, organization_id, workspace_id, created_by_actor_id, title, problem_statement, expected_outcome, classification, requested_priority, operational_priority, status, version, created_at, updated_at
        FROM initiatives WHERE organization_id = $1 AND workspace_id = $2 ORDER BY updated_at DESC`,
       [input.organizationId, input.workspaceId],
     );
@@ -2718,14 +2721,16 @@ export class PostgresInitiativeStore implements InitiativeStore {
     expectedVersion: number;
   }): Promise<boolean> {
     const result = await this.pool.query(
-      `UPDATE initiatives SET title = $2, problem_statement = $3, expected_outcome = $4, classification = $5, status = $6, version = $7, updated_at = $8
-       WHERE id = $1 AND version = $9`,
+      `UPDATE initiatives SET title = $2, problem_statement = $3, expected_outcome = $4, classification = $5, requested_priority = $6, operational_priority = $7, status = $8, version = $9, updated_at = $10
+       WHERE id = $1 AND version = $11`,
       [
         input.initiative.id,
         input.initiative.title,
         input.initiative.problemStatement,
         input.initiative.expectedOutcome,
         input.initiative.classification,
+        input.initiative.requestedPriority,
+        input.initiative.operationalPriority,
         input.initiative.status,
         input.initiative.version,
         input.initiative.updatedAt,
@@ -4258,6 +4263,8 @@ type InitiativeRow = {
   problem_statement: string;
   expected_outcome: string;
   classification: InitiativeClassification;
+  requested_priority: InitiativePriority | null;
+  operational_priority: InitiativePriority | null;
   status: InitiativeStatus;
   version: number;
   created_at: Date;
@@ -4286,6 +4293,8 @@ function toInitiative(row: InitiativeRow): Initiative {
     problemStatement: row.problem_statement,
     expectedOutcome: row.expected_outcome,
     classification: row.classification,
+    requestedPriority: row.requested_priority,
+    operationalPriority: row.operational_priority,
     status: row.status,
     version: row.version,
     createdAt: row.created_at,

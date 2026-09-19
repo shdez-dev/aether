@@ -16,6 +16,8 @@ describe("initiative UI", () => {
       problemStatement: "Problema",
       expectedOutcome: "Resultado",
       classification: "internal" as const,
+      requestedPriority: "medium" as const,
+      operationalPriority: null,
       status: "draft",
       version: 0,
       createdAt: "2026-09-09T12:00:00.000Z",

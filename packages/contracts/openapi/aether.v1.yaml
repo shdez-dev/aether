@@ -1086,7 +1086,8 @@ paths:
           description: Revisor asignado.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/EvaluationReviewerAssignment" }
+              schema:
+                { $ref: "#/components/schemas/EvaluationReviewerAssignment" }
         default: { $ref: "#/components/responses/Problem" }
   /v1/evaluation-review-assignments/{assignmentId}/abstentions:
     post:
@@ -1107,13 +1108,16 @@ paths:
         content:
           application/json:
             schema:
-              { $ref: "#/components/schemas/AbstainFromEvaluationReviewRequest" }
+              {
+                $ref: "#/components/schemas/AbstainFromEvaluationReviewRequest",
+              }
       responses:
         "200":
           description: Abstención registrada.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/EvaluationReviewerAssignment" }
+              schema:
+                { $ref: "#/components/schemas/EvaluationReviewerAssignment" }
         default: { $ref: "#/components/responses/Problem" }
   /v1/evaluation-review-assignments/{assignmentId}/reassignments:
     post:
@@ -1140,7 +1144,8 @@ paths:
           description: Nueva asignación creada.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/EvaluationReviewerAssignment" }
+              schema:
+                { $ref: "#/components/schemas/EvaluationReviewerAssignment" }
         default: { $ref: "#/components/responses/Problem" }
   /v1/evaluation-review-assignments/{assignmentId}/escalations:
     post:
@@ -1161,13 +1166,16 @@ paths:
         content:
           application/json:
             schema:
-              { $ref: "#/components/schemas/EscalateEvaluationReviewAbstentionRequest" }
+              {
+                $ref: "#/components/schemas/EscalateEvaluationReviewAbstentionRequest",
+              }
       responses:
         "200":
           description: Abstención escalada.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/EvaluationReviewerAssignment" }
+              schema:
+                { $ref: "#/components/schemas/EvaluationReviewerAssignment" }
         default: { $ref: "#/components/responses/Problem" }
   /v1/evaluations/{evaluationId}:
     get:
@@ -1411,6 +1419,33 @@ paths:
       responses:
         "200":
           description: Borrador actualizado.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Initiative" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+  /v1/initiatives/{initiativeId}/operational-priority:
+    post:
+      tags: [Initiatives]
+      operationId: setInitiativeOperationalPriority
+      summary: Fijar la prioridad operativa institucional de una iniciativa
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/InitiativeId"
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetInitiativeOperationalPriorityRequest"
+      responses:
+        "200":
+          description: Prioridad operativa actualizada sin modificar la solicitada.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Initiative" }
@@ -2632,6 +2667,7 @@ components:
           problemStatement,
           expectedOutcome,
           classification,
+          requestedPriority,
         ]
       properties:
         organizationId: { type: string, format: uuid }
@@ -2640,6 +2676,15 @@ components:
         problemStatement: { type: string, minLength: 1, maxLength: 10000 }
         expectedOutcome: { type: string, minLength: 1, maxLength: 10000 }
         classification: { type: string, enum: [internal, confidential] }
+        requestedPriority: { type: string, enum: [low, medium, high] }
+    SetInitiativeOperationalPriorityRequest:
+      type: object
+      additionalProperties: false
+      required: [organizationId, expectedVersion, operationalPriority]
+      properties:
+        organizationId: { type: string, format: uuid }
+        expectedVersion: { type: integer, minimum: 0 }
+        operationalPriority: { type: string, enum: [low, medium, high] }
     SubmitInitiativeRequest:
       type: object
       additionalProperties: false
@@ -2671,6 +2716,8 @@ components:
           problemStatement,
           expectedOutcome,
           classification,
+          requestedPriority,
+          operationalPriority,
         ]
       properties:
         expectedVersion: { type: integer, minimum: 0 }
@@ -2678,6 +2725,9 @@ components:
         problemStatement: { type: string, minLength: 1, maxLength: 10000 }
         expectedOutcome: { type: string, minLength: 1, maxLength: 10000 }
         classification: { type: string, enum: [internal, confidential] }
+        requestedPriority: { type: string, enum: [low, medium, high] }
+        operationalPriority:
+          { type: [string, "null"], enum: [low, medium, high, null] }
     StartReviewRequest:
       type: object
       additionalProperties: false
@@ -2899,7 +2949,19 @@ components:
     EvaluationReviewerAssignment:
       type: object
       required:
-        [id, organizationId, workspaceId, initiativeId, assignedActorId, assignedByActorId, assignedAt, status, statusChangedAt, statusChangedByActorId, reason]
+        [
+          id,
+          organizationId,
+          workspaceId,
+          initiativeId,
+          assignedActorId,
+          assignedByActorId,
+          assignedAt,
+          status,
+          statusChangedAt,
+          statusChangedByActorId,
+          reason,
+        ]
       properties:
         id: { type: string, format: uuid }
         organizationId: { type: string, format: uuid }
@@ -2908,7 +2970,11 @@ components:
         assignedActorId: { type: string }
         assignedByActorId: { type: string }
         assignedAt: { type: string, format: date-time }
-        status: { type: string, enum: [assigned, abstained, reassigned, escalated, completed] }
+        status:
+          {
+            type: string,
+            enum: [assigned, abstained, reassigned, escalated, completed],
+          }
         statusChangedAt: { type: string, format: date-time }
         statusChangedByActorId: { type: string }
         reason: { type: [string, "null"] }
@@ -3168,6 +3234,8 @@ components:
           problemStatement,
           expectedOutcome,
           classification,
+          requestedPriority,
+          operationalPriority,
           status,
           version,
           createdAt,
@@ -3182,6 +3250,10 @@ components:
         problemStatement: { type: string }
         expectedOutcome: { type: string }
         classification: { type: string, enum: [internal, confidential] }
+        requestedPriority:
+          { type: [string, "null"], enum: [low, medium, high, null] }
+        operationalPriority:
+          { type: [string, "null"], enum: [low, medium, high, null] }
         status:
           type: string
           enum:

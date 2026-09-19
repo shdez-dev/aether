@@ -1725,6 +1725,24 @@ describe.sequential("PostgreSQL integration", () => {
         problemStatement: "La atención tarda demasiado.",
         expectedOutcome: "Reducir la mediana de espera.",
         classification: "internal",
+        requestedPriority: "medium",
+      });
+      expect(await initiativesStore.findById(draft.id)).toMatchObject({
+        requestedPriority: "medium",
+        operationalPriority: null,
+      });
+      const reprioritized = await initiativeService.setOperationalPriority({
+        actorId: owner,
+        organizationId: organization.id,
+        initiativeId: draft.id,
+        correlationId: randomUUID(),
+        expectedVersion: draft.version,
+        operationalPriority: "high",
+      });
+      expect(await initiativesStore.findById(draft.id)).toMatchObject({
+        requestedPriority: "medium",
+        operationalPriority: "high",
+        version: reprioritized.version,
       });
       await expect(
         initiativeService.list({
@@ -1739,7 +1757,7 @@ describe.sequential("PostgreSQL integration", () => {
         organizationId: organization.id,
         initiativeId: draft.id,
         correlationId: randomUUID(),
-        expectedVersion: draft.version,
+        expectedVersion: reprioritized.version,
       });
       const standard = await evaluationService.publishStandard({
         actorId: owner,
@@ -1889,6 +1907,7 @@ describe.sequential("PostgreSQL integration", () => {
         problemStatement: "La evidencia de evaluación debe revisarse.",
         expectedOutcome: "Reabrir la revisión antes de decidir.",
         classification: "internal",
+        requestedPriority: "medium",
       });
       const annulmentPresented = await initiativeService.present({
         actorId: owner,

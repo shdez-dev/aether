@@ -58,6 +58,7 @@ import {
   ChangeMembershipStatusRequestSchema,
   ReassignMemberResponsibilitiesRequestSchema,
   CreateInitiativeDraftRequestSchema,
+  SetInitiativeOperationalPriorityRequestSchema,
   CreateOrganizationRequestSchema,
   CreateWorkspaceRequestSchema,
   CreateTeamRequestSchema,
@@ -2702,6 +2703,50 @@ export async function buildServer(input: {
       },
     });
   });
+  app.post(
+    "/v1/initiatives/:initiativeId/operational-priority",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      const params = z
+        .object({ initiativeId: z.string().uuid() })
+        .parse(request.params);
+      const body = SetInitiativeOperationalPriorityRequestSchema.parse(
+        request.body,
+      );
+      return respondIdempotently({
+        request,
+        reply,
+        store: input.idempotency,
+        actorId: session.actorId,
+        operation: `initiative.operational-priority:${params.initiativeId}`,
+        requestPayload: body,
+        execute: async () => {
+          const initiative = await input.initiatives.setOperationalPriority({
+            actorId: session.actorId,
+            correlationId: correlationId(reply),
+            ...params,
+            ...body,
+          });
+          return {
+            statusCode: 200,
+            body: await toInitiativeResponse(
+              await input.initiatives.detail({
+                actorId: session.actorId,
+                correlationId: correlationId(reply),
+                organizationId: initiative.organizationId,
+                initiativeId: initiative.id,
+              }),
+            ),
+          };
+        },
+      });
+    },
+  );
   app.post("/v1/initiatives/:initiativeId/submit", async (request, reply) => {
     const session = await requireSession(
       request,

@@ -68,6 +68,9 @@ describe("ProjectService", () => {
       async findOrganizationRole(input: { actorId: string }) {
         return activeRoles.get(input.actorId) ?? null;
       },
+      async findWorkspaceRole(input: { actorId: string }) {
+        return activeRoles.has(input.actorId) ? ("member" as const) : null;
+      },
     } as TenantStore;
     const audit: ProjectAuditStore = {
       async record() {},
