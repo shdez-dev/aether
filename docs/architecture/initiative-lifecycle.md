@@ -45,6 +45,7 @@ ni una evaluación formal.
 | ------------------ | ---------------- | ---------------------------------------------------------------- |
 | Crear              | —                | `owner`/`admin` de organización, o `admin`/`member` de workspace |
 | Editar o presentar | `draft`          | Creador, `owner`/`admin` de organización o `admin` de workspace  |
+| Asignar atención   | `presented`      | `owner` o `admin` de organización                                |
 | Evaluar            | `presented`      | `owner` o `admin` de organización                                |
 | Decidir            | `under_review`   | Solo `owner` de organización                                     |
 
@@ -63,3 +64,18 @@ responden con conflicto si otra operación ya modificó el agregado.
 La migración `0003_initiatives.sql` conserva las iniciativas y la bitácora en
 PostgreSQL. Los contratos HTTP están en el OpenAPI 3.1 y cada solicitud mutante
 requiere la protección CSRF de la sesión.
+
+## Atención y excepciones de intake
+
+Una iniciativa `presented` puede recibir una única asignación de atención con
+responsable y fecha de siguiente revisión. El responsable debe conservar una
+membresía organizacional activa y acceso efectivo al workspace; los owners y
+admins organizacionales cumplen este último requisito por su alcance global.
+La asignación es inmutable y queda auditada como `initiative.intake_assigned.v1`.
+
+La cola `GET /v1/intake-exceptions` es una vista derivada de iniciativas
+`presented` que no tienen asignación de atención. No se materializa una fila de
+excepción independiente, por lo que una asignación válida la retira de la cola
+sin riesgo de desincronización. PostgreSQL impone una asignación por iniciativa
+y revalida estado, organización, workspace y responsabilidad incluso frente a
+escrituras directas.

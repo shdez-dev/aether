@@ -4,6 +4,7 @@ import {
   AccessDeniedError,
   EvaluationConflictOfInterestError,
   EvaluationService,
+  IntakeService,
   TriageService,
   InitiativeService,
   InitiativeVersionConflictError,
@@ -17,6 +18,7 @@ import {
   InMemoryEvaluationStandardStore,
   InMemoryEvaluationStore,
   InMemoryInitiativeStore,
+  InMemoryIntakeAssignmentStore,
   InMemoryTriageStandardStore,
   InMemoryTriageStore,
 } from "./initiatives.js";
@@ -77,6 +79,42 @@ describe("initiative vertical slice", () => {
       correlationId: ids.next(),
       expectedVersion: initiative.version,
     });
+    const intake = new IntakeService({
+      assignments: new InMemoryIntakeAssignmentStore(initiativesStore),
+      initiatives: initiativesStore,
+      audit,
+      tenancy: tenantStore,
+      ids,
+      clock,
+    });
+    expect(
+      await intake.listUnassigned({
+        actorId: "owner",
+        organizationId: organization.id,
+      }),
+    ).toEqual([
+      expect.objectContaining({ initiativeId: initiative.id }),
+    ]);
+    const assignment = await intake.assign({
+      actorId: "owner",
+      organizationId: organization.id,
+      initiativeId: initiative.id,
+      expectedVersion: presented.version,
+      responsibleActorId: "owner",
+      nextReviewOn: "2026-09-22",
+      correlationId: ids.next(),
+    });
+    expect(assignment).toMatchObject({
+      initiativeId: initiative.id,
+      responsibleActorId: "owner",
+      nextReviewOn: "2026-09-22",
+    });
+    await expect(
+      intake.listUnassigned({
+        actorId: "owner",
+        organizationId: organization.id,
+      }),
+    ).resolves.toEqual([]);
     const standards = new InMemoryTriageStandardStore();
     const triages = new InMemoryTriageStore();
     const service = new TriageService({

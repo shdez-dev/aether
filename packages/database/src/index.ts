@@ -10,6 +10,8 @@ import type {
   InitiativeAuditEvent,
   InitiativeAuditStore,
   InitiativeStore,
+  IntakeAssignmentStore,
+  UnassignedIntakeException,
   TriageStandardStore,
   TriageStore,
   EvaluationStandardStore,
@@ -70,6 +72,7 @@ import type {
 } from "@aether/application";
 import type {
   Initiative,
+  IntakeResponsibility,
   InitiativeClassification,
   InitiativePriority,
   InitiativeStatus,
@@ -2779,6 +2782,56 @@ export class PostgresInitiativeAuditStore implements InitiativeAuditStore {
   }
 }
 
+export class PostgresIntakeAssignmentStore implements IntakeAssignmentStore {
+  constructor(private readonly pool: Pool) {}
+  async create(assignment: IntakeResponsibility): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO initiative_intake_assignments
+       (id, organization_id, workspace_id, initiative_id, responsible_actor_id,
+        assigned_by_actor_id, assigned_at, next_review_on)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [
+        assignment.id,
+        assignment.organizationId,
+        assignment.workspaceId,
+        assignment.initiativeId,
+        assignment.responsibleActorId,
+        assignment.assignedByActorId,
+        assignment.assignedAt,
+        assignment.nextReviewOn,
+      ],
+    );
+  }
+  async findActiveByInitiative(
+    initiativeId: string,
+  ): Promise<IntakeResponsibility | null> {
+    const result = await this.pool.query<IntakeResponsibilityRow>(
+      `SELECT id, organization_id, workspace_id, initiative_id,
+              responsible_actor_id, assigned_by_actor_id, assigned_at,
+              next_review_on
+       FROM initiative_intake_assignments WHERE initiative_id = $1`,
+      [initiativeId],
+    );
+    return result.rows[0] ? toIntakeResponsibility(result.rows[0]) : null;
+  }
+  async listUnassigned(input: {
+    organizationId: string;
+  }): Promise<readonly UnassignedIntakeException[]> {
+    const result = await this.pool.query<UnassignedIntakeExceptionRow>(
+      `SELECT i.organization_id, i.workspace_id, i.id AS initiative_id, i.title,
+              i.updated_at AS presented_at
+         FROM initiatives i
+         LEFT JOIN initiative_intake_assignments a ON a.initiative_id = i.id
+        WHERE i.organization_id = $1
+          AND i.status = 'presented'
+          AND a.id IS NULL
+        ORDER BY i.updated_at ASC, i.id ASC`,
+      [input.organizationId],
+    );
+    return result.rows.map(toUnassignedIntakeException);
+  }
+}
+
 export class PostgresEvaluationStandardStore implements EvaluationStandardStore {
   constructor(private readonly pool: Pool) {}
   async create(standard: EvaluationStandard): Promise<void> {
@@ -4442,6 +4495,23 @@ type EvaluationStandardRow = {
   published_at: Date;
   published_by_actor_id: string;
 };
+type IntakeResponsibilityRow = {
+  id: string;
+  organization_id: string;
+  workspace_id: string;
+  initiative_id: string;
+  responsible_actor_id: string;
+  assigned_by_actor_id: string;
+  assigned_at: Date;
+  next_review_on: string | Date;
+};
+type UnassignedIntakeExceptionRow = {
+  organization_id: string;
+  workspace_id: string;
+  initiative_id: string;
+  title: string;
+  presented_at: Date;
+};
 type TriageStandardRow = {
   id: string;
   organization_id: string;
@@ -4708,6 +4778,34 @@ function toEvaluationStandard(row: EvaluationStandardRow): EvaluationStandard {
     publishedAt: row.published_at,
     publishedByActorId: row.published_by_actor_id,
   };
+}
+function toIntakeResponsibility(
+  row: IntakeResponsibilityRow,
+): IntakeResponsibility {
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    workspaceId: row.workspace_id,
+    initiativeId: row.initiative_id,
+    responsibleActorId: row.responsible_actor_id,
+    assignedByActorId: row.assigned_by_actor_id,
+    assignedAt: row.assigned_at,
+    nextReviewOn: toCalendarDate(row.next_review_on),
+  };
+}
+function toUnassignedIntakeException(
+  row: UnassignedIntakeExceptionRow,
+): UnassignedIntakeException {
+  return {
+    organizationId: row.organization_id,
+    workspaceId: row.workspace_id,
+    initiativeId: row.initiative_id,
+    title: row.title,
+    presentedAt: row.presented_at,
+  };
+}
+function toCalendarDate(value: string | Date): string {
+  return typeof value === "string" ? value : value.toISOString().slice(0, 10);
 }
 function toTriageStandard(row: TriageStandardRow): TriageStandard {
   return {

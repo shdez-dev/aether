@@ -7,6 +7,7 @@ import { PostgreSqlContainer } from "@testcontainers/postgresql";
 import {
   AccessDeniedError,
   EvaluationService,
+  IntakeService,
   TriageService,
   InitiativeVersionConflictError,
   InitiativeService,
@@ -31,6 +32,7 @@ import {
   PostgresTriageStore,
   PostgresInitiativeAuditStore,
   PostgresInitiativeStore,
+  PostgresIntakeAssignmentStore,
   PostgresIdempotencyStore,
   PostgresNotificationStore,
   PostgresOutboxStore,
@@ -1762,6 +1764,57 @@ describe.sequential("PostgreSQL integration", () => {
         correlationId: randomUUID(),
         expectedVersion: reprioritized.version,
       });
+      const intakeAssignments = new PostgresIntakeAssignmentStore(pool);
+      const intakeService = new IntakeService({
+        assignments: intakeAssignments,
+        initiatives: initiativesStore,
+        audit: initiativeAudit,
+        tenancy: tenantStore,
+        ids,
+        clock,
+      });
+      expect(
+        await intakeService.listUnassigned({
+          actorId: owner,
+          organizationId: organization.id,
+        }),
+      ).toEqual([expect.objectContaining({ initiativeId: draft.id })]);
+      const intakeAssignment = await intakeService.assign({
+        actorId: owner,
+        organizationId: organization.id,
+        initiativeId: draft.id,
+        expectedVersion: presented.version,
+        responsibleActorId: owner,
+        nextReviewOn: "2026-09-24",
+        correlationId: randomUUID(),
+      });
+      expect(
+        await intakeAssignments.findActiveByInitiative(draft.id),
+      ).toMatchObject({ id: intakeAssignment.id, nextReviewOn: "2026-09-24" });
+      await expect(
+        pool.query(
+          `INSERT INTO initiative_intake_assignments
+           (id, organization_id, workspace_id, initiative_id,
+            responsible_actor_id, assigned_by_actor_id, assigned_at, next_review_on)
+           VALUES ($1,$2,$3,$4,$5,$6,NOW(),'2026-09-24')`,
+          [
+            randomUUID(),
+            organization.id,
+            otherWorkspace.id,
+            draft.id,
+            owner,
+            owner,
+          ],
+        ),
+      ).rejects.toThrow(
+        "intake assignment must preserve presented initiative scope and active responsibility",
+      );
+      await expect(
+        intakeService.listUnassigned({
+          actorId: owner,
+          organizationId: organization.id,
+        }),
+      ).resolves.toEqual([]);
       const triageStore = new PostgresTriageStore(pool);
       const triageStandardStore = new PostgresTriageStandardStore(pool);
       const triageService = new TriageService({

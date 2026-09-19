@@ -18,6 +18,8 @@ import {
   SecurityAuditStore,
   InitiativeDomainError,
   InitiativeService,
+  IntakeService,
+  IntakeDomainError,
   InitiativeVersionConflictError,
   IdempotencyStore,
   ProjectAlreadyExistsError,
@@ -89,6 +91,7 @@ import {
   PublishTriageStandardRequestSchema,
   ActivateTriageStandardRequestSchema,
   TriageInitiativeRequestSchema,
+  AssignIntakeResponsibilityRequestSchema,
   StartReviewRequestSchema,
   AnnulEvaluationRequestSchema,
   SubmitInitiativeRequestSchema,
@@ -151,6 +154,7 @@ export async function buildServer(input: {
   accessGrants?: TemporaryAccessGrantService;
   supportAccess?: SupportAccessService;
   initiatives: InitiativeService;
+  intake?: IntakeService;
   evaluations: EvaluationService;
   triage?: TriageService;
   projects: ProjectService;
@@ -506,6 +510,8 @@ export async function buildServer(input: {
                                           ? "CONFLICT"
                                           : error instanceof
                                                 InitiativeDomainError ||
+                                              error instanceof
+                                                IntakeDomainError ||
                                               error instanceof
                                                 DocumentValidationError ||
                                               error instanceof
@@ -1890,6 +1896,23 @@ export async function buildServer(input: {
       }),
     );
   });
+  app.get("/v1/intake-exceptions", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    if (!input.intake) throw new Error("Intake service is not configured");
+    const { organizationId } = z
+      .object({ organizationId: z.string().uuid() })
+      .parse(request.query);
+    const exceptions = await input.intake.listUnassigned({
+      actorId: session.actorId,
+      organizationId,
+    });
+    return exceptions.map(toUnassignedIntakeExceptionResponse);
+  });
   app.get("/v1/evaluations/:evaluationId", async (request, reply) => {
     const session = await requireSession(
       request,
@@ -2900,6 +2923,41 @@ export async function buildServer(input: {
       },
     });
   });
+  app.post(
+    "/v1/initiatives/:initiativeId/intake-assignments",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      if (!input.intake) throw new Error("Intake service is not configured");
+      const params = z
+        .object({ initiativeId: z.string().uuid() })
+        .parse(request.params);
+      const body = AssignIntakeResponsibilityRequestSchema.parse(request.body);
+      return respondIdempotently({
+        request,
+        reply,
+        store: input.idempotency,
+        actorId: session.actorId,
+        operation: `initiative.intake-assignment:${params.initiativeId}`,
+        requestPayload: { params, body },
+        execute: async () => ({
+          statusCode: 201,
+          body: toIntakeResponsibilityResponse(
+            await input.intake!.assign({
+              actorId: session.actorId,
+              correlationId: correlationId(reply),
+              ...params,
+              ...body,
+            }),
+          ),
+        }),
+      });
+    },
+  );
   app.post("/v1/initiatives/:initiativeId/triage", async (request, reply) => {
     const session = await requireSession(
       request,
@@ -3304,6 +3362,16 @@ function toTriageResponse(
   triage: { assessedAt: Date } & Record<string, unknown>,
 ) {
   return { ...triage, assessedAt: triage.assessedAt.toISOString() };
+}
+function toIntakeResponsibilityResponse(
+  assignment: { assignedAt: Date } & Record<string, unknown>,
+) {
+  return { ...assignment, assignedAt: assignment.assignedAt.toISOString() };
+}
+function toUnassignedIntakeExceptionResponse(
+  exception: { presentedAt: Date } & Record<string, unknown>,
+) {
+  return { ...exception, presentedAt: exception.presentedAt.toISOString() };
 }
 function toEvaluationReviewerAssignmentResponse(
   assignment: {

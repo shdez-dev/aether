@@ -160,6 +160,12 @@ export const TriageInitiativeRequestSchema = z.object({
     )
     .max(100),
 });
+export const AssignIntakeResponsibilityRequestSchema = z.object({
+  organizationId: UuidSchema,
+  expectedVersion: z.number().int().nonnegative(),
+  responsibleActorId: z.string().min(1).max(255),
+  nextReviewOn: z.string().date(),
+});
 export const ActivateEvaluationStandardRequestSchema = z.object({
   organizationId: UuidSchema,
 });
@@ -279,6 +285,23 @@ export const InitiativeTriageResponseSchema = z.object({
   ),
   assessedByActorId: z.string(),
   assessedAt: z.string().datetime(),
+});
+export const IntakeResponsibilityResponseSchema = z.object({
+  id: UuidSchema,
+  organizationId: UuidSchema,
+  workspaceId: UuidSchema,
+  initiativeId: UuidSchema,
+  responsibleActorId: z.string(),
+  assignedByActorId: z.string(),
+  assignedAt: z.string().datetime(),
+  nextReviewOn: z.string().date(),
+});
+export const UnassignedIntakeExceptionResponseSchema = z.object({
+  organizationId: UuidSchema,
+  workspaceId: UuidSchema,
+  initiativeId: UuidSchema,
+  title: z.string(),
+  presentedAt: z.string().datetime(),
 });
 export const InitiativeEvaluationResponseSchema = z.object({
   id: UuidSchema,
@@ -436,6 +459,9 @@ export type PublishTriageStandardRequest = z.infer<
 export type TriageInitiativeRequest = z.infer<
   typeof TriageInitiativeRequestSchema
 >;
+export type AssignIntakeResponsibilityRequest = z.infer<
+  typeof AssignIntakeResponsibilityRequestSchema
+>;
 export type InitiativeResponse = z.infer<typeof InitiativeResponseSchema>;
 export type InitiativeAuditEvent = z.infer<typeof InitiativeAuditEventSchema>;
 export type EvaluationStandardResponse = z.infer<
@@ -446,6 +472,12 @@ export type TriageStandardResponse = z.infer<
 >;
 export type InitiativeTriageResponse = z.infer<
   typeof InitiativeTriageResponseSchema
+>;
+export type IntakeResponsibilityResponse = z.infer<
+  typeof IntakeResponsibilityResponseSchema
+>;
+export type UnassignedIntakeExceptionResponse = z.infer<
+  typeof UnassignedIntakeExceptionResponseSchema
 >;
 export type InitiativeEvaluationResponse = z.infer<
   typeof InitiativeEvaluationResponseSchema

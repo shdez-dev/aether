@@ -15,6 +15,7 @@ import { ApiProblemSchema } from "@aether/contracts";
 import { parse } from "yaml";
 import {
   EvaluationService,
+  IntakeService,
   TriageService,
   AuditHistoryService,
   InitiativeService,
@@ -34,6 +35,7 @@ import {
   InMemoryInitiativeAuditStore,
   InMemoryAuditHistoryStore,
   InMemoryInitiativeStore,
+  InMemoryIntakeAssignmentStore,
   InMemoryIdempotencyStore,
   InMemoryTenantStore,
   InMemoryProductMetricsStore,
@@ -1578,6 +1580,14 @@ describe("HTTP authentication boundary", () => {
       ids: { next: () => crypto.randomUUID() },
       clock: { now: () => new Date() },
     });
+    const intake = new IntakeService({
+      assignments: new InMemoryIntakeAssignmentStore(initiativeStore),
+      initiatives: initiativeStore,
+      audit: auditStore,
+      tenancy: tenancyStore,
+      ids: { next: () => crypto.randomUUID() },
+      clock: { now: () => new Date() },
+    });
     const evaluations = new EvaluationService({
       standards: new InMemoryEvaluationStandardStore(),
       evaluations: new InMemoryEvaluationStore(),
@@ -1649,6 +1659,7 @@ describe("HTTP authentication boundary", () => {
       auth,
       tenants,
       initiatives,
+      intake,
       evaluations,
       triage,
       projects: {} as ProjectService,
@@ -2065,6 +2076,67 @@ describe("HTTP authentication boundary", () => {
       version: number;
     };
     expect(presented.status).toBe("presented");
+
+    const unassignedBefore = await app.inject({
+      method: "GET",
+      url: `/v1/intake-exceptions?organizationId=${organization.id}`,
+      headers: { cookie: headers.cookie },
+    });
+    expect(unassignedBefore.statusCode).toBe(200);
+    expect(unassignedBefore.json()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ initiativeId: created.id }),
+      ]),
+    );
+    const intakeAssignmentResponse = await app.inject({
+      method: "POST",
+      url: `/v1/initiatives/${created.id}/intake-assignments`,
+      headers: {
+        ...headers,
+        "idempotency-key": "assign-intake-responsibility",
+      },
+      payload: {
+        organizationId: organization.id,
+        expectedVersion: presented.version,
+        responsibleActorId: authenticatedActorId,
+        nextReviewOn: "2026-09-24",
+      },
+    });
+    expect(intakeAssignmentResponse.statusCode).toBe(201);
+    expect(intakeAssignmentResponse.json()).toMatchObject({
+      initiativeId: created.id,
+      responsibleActorId: authenticatedActorId,
+      nextReviewOn: "2026-09-24",
+    });
+    const replayedIntakeAssignment = await app.inject({
+      method: "POST",
+      url: `/v1/initiatives/${created.id}/intake-assignments`,
+      headers: {
+        ...headers,
+        "idempotency-key": "assign-intake-responsibility",
+      },
+      payload: {
+        organizationId: organization.id,
+        expectedVersion: presented.version,
+        responsibleActorId: authenticatedActorId,
+        nextReviewOn: "2026-09-24",
+      },
+    });
+    expect(replayedIntakeAssignment.statusCode).toBe(201);
+    expect(replayedIntakeAssignment.headers["idempotent-replayed"]).toBe(
+      "true",
+    );
+    const unassignedAfter = await app.inject({
+      method: "GET",
+      url: `/v1/intake-exceptions?organizationId=${organization.id}`,
+      headers: { cookie: headers.cookie },
+    });
+    expect(unassignedAfter.statusCode).toBe(200);
+    expect(unassignedAfter.json()).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ initiativeId: created.id }),
+      ]),
+    );
 
     const standardResponse = await app.inject({
       method: "POST",

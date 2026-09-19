@@ -2,6 +2,7 @@
 
 export * from "./tenancy.js";
 export * from "./initiatives.js";
+export * from "./intake.js";
 export * from "./evaluations.js";
 export * from "./triage.js";
 export * from "./projects.js";

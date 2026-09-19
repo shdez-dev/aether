@@ -11,6 +11,7 @@ import {
   ProductMetricsService,
   OutboxAdministrationService,
   InitiativeService,
+  IntakeService,
   ProjectService,
   TenantService,
   TemporaryAccessGrantService,
@@ -32,6 +33,7 @@ import {
   PostgresOutboxAdministrationStore,
   PostgresInitiativeAuditStore,
   PostgresInitiativeStore,
+  PostgresIntakeAssignmentStore,
   PostgresIdempotencyStore,
   PostgresProjectAuditStore,
   PostgresProjectExecutionStore,
@@ -116,6 +118,14 @@ const initiatives = new InitiativeService({
   audit: new PostgresInitiativeAuditStore(pool),
   tenancy: new PostgresTenantStore(pool),
   accessGrants,
+  ids: { next: randomUUID },
+  clock: { now: () => new Date() },
+});
+const intake = new IntakeService({
+  assignments: new PostgresIntakeAssignmentStore(pool),
+  initiatives: new PostgresInitiativeStore(pool),
+  audit: new PostgresInitiativeAuditStore(pool),
+  tenancy: new PostgresTenantStore(pool),
   ids: { next: randomUUID },
   clock: { now: () => new Date() },
 });
@@ -223,6 +233,7 @@ const app = await buildServer({
   accessGrants,
   supportAccess,
   initiatives,
+  intake,
   evaluations,
   triage,
   projects,

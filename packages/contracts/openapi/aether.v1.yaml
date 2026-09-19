@@ -1169,6 +1169,51 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/InitiativeTriage" }
         default: { $ref: "#/components/responses/Problem" }
+  /v1/initiatives/{initiativeId}/intake-assignments:
+    post:
+      tags: [Initiatives]
+      operationId: assignInitiativeIntakeResponsibility
+      summary: Asignar responsable de atención y fecha de revisión
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: initiativeId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              { $ref: "#/components/schemas/AssignIntakeResponsibilityRequest" }
+      responses:
+        "201":
+          description: Responsabilidad de atención registrada.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IntakeResponsibility" }
+        default: { $ref: "#/components/responses/Problem" }
+  /v1/intake-exceptions:
+    get:
+      tags: [Initiatives]
+      operationId: listUnassignedIntakeExceptions
+      summary: Listar iniciativas presentadas sin responsable de atención
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationContextId"
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: Cola derivada de excepciones sin responsable.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/UnassignedIntakeException" }
+        default: { $ref: "#/components/responses/Problem" }
   /v1/initiatives/{initiativeId}/review-assignments:
     post:
       tags: [Initiatives]
@@ -3006,6 +3051,36 @@ components:
               assessment:
                 { type: [string, "null"], enum: [pass, fail, not_applicable, null] }
               justification: { type: array, items: { type: string }, maxItems: 50 }
+    AssignIntakeResponsibilityRequest:
+      type: object
+      additionalProperties: false
+      required: [organizationId, expectedVersion, responsibleActorId, nextReviewOn]
+      properties:
+        organizationId: { type: string, format: uuid }
+        expectedVersion: { type: integer, minimum: 0 }
+        responsibleActorId: { type: string, minLength: 1, maxLength: 255 }
+        nextReviewOn: { type: string, format: date }
+    IntakeResponsibility:
+      type: object
+      required: [id, organizationId, workspaceId, initiativeId, responsibleActorId, assignedByActorId, assignedAt, nextReviewOn]
+      properties:
+        id: { type: string, format: uuid }
+        organizationId: { type: string, format: uuid }
+        workspaceId: { type: string, format: uuid }
+        initiativeId: { type: string, format: uuid }
+        responsibleActorId: { type: string }
+        assignedByActorId: { type: string }
+        assignedAt: { type: string, format: date-time }
+        nextReviewOn: { type: string, format: date }
+    UnassignedIntakeException:
+      type: object
+      required: [organizationId, workspaceId, initiativeId, title, presentedAt]
+      properties:
+        organizationId: { type: string, format: uuid }
+        workspaceId: { type: string, format: uuid }
+        initiativeId: { type: string, format: uuid }
+        title: { type: string }
+        presentedAt: { type: string, format: date-time }
     TriageStandard:
       type: object
       required: [id, organizationId, name, version, criteria, isActive, publishedAt, publishedByActorId]

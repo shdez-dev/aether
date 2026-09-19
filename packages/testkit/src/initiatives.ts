@@ -1,6 +1,8 @@
 import type {
   TriageStandardStore,
   TriageStore,
+  IntakeAssignmentStore,
+  UnassignedIntakeException,
   EvaluationStandardStore,
   EvaluationStore,
   AuditEvent,
@@ -13,6 +15,7 @@ import type {
 import type {
   EvaluationStandard,
   InitiativeTriage,
+  IntakeResponsibility,
   TriageStandard,
   Initiative,
   InitiativeDecision,
@@ -305,5 +308,47 @@ export class InMemoryTriageStore implements TriageStore {
   }
   async findById(triageId: string): Promise<InitiativeTriage | null> {
     return this.triages.get(triageId) ?? null;
+  }
+}
+
+export class InMemoryIntakeAssignmentStore implements IntakeAssignmentStore {
+  readonly assignments = new Map<string, IntakeResponsibility>();
+  constructor(private readonly initiatives: InMemoryInitiativeStore) {}
+  async create(assignment: IntakeResponsibility): Promise<void> {
+    if (await this.findActiveByInitiative(assignment.initiativeId))
+      throw new Error("Active intake assignment already exists");
+    this.assignments.set(assignment.id, assignment);
+  }
+  async findActiveByInitiative(
+    initiativeId: string,
+  ): Promise<IntakeResponsibility | null> {
+    return (
+      [...this.assignments.values()].find(
+        (assignment) => assignment.initiativeId === initiativeId,
+      ) ?? null
+    );
+  }
+  async listUnassigned(input: {
+    organizationId: string;
+  }): Promise<readonly UnassignedIntakeException[]> {
+    return [...this.initiatives.initiatives.values()]
+      .filter(
+        (initiative) =>
+          initiative.organizationId === input.organizationId &&
+          initiative.status === "presented" &&
+          ![...this.assignments.values()].some(
+            (assignment) => assignment.initiativeId === initiative.id,
+          ),
+      )
+      .map((initiative) => ({
+        organizationId: initiative.organizationId,
+        workspaceId: initiative.workspaceId,
+        initiativeId: initiative.id,
+        title: initiative.title,
+        presentedAt: initiative.updatedAt,
+      }))
+      .sort((left, right) =>
+        left.presentedAt.getTime() - right.presentedAt.getTime(),
+      );
   }
 }
