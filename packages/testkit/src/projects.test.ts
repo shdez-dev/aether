@@ -70,6 +70,20 @@ describe("project conversion and execution", () => {
         actorEmail: email,
       });
     }
+    const unscopedInvitation = await tenants.invite({
+      actorId: "owner",
+      organizationId: organization.id,
+      email: "unscoped@test",
+      organizationRole: "member",
+      workspaceIds: [],
+      workspaceRole: "member",
+      expiresInDays: 7,
+    });
+    await tenants.acceptInvitation({
+      token: unscopedInvitation.deliveryToken,
+      actorId: "unscoped",
+      actorEmail: "unscoped@test",
+    });
     const initiatives = new InMemoryInitiativeStore();
     const draft = createInitiative({
       id: ids.next(),
@@ -177,6 +191,17 @@ describe("project conversion and execution", () => {
         resolutionNote: "Resuelta dentro del alcance inicial.",
       },
     });
+    await expect(
+      projects.createFromInitiative({
+        ...conversionInput,
+        leadActorId: "unscoped",
+        participants: [
+          { actorId: "owner", role: "sponsor" },
+          { actorId: "unscoped", role: "lead" },
+          { actorId: "observer", role: "observer" },
+        ],
+      }),
+    ).rejects.toBeInstanceOf(AccessDeniedError);
     const project = await projects.createFromInitiative(conversionInput);
     expect(project.sourceInitiativeId).toBe(approved.id);
     expect(project.sourceDecisionId).toBe(decisionId);

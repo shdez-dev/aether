@@ -149,6 +149,11 @@ export class ProjectService {
         ...input.participants.map((participant) => participant.actorId),
       ].map((actorId) => this.assertMember(actorId, input.organizationId)),
     );
+    await this.assertProjectLeadActive({
+      organizationId: initiative.organizationId,
+      workspaceId: initiative.workspaceId,
+      leadActorId: input.leadActorId,
+    });
     const now = this.dependencies.clock.now();
     const project = createProject({
       id: this.dependencies.ids.next(),
@@ -221,6 +226,7 @@ export class ProjectService {
       project,
       input.correlationId,
     );
+    await this.assertProjectLeadActive(project);
     if (project.version !== input.expectedVersion)
       throw new ProjectVersionConflictError();
     const updated = transitionProject(
@@ -500,6 +506,29 @@ export class ProjectService {
       }))
     )
       throw new AccessDeniedError("organization:read");
+  }
+  private async assertProjectParticipant(
+    actorId: string,
+    organizationId: string,
+    workspaceId: string,
+  ): Promise<void> {
+    await this.assertMember(actorId, organizationId);
+    if (
+      !(await this.dependencies.tenancy.findWorkspaceRole({
+        actorId,
+        workspaceId,
+      }))
+    )
+      throw new AccessDeniedError("workspace:manage");
+  }
+  private async assertProjectLeadActive(
+    project: Pick<Project, "organizationId" | "workspaceId" | "leadActorId">,
+  ): Promise<void> {
+    await this.assertProjectParticipant(
+      project.leadActorId,
+      project.organizationId,
+      project.workspaceId,
+    );
   }
   private async assertExecutionAccess(
     actorId: string,
