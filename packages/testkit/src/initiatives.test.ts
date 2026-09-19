@@ -6,6 +6,7 @@ import {
   EvaluationService,
   InitiativeService,
   InitiativeVersionConflictError,
+  NotificationService,
   TenantService,
   WorkspaceArchivedError,
 } from "@aether/application";
@@ -16,6 +17,7 @@ import {
   InMemoryEvaluationStore,
   InMemoryInitiativeStore,
 } from "./initiatives.js";
+import { InMemoryNotificationStore } from "./notifications.js";
 import { InMemoryTenantStore } from "./tenancy.js";
 
 describe("initiative vertical slice", () => {
@@ -127,12 +129,20 @@ describe("initiative vertical slice", () => {
     });
     const standards = new InMemoryEvaluationStandardStore();
     const evaluationStore = new InMemoryEvaluationStore();
+    const notificationStore = new InMemoryNotificationStore();
+    const notifications = new NotificationService({
+      store: notificationStore,
+      tenancy: tenantStore,
+      ids,
+      clock,
+    });
     const evaluations = new EvaluationService({
       standards,
       evaluations: evaluationStore,
       initiatives: initiativeStore,
       audit,
       tenancy: tenantStore,
+      notifications,
       ids,
       clock,
     });
@@ -208,6 +218,17 @@ describe("initiative vertical slice", () => {
       ],
     });
     expect(decided.outcome).toBe("approved");
+    expect(await notificationStore.list({
+      actorId: "author",
+      organizationId: organization.id,
+    })).toEqual([
+      expect.objectContaining({
+        recipientActorId: "author",
+        resourceType: "initiative",
+        resourceId: created.id,
+        title: "Hay una nueva decisión para una iniciativa.",
+      }),
+    ]);
     expect(decided.conditions).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
