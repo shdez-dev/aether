@@ -125,6 +125,7 @@ export function evaluateInitiative(input: {
   const assessedCriteria = criteria.filter(
     (criterion) => criterion.assessment !== null,
   ).length;
+  const totalCriteria = criteria.length;
   return {
     id: input.id,
     organizationId: input.organizationId,
@@ -135,9 +136,12 @@ export function evaluateInitiative(input: {
     standardVersion: input.standard.version,
     criteria,
     coverage: {
-      totalCriteria: criteria.length,
+      totalCriteria,
       assessedCriteria,
-      percentage: Math.round((assessedCriteria / criteria.length) * 100),
+      percentage:
+        totalCriteria === 0
+          ? 0
+          : Math.round((assessedCriteria / totalCriteria) * 100),
     },
     evaluatedByActorId: input.evaluatedByActorId,
     evaluatedAt: input.evaluatedAt,

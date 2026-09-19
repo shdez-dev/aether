@@ -62,6 +62,41 @@ describe("Evaluation and decision", () => {
     ).toThrow(EvaluationDomainError);
   });
 
+  it("nunca informa 100 % cuando un estándar sin criterios llega desde datos heredados", () => {
+    const evaluation = evaluateInitiative({
+      id: "00000000-0000-4000-8000-000000000017",
+      organizationId: standard.organizationId,
+      workspaceId: "00000000-0000-4000-8000-000000000014",
+      initiativeId: "00000000-0000-4000-8000-000000000015",
+      initiativeVersion: 4,
+      standard: { ...standard, criteria: [] },
+      results: [],
+      evaluatedByActorId: "reviewer",
+      evaluatedAt: now,
+    });
+
+    expect(evaluation.coverage).toEqual({
+      totalCriteria: 0,
+      assessedCriteria: 0,
+      percentage: 0,
+    });
+    expect(() =>
+      decideInitiative({
+        id: "00000000-0000-4000-8000-000000000018",
+        organizationId: standard.organizationId,
+        workspaceId: evaluation.workspaceId,
+        initiativeId: evaluation.initiativeId,
+        evaluationId: evaluation.id,
+        outcome: "approved",
+        rationale: "No debe decidirse sin cobertura.",
+        evidence: [],
+        decidedByActorId: "owner",
+        decidedAt: now,
+        evaluation,
+      }),
+    ).toThrow(EvaluationDomainError);
+  });
+
   it("permite devolución y cancelación como transiciones explícitas", () => {
     const initiative = createInitiative({
       id: "00000000-0000-4000-8000-000000000020",
