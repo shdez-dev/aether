@@ -1326,11 +1326,25 @@ describe("HTTP authentication boundary", () => {
       headers: {
         origin: config.webOrigin,
         "x-csrf-token": csrf,
+        "idempotency-key": "change-membership-status-key",
         cookie: `aether_session=${session}; aether_csrf=${csrf}`,
       },
       payload: { status: "suspended" },
     });
     expect(suspension.statusCode).toBe(204);
+    const replayedSuspension = await app.inject({
+      method: "PATCH",
+      url: `/v1/organizations/${organization.json().id}/members/suspended-member/status`,
+      headers: {
+        origin: config.webOrigin,
+        "x-csrf-token": csrf,
+        "idempotency-key": "change-membership-status-key",
+        cookie: `aether_session=${session}; aether_csrf=${csrf}`,
+      },
+      payload: { status: "suspended" },
+    });
+    expect(replayedSuspension.statusCode).toBe(204);
+    expect(replayedSuspension.headers["idempotent-replayed"]).toBe("true");
     await expect(
       tenants.capabilities({
         actorId: "suspended-member",

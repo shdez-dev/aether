@@ -1398,21 +1398,31 @@ export async function buildServer(input: {
         input.config,
       );
       assertRecentAuthentication(session, input.config);
-      const { organizationId, actorId } = z
+      const params = z
         .object({
           organizationId: z.string().uuid(),
           actorId: z.string().min(1).max(255),
         })
         .parse(request.params);
       const body = ChangeMembershipStatusRequestSchema.parse(request.body);
-      await input.tenants.changeMembershipStatus({
+      return respondIdempotentlyWhenRequested({
+        request,
+        reply,
+        store: input.idempotency,
         actorId: session.actorId,
-        organizationId,
-        targetActorId: actorId,
-        status: body.status,
-        correlationId: correlationId(reply),
+        operation: `organization.membership.status:${params.organizationId}:${params.actorId}`,
+        requestPayload: { params, body },
+        execute: async () => {
+          await input.tenants.changeMembershipStatus({
+            actorId: session.actorId,
+            organizationId: params.organizationId,
+            targetActorId: params.actorId,
+            status: body.status,
+            correlationId: correlationId(reply),
+          });
+          return { statusCode: 204, body: {} };
+        },
       });
-      return reply.code(204).send();
     },
   );
   app.post(

@@ -910,6 +910,7 @@ paths:
           schema: { type: string, minLength: 1, maxLength: 255 }
         - $ref: "#/components/parameters/CsrfToken"
         - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
