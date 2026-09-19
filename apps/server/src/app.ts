@@ -1794,7 +1794,7 @@ export async function buildServer(input: {
       organizationId,
       evaluationId,
     });
-    return { ...evaluation, evaluatedAt: evaluation.evaluatedAt.toISOString() };
+    return toEvaluationResponse(evaluation);
   });
   app.post(
     "/v1/evaluations/:evaluationId/annulments",

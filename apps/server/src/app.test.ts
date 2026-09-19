@@ -2157,6 +2157,9 @@ describe("HTTP authentication boundary", () => {
     expect(evaluationResponse.json()).toMatchObject({
       id: review.evaluation.id,
       initiativeId: created.id,
+      annulledByActorId: null,
+      annulledAt: null,
+      annulmentReason: null,
     });
     const conflictDecisionResponse = await app.inject({
       method: "POST",
