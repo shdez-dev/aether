@@ -604,10 +604,13 @@ export async function buildServer(input: {
     };
   });
   app.post("/auth/logout", async (request, reply) => {
-    await input.auth.logout(
-      request.cookies[sessionCookie],
-      correlationId(reply),
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
     );
+    await input.auth.logoutSession(session, correlationId(reply));
     reply.clearCookie(sessionCookie, sessionCookieOptions(input.config));
     reply.clearCookie(csrfCookie, csrfCookieOptions(input.config));
     return reply.code(204).send();
@@ -1730,13 +1733,27 @@ export async function buildServer(input: {
       input.config,
     );
     const body = PublishEvaluationStandardRequestSchema.parse(request.body);
-    const standard = await input.evaluations.publishStandard({
+    return respondIdempotentlyWhenRequested({
+      request,
+      reply,
+      store: input.idempotency,
       actorId: session.actorId,
-      ...body,
+      operation: "evaluation-standard.publish",
+      requestPayload: body,
+      execute: async () => {
+        const standard = await input.evaluations.publishStandard({
+          actorId: session.actorId,
+          ...body,
+        });
+        return {
+          statusCode: 201,
+          body: {
+            ...standard,
+            publishedAt: standard.publishedAt.toISOString(),
+          },
+        };
+      },
     });
-    return reply
-      .code(201)
-      .send({ ...standard, publishedAt: standard.publishedAt.toISOString() });
   });
   app.get("/v1/evaluation-standards", async (request, reply) => {
     const session = await requireSession(

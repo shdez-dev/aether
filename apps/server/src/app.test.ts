@@ -347,6 +347,80 @@ describe("HTTP authentication boundary", () => {
     await app.close();
   });
 
+  it("authenticates one valid session before processing every protected OpenAPI operation", async () => {
+    const authStore = new InMemoryAuthStore();
+    const auth = new AuthService({
+      store: authStore,
+      cipher: createAesGcmCipher(config.sessionEncryptionKey),
+      oidc,
+      issuer: config.oidcIssuerUrl,
+      sessionTtlSeconds: config.sessionTtlSeconds,
+      sessionRenewalWindowSeconds: config.sessionRenewalWindowSeconds,
+    });
+    const app = await buildServer({
+      config,
+      auth,
+      tenants: {} as TenantService,
+      initiatives: {} as InitiativeService,
+      evaluations: {} as EvaluationService,
+      projects: {} as ProjectService,
+      idempotency: new InMemoryIdempotencyStore(),
+    });
+    const spec = parse(
+      await readFile(
+        new URL(
+          "../../../packages/contracts/openapi/aether.v1.yaml",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    ) as {
+      paths: Record<
+        string,
+        Record<string, { security?: readonly Record<string, unknown>[] }>
+      >;
+    };
+    const unsafeMethods = new Set(["post", "put", "patch", "delete"]);
+    const protectedOperations = Object.entries(spec.paths).flatMap(
+      ([path, operations]) =>
+        Object.entries(operations).flatMap(([method, operation]) =>
+          operation.security?.some((entry) => "cookieSession" in entry)
+            ? [[method, path] as const]
+            : [],
+        ),
+    );
+    for (const [index, [method, path]] of protectedOperations.entries()) {
+      const token = `authenticated-openapi-operation-${index}`;
+      await createAuthenticatedSession(authStore, {
+        token,
+        actorId: `authenticated-actor-${index}`,
+        actorEmail: `actor-${index}@example.test`,
+      });
+      const beforeLookups = authStore.activeSessionLookups;
+      const response = await app.inject({
+        method: method.toUpperCase() as
+          "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
+        url: path.replaceAll(
+          /\{[^}]+\}/g,
+          "00000000-0000-4000-8000-000000000001",
+        ),
+        headers: {
+          cookie: `aether_session=${token}; aether_csrf=openapi-auth-boundary`,
+          ...(unsafeMethods.has(method)
+            ? {
+                origin: config.webOrigin,
+                "x-csrf-token": "openapi-auth-boundary",
+              }
+            : {}),
+        },
+      });
+      const operation = `${method.toUpperCase()} ${path}`;
+      expect(authStore.activeSessionLookups - beforeLookups, operation).toBe(1);
+      expect(response.statusCode, operation).not.toBe(401);
+    }
+    await app.close();
+  });
+
   it("keeps public Fastify routes aligned with the OpenAPI security contract", async () => {
     const spec = parse(
       await readFile(
@@ -1958,7 +2032,10 @@ describe("HTTP authentication boundary", () => {
     const standardResponse = await app.inject({
       method: "POST",
       url: "/v1/evaluation-standards",
-      headers,
+      headers: {
+        ...headers,
+        "idempotency-key": "publish-evaluation-standard-key",
+      },
       payload: {
         organizationId: organization.id,
         name: "Estándar inicial",
@@ -1979,6 +2056,33 @@ describe("HTTP authentication boundary", () => {
       id: string;
       criteria: { id: string }[];
     };
+    const replayedStandardResponse = await app.inject({
+      method: "POST",
+      url: "/v1/evaluation-standards",
+      headers: {
+        ...headers,
+        "idempotency-key": "publish-evaluation-standard-key",
+      },
+      payload: {
+        organizationId: organization.id,
+        name: "Estándar inicial",
+        version: 1,
+        criteria: [
+          {
+            id: standard.criteria[0]!.id,
+            code: "IMPACT",
+            name: "Impacto",
+            description: "La iniciativa demuestra un impacto institucional.",
+            weight: 1,
+          },
+        ],
+      },
+    });
+    expect(replayedStandardResponse.statusCode).toBe(201);
+    expect(replayedStandardResponse.headers["idempotent-replayed"]).toBe(
+      "true",
+    );
+    expect(replayedStandardResponse.json()).toEqual(standardResponse.json());
     const standardsResponse = await app.inject({
       method: "GET",
       url: `/v1/evaluation-standards?organizationId=${organization.id}`,

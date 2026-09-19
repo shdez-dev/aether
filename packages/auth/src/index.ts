@@ -349,6 +349,13 @@ export class AuthService {
   ): Promise<void> {
     const session = await this.authenticate(sessionToken);
     if (!session) return;
+    await this.logoutSession(session, correlationId);
+  }
+
+  async logoutSession(
+    session: AuthSession,
+    correlationId: string = randomUUID(),
+  ): Promise<void> {
     const now = this.now();
     const revoked = await this.options.store.revokeOwnedSession({
       actorId: session.actorId,
