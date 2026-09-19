@@ -8,6 +8,11 @@ iniciativa o decisión. El proyecto conserva ambos identificadores de origen,
 por lo que la cadena iniciativa → decisión → proyecto puede consultarse sin
 inferencias.
 
+Además de las claves foráneas, la base de datos rechaza que la iniciativa, la
+decisión y el proyecto pertenezcan a organizaciones o workspaces distintos. La
+regla protege la trazabilidad incluso ante escrituras que no atraviesen el caso
+de uso de aplicación.
+
 El comando exige un sponsor y un líder distintos, más la lista completa de
 participantes. Todos deben ser miembros de la organización y se registra su rol
 (`sponsor`, `lead`, `contributor` u `observer`); la conversión no asigna roles

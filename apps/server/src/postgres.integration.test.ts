@@ -1681,6 +1681,12 @@ describe.sequential("PostgreSQL integration", () => {
         name: "Estrategia",
         mode: "institutional",
       });
+      const otherWorkspace = await tenantService.createWorkspace({
+        actorId: owner,
+        organizationId: organization.id,
+        name: "Otro contexto",
+        mode: "institutional",
+      });
       const invited = await tenantService.invite({
         actorId: owner,
         organizationId: organization.id,
@@ -1815,6 +1821,23 @@ describe.sequential("PostgreSQL integration", () => {
       if (!successfulDecision || successfulDecision.status !== "fulfilled")
         throw new Error("An approved decision was expected");
       const decision = successfulDecision.value;
+      await expect(
+        pool.query(
+          `INSERT INTO projects (id, organization_id, workspace_id, source_initiative_id, source_decision_id, name, sponsor_actor_id, lead_actor_id, participants, status, created_at, updated_at)
+           VALUES ($1,$2,$3,$4,$5,'Proyecto inconsistente',$6,$7,'[]','planned',NOW(),NOW())`,
+          [
+            randomUUID(),
+            organization.id,
+            otherWorkspace.id,
+            draft.id,
+            decision.id,
+            owner,
+            "lead@example.test",
+          ],
+        ),
+      ).rejects.toThrow(
+        "project source initiative and decision must share organization and workspace",
+      );
       const persistedDecision = await evaluationsStore.findDecision(
         decision.id,
       );
