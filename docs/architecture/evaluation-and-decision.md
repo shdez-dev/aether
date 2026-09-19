@@ -55,7 +55,10 @@ evaluación inmutable y mueve la iniciativa a `under_review`.
 
 Un `owner` puede anular una evaluación no decidida con un motivo. La anulación
 no borra respuestas, cobertura ni calidad: conserva el registro y añade actor,
-fecha y motivo. Una evaluación que ya sustenta una decisión no puede anularse.
+fecha y motivo. Una evaluación que ya sustenta una decisión no puede anularse,
+y una evaluación anulada no puede sustentar una decisión. La aplicación y la
+base de datos preservan ambas direcciones de esa invariante, incluso ante
+escrituras que eludan el servicio.
 
 ## Decisión
 

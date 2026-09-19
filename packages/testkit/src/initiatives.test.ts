@@ -218,6 +218,15 @@ describe("initiative vertical slice", () => {
       ],
     });
     expect(decided.outcome).toBe("approved");
+    await expect(
+      evaluations.annulEvaluation({
+        actorId: "owner",
+        organizationId: organization.id,
+        evaluationId: evaluation.id,
+        reason: "No puede invalidarse una evaluación ya decidida.",
+        correlationId: ids.next(),
+      }),
+    ).rejects.toMatchObject({ code: "EVALUATION_ALREADY_DECIDED" });
     expect(await notificationStore.list({
       actorId: "author",
       organizationId: organization.id,
@@ -292,6 +301,64 @@ describe("initiative vertical slice", () => {
       "initiative.decision_condition_fulfilled.v1",
       "initiative.decision_condition_exempted.v1",
     ]);
+    const annulmentDraft = await initiatives.create({
+      actorId: "author",
+      organizationId: organization.id,
+      workspaceId: workspace.id,
+      correlationId: ids.next(),
+      title: "Revisar evidencia de anulación",
+      problemStatement: "La evidencia de soporte está incompleta.",
+      expectedOutcome: "Completar la revisión antes de decidir.",
+      classification: "internal",
+    });
+    const annulmentPresented = await initiatives.present({
+      actorId: "author",
+      organizationId: organization.id,
+      initiativeId: annulmentDraft.id,
+      correlationId: ids.next(),
+      expectedVersion: annulmentDraft.version,
+    });
+    const annulmentEvaluation = await evaluations.review({
+      actorId: "reviewer",
+      organizationId: organization.id,
+      initiativeId: annulmentDraft.id,
+      correlationId: ids.next(),
+      expectedVersion: annulmentPresented.version,
+      standardId: standard.id,
+      results: [
+        {
+          criterionId: standard.criteria[0]!.id,
+          assessment: "met",
+          evidence: ["Evidencia pendiente de validación."],
+        },
+      ],
+    });
+    const annulled = await evaluations.annulEvaluation({
+      actorId: "owner",
+      organizationId: organization.id,
+      evaluationId: annulmentEvaluation.id,
+      reason: "La evidencia requiere una revisión adicional.",
+      correlationId: ids.next(),
+    });
+    expect(annulled).toMatchObject({
+      id: annulmentEvaluation.id,
+      annulledByActorId: "owner",
+      annulmentReason: "La evidencia requiere una revisión adicional.",
+    });
+    expect(annulled.annulledAt).toEqual(clock.now());
+    await expect(
+      evaluations.decide({
+        actorId: "owner",
+        organizationId: organization.id,
+        initiativeId: annulmentDraft.id,
+        correlationId: ids.next(),
+        expectedVersion: annulmentPresented.version + 1,
+        evaluationId: annulled.id,
+        outcome: "approved",
+        rationale: "No debe decidirse una evaluación anulada.",
+        evidence: ["Acta."],
+      }),
+    ).rejects.toMatchObject({ code: "EVALUATION_ANNULLED" });
     await tenants.archiveWorkspace({
       actorId: "owner",
       organizationId: organization.id,

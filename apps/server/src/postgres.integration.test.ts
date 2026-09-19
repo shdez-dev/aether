@@ -1857,6 +1857,82 @@ describe.sequential("PostgreSQL integration", () => {
           expect.objectContaining({ criterion: standard.criteria[0] }),
         ],
       });
+      const annulmentDraft = await initiativeService.create({
+        actorId: owner,
+        organizationId: organization.id,
+        workspaceId: workspace.id,
+        correlationId: randomUUID(),
+        title: "Evaluación que requiere nueva evidencia",
+        problemStatement: "La evidencia de evaluación debe revisarse.",
+        expectedOutcome: "Reabrir la revisión antes de decidir.",
+        classification: "internal",
+      });
+      const annulmentPresented = await initiativeService.present({
+        actorId: owner,
+        organizationId: organization.id,
+        initiativeId: annulmentDraft.id,
+        correlationId: randomUUID(),
+        expectedVersion: annulmentDraft.version,
+      });
+      const annulmentEvaluation = await evaluationService.review({
+        actorId: "reviewer@example.test",
+        organizationId: organization.id,
+        initiativeId: annulmentDraft.id,
+        standardId: replacementStandard.id,
+        expectedVersion: annulmentPresented.version,
+        correlationId: randomUUID(),
+        results: [
+          {
+            criterionId: replacementStandard.criteria[0]!.id,
+            assessment: "met",
+            evidence: ["Evidencia que requiere contraste."],
+          },
+        ],
+      });
+      const annulledEvaluation = await evaluationService.annulEvaluation({
+        actorId: owner,
+        organizationId: organization.id,
+        evaluationId: annulmentEvaluation.id,
+        reason: "La evidencia debe completarse antes de la decisión.",
+        correlationId: randomUUID(),
+      });
+      expect(
+        await evaluationsStore.findEvaluation(annulledEvaluation.id),
+      ).toMatchObject({
+        annulledByActorId: owner,
+        annulledAt: annulledEvaluation.annulledAt,
+        annulmentReason: "La evidencia debe completarse antes de la decisión.",
+      });
+      await expect(
+        evaluationService.decide({
+          actorId: owner,
+          organizationId: organization.id,
+          initiativeId: annulmentDraft.id,
+          evaluationId: annulledEvaluation.id,
+          expectedVersion: annulmentPresented.version + 1,
+          outcome: "approved",
+          rationale: "No debe decidirse una evaluación anulada.",
+          evidence: ["Acta."],
+          correlationId: randomUUID(),
+        }),
+      ).rejects.toMatchObject({ code: "EVALUATION_ANNULLED" });
+      await expect(
+        pool.query(
+          `INSERT INTO initiative_decisions (id, organization_id, workspace_id, initiative_id, evaluation_id, outcome, rationale, evidence, standard_id, standard_version, coverage, decided_by_actor_id, decided_at)
+           VALUES ($1,$2,$3,$4,$5,'approved','Evaluación anulada','[]',$6,$7,$8::jsonb,$9,NOW())`,
+          [
+            randomUUID(),
+            organization.id,
+            workspace.id,
+            annulmentDraft.id,
+            annulledEvaluation.id,
+            replacementStandard.id,
+            replacementStandard.version,
+            JSON.stringify(annulledEvaluation.coverage),
+            owner,
+          ],
+        ),
+      ).rejects.toThrow("decision cannot reference an annulled evaluation");
       const reviewing = await initiativesStore.findById(draft.id);
       await expect(
         pool.query(
@@ -1921,6 +1997,16 @@ describe.sequential("PostgreSQL integration", () => {
       if (!successfulDecision || successfulDecision.status !== "fulfilled")
         throw new Error("An approved decision was expected");
       const decision = successfulDecision.value;
+      await expect(
+        pool.query(
+          `UPDATE initiative_evaluations
+              SET annulled_by_actor_id = $1,
+                  annulled_at = NOW(),
+                  annulment_reason = 'No debe permitirse por SQL directo.'
+            WHERE id = $2`,
+          [owner, evaluation.id],
+        ),
+      ).rejects.toThrow("an evaluation with a decision cannot be annulled");
       const persistedQuality = await pool.query<{
         evaluation_quality: typeof evaluation.quality;
         decision_quality: typeof decision.quality;

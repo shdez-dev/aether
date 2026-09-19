@@ -2956,9 +2956,16 @@ function toOutboxDeadLetterResponse(
   return { ...deadLetter, failedAt: deadLetter.failedAt.toISOString() };
 }
 function toEvaluationResponse(
-  evaluation: { evaluatedAt: Date } & Record<string, unknown>,
+  evaluation: {
+    evaluatedAt: Date;
+    annulledAt?: Date | null;
+  } & Record<string, unknown>,
 ) {
-  return { ...evaluation, evaluatedAt: evaluation.evaluatedAt.toISOString() };
+  return {
+    ...evaluation,
+    evaluatedAt: evaluation.evaluatedAt.toISOString(),
+    annulledAt: evaluation.annulledAt?.toISOString() ?? null,
+  };
 }
 function toDecisionResponse(
   decision: {

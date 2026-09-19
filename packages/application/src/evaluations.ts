@@ -182,6 +182,10 @@ export class EvaluationService {
       evaluation.initiativeId,
       input.organizationId,
     );
+    await assertWorkspaceWritable(
+      this.dependencies.tenancy,
+      initiative.workspaceId,
+    );
     const updated = {
       ...evaluation,
       annulledByActorId: input.actorId,
@@ -304,6 +308,8 @@ export class EvaluationService {
       input.evaluationId,
     );
     if (!evaluation) throw new ResourceNotFoundError("INITIATIVE_NOT_FOUND");
+    if (evaluation.annulledAt)
+      throw new EvaluationDomainError("EVALUATION_ANNULLED");
     if (evaluation.evaluatedByActorId === input.actorId)
       throw new EvaluationConflictOfInterestError();
     await this.assertOwner(input.actorId, input.organizationId);

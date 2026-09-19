@@ -2737,6 +2737,113 @@ describe("Project conversion idempotency", () => {
   });
 });
 
+describe("Evaluation annulment endpoint", () => {
+  it("preserva la fecha en ISO y repite idempotentemente la anulación", async () => {
+    const authStore = new InMemoryAuthStore();
+    const auth = new AuthService({
+      store: authStore,
+      cipher: createAesGcmCipher(config.sessionEncryptionKey),
+      oidc,
+      issuer: config.oidcIssuerUrl,
+      sessionTtlSeconds: config.sessionTtlSeconds,
+      sessionRenewalWindowSeconds: config.sessionRenewalWindowSeconds,
+    });
+    const organizationId = crypto.randomUUID();
+    const workspaceId = crypto.randomUUID();
+    const initiativeId = crypto.randomUUID();
+    const evaluationId = crypto.randomUUID();
+    const calls: Array<{
+      actorId: string;
+      organizationId: string;
+      evaluationId: string;
+      reason: string;
+      correlationId: string;
+    }> = [];
+    const annulledAt = new Date("2026-09-19T12:00:00.000Z");
+    const app = await buildServer({
+      config,
+      auth,
+      tenants: {} as TenantService,
+      initiatives: {} as InitiativeService,
+      evaluations: {
+        async annulEvaluation(input: (typeof calls)[number]) {
+          calls.push(input);
+          return {
+            id: evaluationId,
+            organizationId,
+            workspaceId,
+            initiativeId,
+            initiativeVersion: 3,
+            standardId: crypto.randomUUID(),
+            standardVersion: 1,
+            criteria: [],
+            coverage: {
+              totalCriteria: 0,
+              applicableCriteria: 0,
+              assessedCriteria: 0,
+              notApplicableCriteria: 0,
+              percentage: 0,
+            },
+            quality: null,
+            evaluatedByActorId: "reviewer",
+            evaluatedAt: new Date("2026-09-19T11:00:00.000Z"),
+            annulledByActorId: input.actorId,
+            annulledAt,
+            annulmentReason: input.reason,
+          };
+        },
+      } as unknown as EvaluationService,
+      projects: {} as ProjectService,
+      idempotency: new InMemoryIdempotencyStore(),
+    });
+    await createAuthenticatedSession(authStore, {
+      token: "evaluation-annulment-session",
+      actorId: "owner",
+      actorEmail: "owner@example.test",
+    });
+    const headers = {
+      origin: config.webOrigin,
+      "x-csrf-token": "evaluation-annulment-csrf",
+      "idempotency-key": "evaluation-annulment-key",
+      cookie:
+        "aether_session=evaluation-annulment-session; aether_csrf=evaluation-annulment-csrf",
+    };
+    const payload = {
+      organizationId,
+      reason: "La evidencia debe revisarse antes de decidir.",
+    };
+    const created = await app.inject({
+      method: "POST",
+      url: `/v1/evaluations/${evaluationId}/annulments`,
+      headers,
+      payload,
+    });
+    expect(created.statusCode).toBe(200);
+    expect(created.json()).toMatchObject({
+      id: evaluationId,
+      annulledAt: annulledAt.toISOString(),
+      annulmentReason: payload.reason,
+    });
+    const replayed = await app.inject({
+      method: "POST",
+      url: `/v1/evaluations/${evaluationId}/annulments`,
+      headers,
+      payload,
+    });
+    expect(replayed.statusCode).toBe(200);
+    expect(replayed.headers["idempotent-replayed"]).toBe("true");
+    expect(calls).toEqual([
+      expect.objectContaining({
+        actorId: "owner",
+        organizationId,
+        evaluationId,
+        reason: payload.reason,
+      }),
+    ]);
+    await app.close();
+  });
+});
+
 describe("document relocation endpoint", () => {
   it("requires recent authentication and exposes only a same-workspace relocation", async () => {
     const ids = { next: () => crypto.randomUUID() };
