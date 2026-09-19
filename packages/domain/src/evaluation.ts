@@ -30,7 +30,9 @@ export type EvaluationResultInput = Readonly<{
 }>;
 export type EvaluationCoverage = Readonly<{
   totalCriteria: number;
+  applicableCriteria: number;
   assessedCriteria: number;
+  notApplicableCriteria: number;
   percentage: number;
 }>;
 export type InitiativeEvaluation = Readonly<{
@@ -122,10 +124,15 @@ export function evaluateInitiative(input: {
       evidence: [...(result?.evidence ?? [])],
     };
   });
+  const notApplicableCriteria = criteria.filter(
+    (criterion) => criterion.assessment === "not_applicable",
+  ).length;
   const assessedCriteria = criteria.filter(
-    (criterion) => criterion.assessment !== null,
+    (criterion) =>
+      criterion.assessment === "met" || criterion.assessment === "not_met",
   ).length;
   const totalCriteria = criteria.length;
+  const applicableCriteria = totalCriteria - notApplicableCriteria;
   return {
     id: input.id,
     organizationId: input.organizationId,
@@ -137,11 +144,13 @@ export function evaluateInitiative(input: {
     criteria,
     coverage: {
       totalCriteria,
+      applicableCriteria,
       assessedCriteria,
+      notApplicableCriteria,
       percentage:
-        totalCriteria === 0
+        applicableCriteria === 0
           ? 0
-          : Math.round((assessedCriteria / totalCriteria) * 100),
+          : Math.round((assessedCriteria / applicableCriteria) * 100),
     },
     evaluatedByActorId: input.evaluatedByActorId,
     evaluatedAt: input.evaluatedAt,

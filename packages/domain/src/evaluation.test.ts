@@ -42,7 +42,9 @@ describe("Evaluation and decision", () => {
     });
     expect(incomplete.coverage).toEqual({
       totalCriteria: 1,
+      applicableCriteria: 1,
       assessedCriteria: 0,
+      notApplicableCriteria: 0,
       percentage: 0,
     });
     expect(() =>
@@ -77,7 +79,9 @@ describe("Evaluation and decision", () => {
 
     expect(evaluation.coverage).toEqual({
       totalCriteria: 0,
+      applicableCriteria: 0,
       assessedCriteria: 0,
+      notApplicableCriteria: 0,
       percentage: 0,
     });
     expect(() =>
@@ -95,6 +99,49 @@ describe("Evaluation and decision", () => {
         evaluation,
       }),
     ).toThrow(EvaluationDomainError);
+  });
+
+  it("separa los criterios no aplicables del denominador de cobertura", () => {
+    const evaluation = evaluateInitiative({
+      id: "00000000-0000-4000-8000-000000000019",
+      organizationId: standard.organizationId,
+      workspaceId: "00000000-0000-4000-8000-000000000014",
+      initiativeId: "00000000-0000-4000-8000-000000000015",
+      initiativeVersion: 4,
+      standard: {
+        ...standard,
+        criteria: [
+          standard.criteria[0]!,
+          {
+            ...standard.criteria[0]!,
+            id: "00000000-0000-4000-8000-000000000020",
+            code: "CONTEXT",
+          },
+        ],
+      },
+      results: [
+        {
+          criterionId: standard.criteria[0]!.id,
+          assessment: "met",
+          evidence: ["Evidencia"],
+        },
+        {
+          criterionId: "00000000-0000-4000-8000-000000000020",
+          assessment: "not_applicable",
+          evidence: ["No aplica al contexto"],
+        },
+      ],
+      evaluatedByActorId: "reviewer",
+      evaluatedAt: now,
+    });
+
+    expect(evaluation.coverage).toEqual({
+      totalCriteria: 2,
+      applicableCriteria: 1,
+      assessedCriteria: 1,
+      notApplicableCriteria: 1,
+      percentage: 100,
+    });
   });
 
   it("permite devolución y cancelación como transiciones explícitas", () => {

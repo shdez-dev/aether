@@ -107,7 +107,13 @@ describe("project conversion and execution", () => {
       evidence: ["Acta"],
       standardId: ids.next(),
       standardVersion: 1,
-      coverage: { totalCriteria: 1, assessedCriteria: 1, percentage: 100 },
+      coverage: {
+        totalCriteria: 1,
+        applicableCriteria: 1,
+        assessedCriteria: 1,
+        notApplicableCriteria: 0,
+        percentage: 100,
+      },
       decidedByActorId: "owner",
       decidedAt: new Date(),
       conditions: [

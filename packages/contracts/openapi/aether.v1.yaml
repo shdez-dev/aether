@@ -2682,10 +2682,19 @@ components:
               evidence: { type: array, items: { type: string } }
         coverage:
           type: object
-          required: [totalCriteria, assessedCriteria, percentage]
+          required:
+            [
+              totalCriteria,
+              applicableCriteria,
+              assessedCriteria,
+              notApplicableCriteria,
+              percentage,
+            ]
           properties:
             totalCriteria: { type: integer }
+            applicableCriteria: { type: integer }
             assessedCriteria: { type: integer }
+            notApplicableCriteria: { type: integer }
             percentage: { type: integer, minimum: 0, maximum: 100 }
         evaluatedByActorId: { type: string }
         evaluatedAt: { type: string, format: date-time }
@@ -2720,7 +2729,22 @@ components:
         evidence: { type: array, items: { type: string } }
         standardId: { type: string, format: uuid }
         standardVersion: { type: integer }
-        coverage: { type: object }
+        coverage:
+          type: object
+          required:
+            [
+              totalCriteria,
+              applicableCriteria,
+              assessedCriteria,
+              notApplicableCriteria,
+              percentage,
+            ]
+          properties:
+            totalCriteria: { type: integer }
+            applicableCriteria: { type: integer }
+            assessedCriteria: { type: integer }
+            notApplicableCriteria: { type: integer }
+            percentage: { type: integer, minimum: 0, maximum: 100 }
         decidedByActorId: { type: string }
         decidedAt: { type: string, format: date-time }
         conditions:

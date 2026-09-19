@@ -882,7 +882,8 @@ export default function AetherPage() {
                     <p>
                       Cobertura: {evaluation.coverage.percentage}% (
                       {evaluation.coverage.assessedCriteria}/
-                      {evaluation.coverage.totalCriteria})
+                      {evaluation.coverage.applicableCriteria} aplicables;{" "}
+                      {evaluation.coverage.notApplicableCriteria} no aplicables)
                     </p>
                   </section>
                 ) : null}

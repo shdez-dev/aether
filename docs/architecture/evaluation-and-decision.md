@@ -9,10 +9,14 @@ identificador, versión y snapshot de cada criterio junto a la cobertura:
 criterios totales, evaluados y porcentaje. Por ello una activación posterior no
 puede modificar ni reinterpretar una evaluación existente.
 
-La cobertura es `evaluados / criterios totales`, redondeada a porcentaje. Un
-estándar sin criterios no puede publicarse y, como defensa frente a datos
-heredados o escrituras inválidas, una evaluación con cero criterios informa
-`0 %`, nunca `100 %`; por tanto no puede formalizar una decisión.
+La cobertura es `criterios evaluados / criterios aplicables`, redondeada a
+porcentaje. `not_applicable` queda fuera del denominador y se informa por
+separado; `met` y `not_met` son los únicos resultados que integran el
+numerador. La respuesta conserva total, aplicables, evaluados y no aplicables
+para que el indicador pueda auditarse. Un estándar sin criterios no puede
+publicarse y, como defensa frente a datos heredados o escrituras inválidas, una
+evaluación sin criterios aplicables informa `0 %`, nunca `100 %`; por tanto no
+puede formalizar una decisión.
 
 Una vez aplicado, PostgreSQL bloquea cambios en la identidad, versión,
 criterios y metadatos de publicación del estándar. El estado de activación se

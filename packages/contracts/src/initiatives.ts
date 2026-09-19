@@ -196,7 +196,9 @@ export const InitiativeEvaluationResponseSchema = z.object({
   ),
   coverage: z.object({
     totalCriteria: z.number().int(),
+    applicableCriteria: z.number().int(),
     assessedCriteria: z.number().int(),
+    notApplicableCriteria: z.number().int(),
     percentage: z.number().int(),
   }),
   evaluatedByActorId: z.string(),
@@ -215,7 +217,9 @@ export const InitiativeDecisionResponseSchema = z.object({
   standardVersion: z.number().int().positive(),
   coverage: z.object({
     totalCriteria: z.number().int(),
+    applicableCriteria: z.number().int(),
     assessedCriteria: z.number().int(),
+    notApplicableCriteria: z.number().int(),
     percentage: z.number().int(),
   }),
   decidedByActorId: z.string(),
