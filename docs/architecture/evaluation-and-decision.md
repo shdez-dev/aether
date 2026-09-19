@@ -25,6 +25,11 @@ aplicados. Sus resultados posibles son `approved`, `rejected`, `returned` y
 `cancelled`; `approved`, `rejected` y `cancelled` son terminales, mientras que
 `returned` habilita una corrección y nueva presentación.
 
+PostgreSQL revalida que la decisión conserve la misma organización, workspace,
+iniciativa, estándar y versión de estándar de la evaluación referenciada. Así,
+una escritura directa no puede reinterpretar retrospectivamente qué expediente
+ni qué estándar sustentaron la decisión.
+
 La migración `0004_evaluations_and_decisions.sql` persiste estándares,
 evaluaciones y decisiones. Los eventos de auditoría conservan los identificadores
 de evaluación y decisión, la cobertura y el conteo de evidencias.

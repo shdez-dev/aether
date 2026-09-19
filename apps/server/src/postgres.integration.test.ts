@@ -1823,6 +1823,23 @@ describe.sequential("PostgreSQL integration", () => {
       const decision = successfulDecision.value;
       await expect(
         pool.query(
+          `INSERT INTO initiative_decisions (id, organization_id, workspace_id, initiative_id, evaluation_id, outcome, rationale, evidence, standard_id, standard_version, coverage, decided_by_actor_id, decided_at)
+           VALUES ($1,$2,$3,$4,$5,'approved','Versión alterada','[]',$6,2,'{}',$7,NOW())`,
+          [
+            randomUUID(),
+            organization.id,
+            workspace.id,
+            draft.id,
+            evaluation.id,
+            standard.id,
+            owner,
+          ],
+        ),
+      ).rejects.toThrow(
+        "decision must preserve the evaluated initiative and standard version",
+      );
+      await expect(
+        pool.query(
           `INSERT INTO projects (id, organization_id, workspace_id, source_initiative_id, source_decision_id, name, sponsor_actor_id, lead_actor_id, participants, status, created_at, updated_at)
            VALUES ($1,$2,$3,$4,$5,'Proyecto inconsistente',$6,$7,'[]','planned',NOW(),NOW())`,
           [
