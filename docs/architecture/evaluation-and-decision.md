@@ -76,6 +76,10 @@ aplicados. Sus resultados posibles son `approved`, `rejected`, `returned` y
 `returned` habilita una corrección y nueva presentación. Una devolución
 conserva las observaciones en el fundamento y exige `nextReviewOn`; esa fecha
 no puede adjuntarse a ningún otro outcome y PostgreSQL aplica la misma regla.
+Toda decisión, incluido un rechazo, exige un fundamento no vacío tanto en el
+contrato HTTP como en el dominio; por tanto no puede omitirse mediante un caso
+de uso interno. El solicitante recibe el mismo aviso neutral de decisión sin
+exponer outcome, fundamento ni evidencia.
 
 Cuando hay notificaciones configuradas, el solicitante distinto del decisor
 recibe un aviso neutral asociado a la iniciativa. El aviso no incluye outcome,

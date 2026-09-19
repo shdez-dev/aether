@@ -203,4 +203,40 @@ describe("Evaluation and decision", () => {
       "cancelled",
     );
   });
+
+  it("exige fundamento incluso cuando la decisión se crea fuera de HTTP", () => {
+    const evaluation = evaluateInitiative({
+      id: "00000000-0000-4000-8000-000000000030",
+      organizationId: standard.organizationId,
+      workspaceId: "00000000-0000-4000-8000-000000000031",
+      initiativeId: "00000000-0000-4000-8000-000000000032",
+      initiativeVersion: 1,
+      standard,
+      results: [
+        {
+          criterionId: standard.criteria[0]!.id,
+          assessment: "met",
+          evidence: ["Evidencia evaluada."],
+        },
+      ],
+      evaluatedByActorId: "reviewer",
+      evaluatedAt: now,
+    });
+    expect(() =>
+      decideInitiative({
+        id: "00000000-0000-4000-8000-000000000033",
+        organizationId: standard.organizationId,
+        workspaceId: evaluation.workspaceId,
+        initiativeId: evaluation.initiativeId,
+        evaluationId: evaluation.id,
+        outcome: "rejected",
+        rationale: "   ",
+        evidence: ["Acta."],
+        decidedByActorId: "owner",
+        decidedAt: now,
+        nextReviewOn: null,
+        evaluation,
+      }),
+    ).toThrow(new EvaluationDomainError("DECISION_RATIONALE_REQUIRED"));
+  });
 });

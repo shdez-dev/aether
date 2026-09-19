@@ -225,6 +225,8 @@ export function decideInitiative(
     conditions?: readonly DecisionCondition[];
   },
 ): InitiativeDecision {
+  if (!input.rationale.trim())
+    throw new EvaluationDomainError("DECISION_RATIONALE_REQUIRED");
   if (input.outcome !== "approved" && (input.conditions?.length ?? 0) > 0)
     throw new EvaluationDomainError("DECISION_CONDITIONS_REQUIRE_APPROVAL");
   if (input.outcome === "returned" && !input.nextReviewOn)
@@ -316,6 +318,7 @@ export class EvaluationDomainError extends Error {
       | "NEXT_REVIEW_ONLY_FOR_RETURNED_DECISION"
       | "EVALUATION_DOES_NOT_MATCH_INITIATIVE"
       | "EVALUATION_INCOMPLETE"
+      | "DECISION_RATIONALE_REQUIRED"
       | "DECISION_CONDITION_NOT_PENDING"
       | "DECISION_CONDITIONS_REQUIRE_APPROVAL",
   ) {
