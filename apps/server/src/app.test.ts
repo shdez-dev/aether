@@ -29,6 +29,7 @@ import {
   TemporaryAccessGrantService,
   SupportAccessService,
   TenantService,
+  CapacityService,
 } from "@aether/application";
 import {
   InMemoryEvaluationStandardStore,
@@ -3687,6 +3688,156 @@ describe("document project authorization endpoints", () => {
         })
       ).statusCode,
     ).toBe(201);
+    await app.close();
+  });
+
+  it("declara y consulta capacidad con contratos explícitos", async () => {
+    const authStore = new InMemoryAuthStore();
+    const auth = new AuthService({
+      store: authStore,
+      cipher: createAesGcmCipher(config.sessionEncryptionKey),
+      oidc,
+      issuer: config.oidcIssuerUrl,
+      sessionTtlSeconds: config.sessionTtlSeconds,
+      sessionRenewalWindowSeconds: config.sessionRenewalWindowSeconds,
+    });
+    const organizationId = "00000000-0000-4000-8000-000000000001";
+    const projectId = "00000000-0000-4000-8000-000000000002";
+    const period = { startsOn: "2026-10-01", endsOn: "2026-10-07" };
+    const capacity: Pick<
+      CapacityService,
+      "declareAvailability" | "allocate" | "balance"
+    > = {
+      async declareAvailability(input) {
+        expect(input).toMatchObject({
+          actorId: "owner",
+          organizationId,
+          availableActorId: "person",
+          unit: "hours",
+          period,
+          availableEffort: 20,
+        });
+        return {
+          id: "00000000-0000-4000-8000-000000000003",
+          organizationId,
+          actorId: input.availableActorId,
+          unit: input.unit,
+          period: input.period,
+          availableEffort: input.availableEffort,
+          declaredByActorId: input.actorId,
+          declaredAt: new Date("2026-09-20T00:00:00.000Z"),
+        };
+      },
+      async allocate(input) {
+        expect(input).toMatchObject({
+          actorId: "owner",
+          organizationId,
+          projectId,
+          allocatedActorId: "person",
+          unit: "hours",
+          period,
+          allocatedEffort: 15,
+        });
+        return {
+          id: "00000000-0000-4000-8000-000000000004",
+          organizationId,
+          workspaceId: "00000000-0000-4000-8000-000000000005",
+          projectId: input.projectId,
+          actorId: input.allocatedActorId,
+          unit: input.unit,
+          period: input.period,
+          allocatedEffort: input.allocatedEffort,
+          declaredByActorId: input.actorId,
+          declaredAt: new Date("2026-09-20T00:00:00.000Z"),
+        };
+      },
+      async balance(input) {
+        expect(input).toMatchObject({
+          actorId: "owner",
+          organizationId,
+          capacityActorId: "person",
+          unit: "hours",
+          period,
+        });
+        return {
+          availability: {
+            id: "00000000-0000-4000-8000-000000000003",
+            organizationId,
+            actorId: "person",
+            unit: "hours",
+            period,
+            availableEffort: 20,
+            declaredByActorId: "owner",
+            declaredAt: new Date("2026-09-20T00:00:00.000Z"),
+          },
+          allocatedEffort: 27,
+          remainingEffort: 0,
+          overloadEffort: 7,
+        };
+      },
+    };
+    const app = await buildServer({
+      config,
+      auth,
+      tenants: {} as TenantService,
+      initiatives: {} as InitiativeService,
+      evaluations: {} as EvaluationService,
+      projects: {} as ProjectService,
+      capacity: capacity as CapacityService,
+      idempotency: new InMemoryIdempotencyStore(),
+    });
+    await createAuthenticatedSession(authStore, {
+      token: "capacity-session",
+      actorId: "owner",
+      actorEmail: "owner@example.test",
+    });
+    const csrf = "capacity-csrf";
+    const headers = (key: string) => ({
+      origin: config.webOrigin,
+      "x-csrf-token": csrf,
+      "idempotency-key": key,
+      cookie: `aether_session=capacity-session; aether_csrf=${csrf}`,
+    });
+    const availability = await app.inject({
+      method: "POST",
+      url: `/v1/organizations/${organizationId}/capacity-availability`,
+      headers: headers("capacity-availability"),
+      payload: {
+        availableActorId: "person",
+        unit: "hours",
+        period,
+        availableEffort: 20,
+      },
+    });
+    expect(availability.statusCode).toBe(201);
+    expect(availability.json()).toMatchObject({
+      availableEffort: 20,
+      declaredAt: "2026-09-20T00:00:00.000Z",
+    });
+    const allocation = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${projectId}/capacity-allocations`,
+      headers: headers("capacity-allocation"),
+      payload: {
+        organizationId,
+        allocatedActorId: "person",
+        unit: "hours",
+        period,
+        allocatedEffort: 15,
+      },
+    });
+    expect(allocation.statusCode).toBe(201);
+    const balance = await app.inject({
+      method: "GET",
+      url: `/v1/organizations/${organizationId}/capacity-balance?capacityActorId=person&unit=hours&periodStartsOn=2026-10-01&periodEndsOn=2026-10-07`,
+      headers: { cookie: "aether_session=capacity-session" },
+    });
+    expect(balance.statusCode).toBe(200);
+    expect(balance.json()).toMatchObject({
+      allocatedEffort: 27,
+      overloadEffort: 7,
+      availability: { availableEffort: 20 },
+    });
     await app.close();
   });
 });

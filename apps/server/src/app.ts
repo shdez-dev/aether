@@ -55,6 +55,8 @@ import {
   SupportAccessGrantError,
   SupportAccessService,
   ExportService,
+  CapacityDomainError,
+  CapacityService,
 } from "@aether/application";
 import {
   CreateInvitationRequestSchema,
@@ -124,6 +126,9 @@ import {
   OutboxDeadLetterQuerySchema,
   ReplayOutboxDeadLetterRequestSchema,
   ExportRequestSchema,
+  CapacityBalanceQuerySchema,
+  DeclareCapacityAvailabilityRequestSchema,
+  DeclareProjectCapacityAllocationRequestSchema,
 } from "@aether/contracts";
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
@@ -181,6 +186,7 @@ export async function buildServer(input: {
   productMetrics?: ProductMetricsService;
   outboxAdministration?: OutboxAdministrationService;
   exports?: ExportService;
+  capacity?: CapacityService;
   readinessCheck?: () => Promise<void>;
   metrics?: OperationalMetrics;
 }): Promise<FastifyInstance> {
@@ -535,6 +541,8 @@ export async function buildServer(input: {
                                                   "INTAKE_ALREADY_ASSIGNED") ||
                                               error instanceof
                                                 DocumentValidationError ||
+                                              error instanceof
+                                                CapacityDomainError ||
                                               error instanceof
                                                 ProjectDomainError
                                             ? "PRECONDITION_FAILED"
@@ -2278,6 +2286,106 @@ export async function buildServer(input: {
       await input.projects.list({ actorId: session.actorId, ...query })
     ).map(toProjectResponse);
   });
+  app.post(
+    "/v1/organizations/:organizationId/capacity-availability",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      if (!input.capacity)
+        throw new Error("Capacity service is not configured");
+      const params = z
+        .object({ organizationId: z.string().uuid() })
+        .parse(request.params);
+      const body = DeclareCapacityAvailabilityRequestSchema.parse(request.body);
+      return respondIdempotently({
+        request,
+        reply,
+        store: input.idempotency,
+        actorId: session.actorId,
+        operation: `capacity.availability.declare:${params.organizationId}:${body.availableActorId}:${body.unit}:${body.period.startsOn}:${body.period.endsOn}`,
+        requestPayload: { params, body },
+        execute: async () => ({
+          statusCode: 201,
+          body: toCapacityAvailabilityResponse(
+            await input.capacity!.declareAvailability({
+              actorId: session.actorId,
+              organizationId: params.organizationId,
+              ...body,
+            }),
+          ),
+        }),
+      });
+    },
+  );
+  app.get(
+    "/v1/organizations/:organizationId/capacity-balance",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      if (!input.capacity)
+        throw new Error("Capacity service is not configured");
+      const params = z
+        .object({ organizationId: z.string().uuid() })
+        .parse(request.params);
+      const query = CapacityBalanceQuerySchema.parse(request.query);
+      const balance = await input.capacity.balance({
+        actorId: session.actorId,
+        organizationId: params.organizationId,
+        capacityActorId: query.capacityActorId,
+        unit: query.unit,
+        period: {
+          startsOn: query.periodStartsOn,
+          endsOn: query.periodEndsOn,
+        },
+      });
+      return balance ? toCapacityBalanceResponse(balance) : null;
+    },
+  );
+  app.post(
+    "/v1/projects/:projectId/capacity-allocations",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      if (!input.capacity)
+        throw new Error("Capacity service is not configured");
+      const params = z
+        .object({ projectId: z.string().uuid() })
+        .parse(request.params);
+      const body = DeclareProjectCapacityAllocationRequestSchema.parse(
+        request.body,
+      );
+      return respondIdempotently({
+        request,
+        reply,
+        store: input.idempotency,
+        actorId: session.actorId,
+        operation: `capacity.allocation.declare:${params.projectId}:${body.allocatedActorId}:${body.unit}:${body.period.startsOn}:${body.period.endsOn}`,
+        requestPayload: { params, body },
+        execute: async () => ({
+          statusCode: 201,
+          body: toCapacityAllocationResponse(
+            await input.capacity!.allocate({
+              actorId: session.actorId,
+              projectId: params.projectId,
+              ...body,
+            }),
+          ),
+        }),
+      });
+    },
+  );
   app.get("/v1/projects/:projectId", async (request, reply) => {
     const session = await requireSession(
       request,
@@ -3790,6 +3898,31 @@ function toProjectResponse(
     ...project,
     createdAt: project.createdAt.toISOString(),
     updatedAt: project.updatedAt.toISOString(),
+  };
+}
+function toCapacityAvailabilityResponse(
+  availability: {
+    declaredAt: Date;
+  } & Record<string, unknown>,
+) {
+  return { ...availability, declaredAt: availability.declaredAt.toISOString() };
+}
+function toCapacityAllocationResponse(
+  allocation: {
+    declaredAt: Date;
+  } & Record<string, unknown>,
+) {
+  return { ...allocation, declaredAt: allocation.declaredAt.toISOString() };
+}
+function toCapacityBalanceResponse(balance: {
+  availability: { declaredAt: Date } & Record<string, unknown>;
+  allocatedEffort: number;
+  remainingEffort: number;
+  overloadEffort: number;
+}) {
+  return {
+    ...balance,
+    availability: toCapacityAvailabilityResponse(balance.availability),
   };
 }
 function toOrganizationPolicyResponse(policy: {

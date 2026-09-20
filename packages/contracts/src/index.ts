@@ -15,3 +15,4 @@ export * from "./support-access.js";
 export * from "./account-management.js";
 export * from "./outbox.js";
 export * from "./exports.js";
+export * from "./capacity.js";

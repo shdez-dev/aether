@@ -30,6 +30,8 @@ tags:
     description: Ciclo de vida de iniciativas antes de convertirse en proyectos.
   - name: Projects
     description: Compromisos ejecutables con trazabilidad de iniciativa y decisión.
+  - name: Capacity
+    description: Disponibilidad y asignación de esfuerzo planificado por período.
   - name: Audit
     description: Línea temporal autorizada de acciones y eventos.
   - name: Product metrics
@@ -1822,6 +1824,93 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
+  /v1/organizations/{organizationId}/capacity-availability:
+    post:
+      tags: [Capacity]
+      operationId: declareCapacityAvailability
+      summary: Declarar la disponibilidad de una persona para un período
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationId"
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              {
+                $ref: "#/components/schemas/DeclareCapacityAvailabilityRequest",
+              }
+      responses:
+        "201":
+          description: Disponibilidad declarada o actualizada.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CapacityAvailability" }
+        default: { $ref: "#/components/responses/Problem" }
+  /v1/organizations/{organizationId}/capacity-balance:
+    get:
+      tags: [Capacity]
+      operationId: getCapacityBalance
+      summary: Consultar disponibilidad, asignación y sobrecarga de un período
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationId"
+        - name: capacityActorId
+          in: query
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 255 }
+        - name: unit
+          in: query
+          required: true
+          schema: { type: string, enum: [hours, days, points] }
+        - name: periodStartsOn
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: periodEndsOn
+          in: query
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Balance calculado, o null si aún no hay disponibilidad declarada.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/CapacityBalance"
+                  - type: "null"
+        default: { $ref: "#/components/responses/Problem" }
+  /v1/projects/{projectId}/capacity-allocations:
+    post:
+      tags: [Capacity, Projects]
+      operationId: declareProjectCapacityAllocation
+      summary: Asignar esfuerzo de una persona a un proyecto para un período
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              {
+                $ref: "#/components/schemas/DeclareProjectCapacityAllocationRequest",
+              }
+      responses:
+        "201":
+          description: Asignación declarada.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CapacityAllocation" }
+        default: { $ref: "#/components/responses/Problem" }
   /v1/projects:
     get:
       tags: [Projects]
@@ -3953,10 +4042,95 @@ components:
         ownerActorId: { type: string }
         dueOn: { type: [string, "null"], format: date }
         priority: { type: string, enum: [low, medium, high] }
-        estimatedEffort: { type: [number, "null"], exclusiveMinimum: 0, maximum: 1000000 }
-        effortUnit: { type: [string, "null"], enum: [hours, days, points, null] }
+        estimatedEffort:
+          { type: [number, "null"], exclusiveMinimum: 0, maximum: 1000000 }
+        effortUnit:
+          { type: [string, "null"], enum: [hours, days, points, null] }
         periodStartOn: { type: [string, "null"], format: date }
         periodEndOn: { type: [string, "null"], format: date }
+    DeclareCapacityAvailabilityRequest:
+      type: object
+      additionalProperties: false
+      required: [availableActorId, unit, period, availableEffort]
+      properties:
+        availableActorId: { type: string, minLength: 1, maxLength: 255 }
+        unit: { type: string, enum: [hours, days, points] }
+        period: { $ref: "#/components/schemas/CapacityPeriod" }
+        availableEffort: { type: number, exclusiveMinimum: 0, maximum: 1000000 }
+    DeclareProjectCapacityAllocationRequest:
+      type: object
+      additionalProperties: false
+      required:
+        [organizationId, allocatedActorId, unit, period, allocatedEffort]
+      properties:
+        organizationId: { type: string, format: uuid }
+        allocatedActorId: { type: string, minLength: 1, maxLength: 255 }
+        unit: { type: string, enum: [hours, days, points] }
+        period: { $ref: "#/components/schemas/CapacityPeriod" }
+        allocatedEffort: { type: number, exclusiveMinimum: 0, maximum: 1000000 }
+    CapacityPeriod:
+      type: object
+      additionalProperties: false
+      required: [startsOn, endsOn]
+      properties:
+        startsOn: { type: string, format: date }
+        endsOn: { type: string, format: date }
+    CapacityAvailability:
+      type: object
+      required:
+        [
+          id,
+          organizationId,
+          actorId,
+          unit,
+          period,
+          availableEffort,
+          declaredByActorId,
+          declaredAt,
+        ]
+      properties:
+        id: { type: string, format: uuid }
+        organizationId: { type: string, format: uuid }
+        actorId: { type: string }
+        unit: { type: string, enum: [hours, days, points] }
+        period: { $ref: "#/components/schemas/CapacityPeriod" }
+        availableEffort: { type: number, exclusiveMinimum: 0 }
+        declaredByActorId: { type: string }
+        declaredAt: { type: string, format: date-time }
+    CapacityAllocation:
+      type: object
+      required:
+        [
+          id,
+          organizationId,
+          workspaceId,
+          projectId,
+          actorId,
+          unit,
+          period,
+          allocatedEffort,
+          declaredByActorId,
+          declaredAt,
+        ]
+      properties:
+        id: { type: string, format: uuid }
+        organizationId: { type: string, format: uuid }
+        workspaceId: { type: string, format: uuid }
+        projectId: { type: string, format: uuid }
+        actorId: { type: string }
+        unit: { type: string, enum: [hours, days, points] }
+        period: { $ref: "#/components/schemas/CapacityPeriod" }
+        allocatedEffort: { type: number, exclusiveMinimum: 0 }
+        declaredByActorId: { type: string }
+        declaredAt: { type: string, format: date-time }
+    CapacityBalance:
+      type: object
+      required: [availability, allocatedEffort, remainingEffort, overloadEffort]
+      properties:
+        availability: { $ref: "#/components/schemas/CapacityAvailability" }
+        allocatedEffort: { type: number, minimum: 0 }
+        remainingEffort: { type: number, minimum: 0 }
+        overloadEffort: { type: number, minimum: 0 }
     DeclareProjectNextActionDependencyRequest:
       type: object
       additionalProperties: false

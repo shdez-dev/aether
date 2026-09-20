@@ -19,6 +19,7 @@ import {
   TemporaryAccessGrantService,
   SupportAccessService,
   ExportService,
+  CapacityService,
 } from "@aether/application";
 import {
   AuthService,
@@ -56,6 +57,7 @@ import {
   PostgresTemporaryAccessGrantStore,
   PostgresSupportAccessGrantStore,
   PostgresExportJobStore,
+  PostgresCapacityStore,
 } from "@aether/database";
 import {
   createOperationalMetrics,
@@ -243,6 +245,13 @@ const exports = new ExportService({
   ids: { next: randomUUID },
   clock: { now: () => new Date() },
 });
+const capacity = new CapacityService({
+  store: new PostgresCapacityStore(pool),
+  projects: new PostgresProjectStore(pool),
+  tenancy: new PostgresTenantStore(pool),
+  ids: { next: randomUUID },
+  clock: { now: () => new Date() },
+});
 const app = await buildServer({
   config,
   auth,
@@ -266,6 +275,7 @@ const app = await buildServer({
   productMetrics,
   outboxAdministration,
   exports,
+  capacity,
   metrics,
   readinessCheck: async () => {
     await pool.query("SELECT 1");

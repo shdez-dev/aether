@@ -8,6 +8,8 @@ import {
   type Project,
 } from "@aether/domain";
 
+export { CapacityDomainError } from "@aether/domain";
+
 import {
   AccessDeniedError,
   ResourceNotFoundError,
