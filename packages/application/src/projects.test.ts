@@ -158,6 +158,26 @@ describe("ProjectService", () => {
         organizationId: "organization-1",
         projectId: "project-1",
         expectedVersion: 3,
+        status: "active",
+        correlationId: "correlation-resume-without-replan",
+      }),
+    ).rejects.toMatchObject({ code: "PROJECT_REPLAN_REQUIRED" });
+    await expect(
+      service.resume({
+        actorId: "owner",
+        organizationId: "organization-1",
+        projectId: "project-1",
+        expectedVersion: 3,
+        replanNote: "Se ajustó el hito y la próxima acción.",
+        correlationId: "correlation-resume",
+      }),
+    ).resolves.toMatchObject({ status: "active", version: 4 });
+    await expect(
+      service.changeStatus({
+        actorId: "owner",
+        organizationId: "organization-1",
+        projectId: "project-1",
+        expectedVersion: 4,
         status: "cancelled",
         correlationId: "correlation-cancel-without-reason",
       }),
@@ -167,10 +187,10 @@ describe("ProjectService", () => {
         actorId: "owner",
         organizationId: "organization-1",
         projectId: "project-1",
-        expectedVersion: 3,
+        expectedVersion: 4,
         reason: "El patrocinador retiró el mandato.",
         correlationId: "correlation-cancel",
       }),
-    ).resolves.toMatchObject({ status: "cancelled", version: 4 });
+    ).resolves.toMatchObject({ status: "cancelled", version: 5 });
   });
 });

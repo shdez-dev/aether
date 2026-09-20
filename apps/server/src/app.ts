@@ -93,6 +93,7 @@ import {
   TransferProjectWorkspaceRequestSchema,
   CancelProjectRequestSchema,
   PauseProjectRequestSchema,
+  ResumeProjectRequestSchema,
   CreateProjectFromInitiativeRequestSchema,
   PublishEvaluationStandardRequestSchema,
   PublishTriageStandardRequestSchema,
@@ -2476,6 +2477,37 @@ export async function buildServer(input: {
         statusCode: 200,
         body: toProjectResponse(
           await input.projects.pause({
+            actorId: session.actorId,
+            correlationId: correlationId(reply),
+            projectId: params.projectId,
+            ...body,
+          }),
+        ),
+      }),
+    });
+  });
+  app.post("/v1/projects/:projectId/resume", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    const params = z
+      .object({ projectId: z.string().uuid() })
+      .parse(request.params);
+    const body = ResumeProjectRequestSchema.parse(request.body);
+    return respondIdempotently({
+      request,
+      reply,
+      store: input.idempotency,
+      actorId: session.actorId,
+      operation: `project.resume:${params.projectId}`,
+      requestPayload: body,
+      execute: async () => ({
+        statusCode: 200,
+        body: toProjectResponse(
+          await input.projects.resume({
             actorId: session.actorId,
             correlationId: correlationId(reply),
             projectId: params.projectId,

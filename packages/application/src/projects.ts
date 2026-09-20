@@ -248,6 +248,8 @@ export class ProjectService {
       input.projectId,
       input.organizationId,
     );
+    if (input.status === "active" && project.status === "paused")
+      throw new ProjectDomainError("PROJECT_REPLAN_REQUIRED");
     await this.assertExecutionAccess(
       input.actorId,
       project,
@@ -289,6 +291,44 @@ export class ProjectService {
       input.correlationId,
       "project.status_changed.v1",
       { fromStatus: project.status, toStatus: updated.status },
+    );
+    return updated;
+  }
+  async resume(input: {
+    actorId: string;
+    organizationId: string;
+    projectId: string;
+    expectedVersion: number;
+    replanNote: string;
+    correlationId: string;
+  }): Promise<Project> {
+    const project = await this.requireProject(
+      input.projectId,
+      input.organizationId,
+    );
+    await this.assertExecutionAccess(
+      input.actorId,
+      project,
+      input.correlationId,
+    );
+    if (project.version !== input.expectedVersion || !input.replanNote.trim())
+      throw new ProjectDomainError("PROJECT_REPLAN_REQUIRED");
+    const updated = transitionProject(
+      project,
+      "active",
+      this.dependencies.clock.now(),
+    );
+    const saved = await this.dependencies.projects.save({
+      project: updated,
+      expectedVersion: project.version,
+    });
+    if (!saved) throw new ProjectVersionConflictError();
+    await this.record(
+      updated,
+      input.actorId,
+      input.correlationId,
+      "project.resumed.v1",
+      { replanNote: input.replanNote.trim() },
     );
     return updated;
   }

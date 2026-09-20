@@ -2050,6 +2050,31 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Project" }
         default: { $ref: "#/components/responses/Problem" }
+  /v1/projects/{projectId}/resume:
+    post:
+      tags: [Projects]
+      operationId: resumeProject
+      summary: Reactivar un proyecto pausado con replanificación explícita
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ResumeProjectRequest" }
+      responses:
+        "200":
+          description: Proyecto reactivado y replanificación registrada.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Project" }
+        default: { $ref: "#/components/responses/Problem" }
   /v1/projects/{projectId}/milestones:
     post:
       tags: [Projects]
@@ -3862,6 +3887,14 @@ components:
         reason: { type: string, minLength: 1, maxLength: 2000 }
         responsibleActorId: { type: string, minLength: 1, maxLength: 255 }
         reviewOn: { type: string, format: date }
+    ResumeProjectRequest:
+      type: object
+      additionalProperties: false
+      required: [organizationId, expectedVersion, replanNote]
+      properties:
+        organizationId: { type: string, format: uuid }
+        expectedVersion: { type: integer, minimum: 0 }
+        replanNote: { type: string, minLength: 1, maxLength: 2000 }
     AddProjectMilestoneRequest:
       type: object
       additionalProperties: false

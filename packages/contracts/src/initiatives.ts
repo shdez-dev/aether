@@ -261,6 +261,11 @@ export const PauseProjectRequestSchema = z.object({
   responsibleActorId: z.string().min(1).max(255),
   reviewOn: z.string().date(),
 });
+export const ResumeProjectRequestSchema = z.object({
+  organizationId: UuidSchema,
+  expectedVersion: z.number().int().nonnegative(),
+  replanNote: NonEmptyTextSchema.max(2_000),
+});
 export const AddProjectMilestoneRequestSchema = z.object({
   organizationId: UuidSchema,
   title: NonEmptyTextSchema.max(255),
