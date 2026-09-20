@@ -15,6 +15,7 @@ import { ApiProblemSchema } from "@aether/contracts";
 import { parse } from "yaml";
 import {
   EvaluationService,
+  DiagnosticService,
   IntakeService,
   TriageService,
   AuditHistoryService,
@@ -2974,6 +2975,131 @@ describe("Project conversion idempotency", () => {
       code: "IDEMPOTENCY_KEY_REUSED",
     });
     expect(calls).toHaveLength(1);
+  });
+});
+
+describe("Initiative diagnostic endpoints", () => {
+  it("validates evidence, serializes dates and replays a diagnostic save", async () => {
+    const authStore = new InMemoryAuthStore();
+    const auth = new AuthService({
+      store: authStore,
+      cipher: createAesGcmCipher(config.sessionEncryptionKey),
+      oidc,
+      issuer: config.oidcIssuerUrl,
+      sessionTtlSeconds: config.sessionTtlSeconds,
+      sessionRenewalWindowSeconds: config.sessionRenewalWindowSeconds,
+    });
+    const organizationId = crypto.randomUUID();
+    const workspaceId = crypto.randomUUID();
+    const initiativeId = crypto.randomUUID();
+    const savedAt = new Date("2026-09-19T12:00:00.000Z");
+    const calls: unknown[] = [];
+    const diagnostic = {
+      id: crypto.randomUUID(),
+      organizationId,
+      workspaceId,
+      initiativeId,
+      version: 0,
+      beneficiaries: ["Personas usuarias"],
+      causes: [
+        {
+          kind: "evidence" as const,
+          text: "Demora documentada",
+          source: "Registro",
+        },
+      ],
+      constraints: [],
+      previousAttempts: [],
+      hypotheses: [],
+      scope: "Atención interna",
+      risks: [],
+      resources: [],
+      nextExperiment: null,
+      savedByActorId: "owner",
+      savedAt,
+    };
+    const diagnostics = {
+      async get() {
+        return null;
+      },
+      async save(input: unknown) {
+        calls.push(input);
+        return diagnostic;
+      },
+    } as unknown as DiagnosticService;
+    const app = await buildServer({
+      config,
+      auth,
+      tenants: {} as TenantService,
+      initiatives: {} as InitiativeService,
+      evaluations: {} as EvaluationService,
+      projects: {} as ProjectService,
+      diagnostics,
+      idempotency: new InMemoryIdempotencyStore(),
+    });
+    await createAuthenticatedSession(authStore, {
+      token: "diagnostic-session",
+      actorId: "owner",
+      actorEmail: "owner@example.test",
+    });
+    const headers = {
+      origin: config.webOrigin,
+      "x-csrf-token": "diagnostic-csrf",
+      "idempotency-key": "diagnostic-key",
+      cookie: "aether_session=diagnostic-session; aether_csrf=diagnostic-csrf",
+    };
+    const payload = {
+      organizationId,
+      expectedVersion: null,
+      beneficiaries: ["Personas usuarias"],
+      causes: [
+        { kind: "evidence", text: "Demora documentada", source: "Registro" },
+      ],
+      constraints: [],
+      previousAttempts: [],
+      hypotheses: [],
+      scope: "Atención interna",
+      risks: [],
+      resources: [],
+      nextExperiment: null,
+    };
+    const invalid = await app.inject({
+      method: "PUT",
+      url: `/v1/initiatives/${initiativeId}/diagnostic`,
+      headers: { ...headers, "idempotency-key": "diagnostic-invalid" },
+      payload: {
+        ...payload,
+        causes: [{ kind: "evidence", text: "Sin fuente", source: null }],
+      },
+    });
+    expect(invalid.statusCode).toBe(400);
+    const saved = await app.inject({
+      method: "PUT",
+      url: `/v1/initiatives/${initiativeId}/diagnostic`,
+      headers,
+      payload,
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json()).toMatchObject({
+      id: diagnostic.id,
+      savedAt: savedAt.toISOString(),
+    });
+    const replayed = await app.inject({
+      method: "PUT",
+      url: `/v1/initiatives/${initiativeId}/diagnostic`,
+      headers,
+      payload,
+    });
+    expect(replayed.statusCode).toBe(200);
+    expect(replayed.headers["idempotent-replayed"]).toBe("true");
+    expect(calls).toEqual([
+      expect.objectContaining({
+        actorId: "owner",
+        organizationId,
+        initiativeId,
+      }),
+    ]);
+    await app.close();
   });
 });
 

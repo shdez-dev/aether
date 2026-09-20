@@ -22,7 +22,8 @@ export type InitiativeDiagnostic = Readonly<{
   constraints: readonly DiagnosticEntry[];
   previousAttempts: readonly DiagnosticEntry[];
   hypotheses: readonly DiagnosticEntry[];
-  scope: string;
+  /** Null is retained only for diagnostics created before operational context existed. */
+  scope: string | null;
   risks: readonly DiagnosticEntry[];
   resources: readonly string[];
   nextExperiment: string | null;
@@ -32,8 +33,11 @@ export type InitiativeDiagnostic = Readonly<{
 
 export type InitiativeDiagnosticInput = Omit<
   InitiativeDiagnostic,
-  "version" | "savedAt"
->;
+  "version" | "savedAt" | "scope"
+> & {
+  /** Every new save captures a non-empty operational scope. */
+  scope: string;
+};
 
 export function saveInitiativeDiagnostic(input: {
   current: InitiativeDiagnostic | null;
@@ -53,6 +57,8 @@ export function saveInitiativeDiagnostic(input: {
     throw new DiagnosticDomainError("DIAGNOSTIC_BENEFICIARY_REQUIRED");
   if (!input.diagnostic.scope.trim())
     throw new DiagnosticDomainError("DIAGNOSTIC_SCOPE_REQUIRED");
+  if (input.diagnostic.resources.some((resource) => !resource.trim()))
+    throw new DiagnosticDomainError("DIAGNOSTIC_RESOURCE_REQUIRED");
   return {
     ...input.diagnostic,
     beneficiaries: [...input.diagnostic.beneficiaries],
@@ -68,7 +74,10 @@ export function saveInitiativeDiagnostic(input: {
 }
 
 function validateEntry(entry: DiagnosticEntry) {
-  if (!entry.text.trim()) throw new DiagnosticDomainError("DIAGNOSTIC_ENTRY_REQUIRED");
+  if (!DiagnosticEntryKinds.includes(entry.kind))
+    throw new DiagnosticDomainError("DIAGNOSTIC_ENTRY_KIND_INVALID");
+  if (!entry.text.trim())
+    throw new DiagnosticDomainError("DIAGNOSTIC_ENTRY_REQUIRED");
   if (entry.kind === "evidence" && !entry.source?.trim())
     throw new DiagnosticDomainError("DIAGNOSTIC_EVIDENCE_SOURCE_REQUIRED");
 }
@@ -79,7 +88,9 @@ export class DiagnosticDomainError extends Error {
       | "DIAGNOSTIC_BENEFICIARY_REQUIRED"
       | "DIAGNOSTIC_ENTRY_REQUIRED"
       | "DIAGNOSTIC_EVIDENCE_SOURCE_REQUIRED"
-      | "DIAGNOSTIC_SCOPE_REQUIRED",
+      | "DIAGNOSTIC_SCOPE_REQUIRED"
+      | "DIAGNOSTIC_RESOURCE_REQUIRED"
+      | "DIAGNOSTIC_ENTRY_KIND_INVALID",
   ) {
     super(code);
   }

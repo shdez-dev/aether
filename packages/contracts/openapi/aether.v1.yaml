@@ -1092,7 +1092,8 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/PublishTriageStandardRequest" }
+            schema:
+              { $ref: "#/components/schemas/PublishTriageStandardRequest" }
       responses:
         "201":
           description: Estándar de triage publicado.
@@ -1118,7 +1119,8 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/ActivateTriageStandardRequest" }
+            schema:
+              { $ref: "#/components/schemas/ActivateTriageStandardRequest" }
       responses:
         "204": { description: Versión de triage adoptada y activada. }
         default: { $ref: "#/components/responses/Problem" }
@@ -1212,7 +1214,8 @@ paths:
             application/json:
               schema:
                 type: array
-                items: { $ref: "#/components/schemas/UnassignedIntakeException" }
+                items:
+                  { $ref: "#/components/schemas/UnassignedIntakeException" }
         default: { $ref: "#/components/responses/Problem" }
   /v1/initiatives/{initiativeId}/relationships:
     get:
@@ -1236,34 +1239,6 @@ paths:
                 type: array
                 items: { $ref: "#/components/schemas/InitiativeRelationship" }
         default: { $ref: "#/components/responses/Problem" }
-  /v1/initiatives/{initiativeId}/diagnostic:
-    get:
-      tags: [Initiatives]
-      operationId: getInitiativeDiagnostic
-      security: [{ cookieSession: [] }]
-      parameters:
-        - name: initiativeId
-          in: path
-          required: true
-          schema: { type: string, format: uuid }
-        - $ref: "#/components/parameters/OrganizationContextId"
-      responses:
-        "200": { description: Borrador de diagnóstico o null. }
-        default: { $ref: "#/components/responses/Problem" }
-    put:
-      tags: [Initiatives]
-      operationId: saveInitiativeDiagnostic
-      security: [{ cookieSession: [] }]
-      parameters:
-        - name: initiativeId
-          in: path
-          required: true
-          schema: { type: string, format: uuid }
-        - $ref: "#/components/parameters/CsrfToken"
-        - $ref: "#/components/parameters/IdempotencyKey"
-      responses:
-        "200": { description: Borrador de diagnóstico guardado. }
-        default: { $ref: "#/components/responses/Problem" }
     post:
       tags: [Initiatives]
       operationId: declareInitiativeRelationship
@@ -1281,13 +1256,61 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/DeclareInitiativeRelationshipRequest" }
+            schema:
+              {
+                $ref: "#/components/schemas/DeclareInitiativeRelationshipRequest",
+              }
       responses:
         "201":
           description: Relación append-only declarada por el solicitante.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/InitiativeRelationship" }
+        default: { $ref: "#/components/responses/Problem" }
+  /v1/initiatives/{initiativeId}/diagnostic:
+    get:
+      tags: [Initiatives]
+      operationId: getInitiativeDiagnostic
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: initiativeId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/OrganizationContextId"
+      responses:
+        "200":
+          description: Borrador de diagnóstico o null.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/InitiativeDiagnostic"
+                  - type: "null"
+        default: { $ref: "#/components/responses/Problem" }
+    put:
+      tags: [Initiatives]
+      operationId: saveInitiativeDiagnostic
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: initiativeId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              { $ref: "#/components/schemas/SaveInitiativeDiagnosticRequest" }
+      responses:
+        "200":
+          description: Borrador de diagnóstico guardado.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InitiativeDiagnostic" }
         default: { $ref: "#/components/responses/Problem" }
   /v1/initiatives/{initiativeId}/review-assignments:
     post:
@@ -3124,12 +3147,17 @@ components:
             properties:
               criterionId: { type: string, format: uuid }
               assessment:
-                { type: [string, "null"], enum: [pass, fail, not_applicable, null] }
-              justification: { type: array, items: { type: string }, maxItems: 50 }
+                {
+                  type: [string, "null"],
+                  enum: [pass, fail, not_applicable, null],
+                }
+              justification:
+                { type: array, items: { type: string }, maxItems: 50 }
     AssignIntakeResponsibilityRequest:
       type: object
       additionalProperties: false
-      required: [organizationId, expectedVersion, responsibleActorId, nextReviewOn]
+      required:
+        [organizationId, expectedVersion, responsibleActorId, nextReviewOn]
       properties:
         organizationId: { type: string, format: uuid }
         expectedVersion: { type: integer, minimum: 0 }
@@ -3137,7 +3165,17 @@ components:
         nextReviewOn: { type: string, format: date }
     IntakeResponsibility:
       type: object
-      required: [id, organizationId, workspaceId, initiativeId, responsibleActorId, assignedByActorId, assignedAt, nextReviewOn]
+      required:
+        [
+          id,
+          organizationId,
+          workspaceId,
+          initiativeId,
+          responsibleActorId,
+          assignedByActorId,
+          assignedAt,
+          nextReviewOn,
+        ]
       properties:
         id: { type: string, format: uuid }
         organizationId: { type: string, format: uuid }
@@ -3157,7 +3195,17 @@ components:
         kind: { type: string, enum: [related, continues] }
     InitiativeRelationship:
       type: object
-      required: [id, organizationId, workspaceId, sourceInitiativeId, targetInitiativeId, kind, declaredByActorId, declaredAt]
+      required:
+        [
+          id,
+          organizationId,
+          workspaceId,
+          sourceInitiativeId,
+          targetInitiativeId,
+          kind,
+          declaredByActorId,
+          declaredAt,
+        ]
       properties:
         id: { type: string, format: uuid }
         organizationId: { type: string, format: uuid }
@@ -3167,6 +3215,137 @@ components:
         kind: { type: string, enum: [related, continues] }
         declaredByActorId: { type: string }
         declaredAt: { type: string, format: date-time }
+    DiagnosticEntry:
+      type: object
+      additionalProperties: false
+      required: [kind, text, source]
+      properties:
+        kind: { type: string, enum: [evidence, opinion, uncertainty] }
+        text: { type: string, minLength: 1, maxLength: 2000 }
+        source: { type: [string, "null"], maxLength: 2000 }
+    SaveInitiativeDiagnosticRequest:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          organizationId,
+          expectedVersion,
+          beneficiaries,
+          causes,
+          constraints,
+          previousAttempts,
+          hypotheses,
+          scope,
+          risks,
+          resources,
+          nextExperiment,
+        ]
+      properties:
+        organizationId: { type: string, format: uuid }
+        expectedVersion: { type: [integer, "null"], minimum: 0 }
+        beneficiaries:
+          {
+            type: array,
+            maxItems: 100,
+            items: { type: string, minLength: 1, maxLength: 255 },
+          }
+        causes:
+          {
+            type: array,
+            maxItems: 100,
+            items: { $ref: "#/components/schemas/DiagnosticEntry" },
+          }
+        constraints:
+          {
+            type: array,
+            maxItems: 100,
+            items: { $ref: "#/components/schemas/DiagnosticEntry" },
+          }
+        previousAttempts:
+          {
+            type: array,
+            maxItems: 100,
+            items: { $ref: "#/components/schemas/DiagnosticEntry" },
+          }
+        hypotheses:
+          {
+            type: array,
+            maxItems: 100,
+            items: { $ref: "#/components/schemas/DiagnosticEntry" },
+          }
+        scope: { type: string, minLength: 1, maxLength: 2000 }
+        risks:
+          {
+            type: array,
+            maxItems: 100,
+            items: { $ref: "#/components/schemas/DiagnosticEntry" },
+          }
+        resources:
+          {
+            type: array,
+            maxItems: 100,
+            items: { type: string, minLength: 1, maxLength: 255 },
+          }
+        nextExperiment:
+          { type: [string, "null"], minLength: 1, maxLength: 2000 }
+    InitiativeDiagnostic:
+      type: object
+      required:
+        [
+          id,
+          organizationId,
+          workspaceId,
+          initiativeId,
+          version,
+          beneficiaries,
+          causes,
+          constraints,
+          previousAttempts,
+          hypotheses,
+          scope,
+          risks,
+          resources,
+          nextExperiment,
+          savedByActorId,
+          savedAt,
+        ]
+      properties:
+        id: { type: string, format: uuid }
+        organizationId: { type: string, format: uuid }
+        workspaceId: { type: string, format: uuid }
+        initiativeId: { type: string, format: uuid }
+        version: { type: integer, minimum: 0 }
+        beneficiaries: { type: array, items: { type: string } }
+        causes:
+          {
+            type: array,
+            items: { $ref: "#/components/schemas/DiagnosticEntry" },
+          }
+        constraints:
+          {
+            type: array,
+            items: { $ref: "#/components/schemas/DiagnosticEntry" },
+          }
+        previousAttempts:
+          {
+            type: array,
+            items: { $ref: "#/components/schemas/DiagnosticEntry" },
+          }
+        hypotheses:
+          {
+            type: array,
+            items: { $ref: "#/components/schemas/DiagnosticEntry" },
+          }
+        scope: { type: [string, "null"] }
+        risks:
+          {
+            type: array,
+            items: { $ref: "#/components/schemas/DiagnosticEntry" },
+          }
+        resources: { type: array, items: { type: string } }
+        nextExperiment: { type: [string, "null"] }
+        savedByActorId: { type: string }
+        savedAt: { type: string, format: date-time }
     UnassignedIntakeException:
       type: object
       required: [organizationId, workspaceId, initiativeId, title, updatedAt]
@@ -3178,7 +3357,17 @@ components:
         updatedAt: { type: string, format: date-time }
     TriageStandard:
       type: object
-      required: [id, organizationId, name, version, criteria, isActive, publishedAt, publishedByActorId]
+      required:
+        [
+          id,
+          organizationId,
+          name,
+          version,
+          criteria,
+          isActive,
+          publishedAt,
+          publishedByActorId,
+        ]
       properties:
         id: { type: string, format: uuid }
         organizationId: { type: string, format: uuid }
@@ -3192,7 +3381,19 @@ components:
         publishedByActorId: { type: string }
     InitiativeTriage:
       type: object
-      required: [id, organizationId, workspaceId, initiativeId, initiativeVersion, standardId, standardVersion, criteria, assessedByActorId, assessedAt]
+      required:
+        [
+          id,
+          organizationId,
+          workspaceId,
+          initiativeId,
+          initiativeVersion,
+          standardId,
+          standardVersion,
+          criteria,
+          assessedByActorId,
+          assessedAt,
+        ]
       properties:
         id: { type: string, format: uuid }
         organizationId: { type: string, format: uuid }
@@ -3209,7 +3410,10 @@ components:
             properties:
               criterion: { $ref: "#/components/schemas/TriageCriterion" }
               assessment:
-                { type: [string, "null"], enum: [pass, fail, not_applicable, null] }
+                {
+                  type: [string, "null"],
+                  enum: [pass, fail, not_applicable, null],
+                }
               justification: { type: array, items: { type: string } }
         assessedByActorId: { type: string }
         assessedAt: { type: string, format: date-time }

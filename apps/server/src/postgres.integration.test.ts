@@ -7,6 +7,7 @@ import { PostgreSqlContainer } from "@testcontainers/postgresql";
 import {
   AccessDeniedError,
   EvaluationService,
+  DiagnosticService,
   IntakeService,
   TriageService,
   InitiativeVersionConflictError,
@@ -31,6 +32,7 @@ import {
   PostgresTriageStandardStore,
   PostgresTriageStore,
   PostgresInitiativeAuditStore,
+  PostgresDiagnosticStore,
   PostgresInitiativeStore,
   PostgresIntakeAssignmentStore,
   PostgresIdempotencyStore,
@@ -1732,6 +1734,56 @@ describe.sequential("PostgreSQL integration", () => {
         classification: "internal",
         requestedPriority: "medium",
       });
+      const diagnostics = new DiagnosticService({
+        store: new PostgresDiagnosticStore(pool),
+        initiatives: initiativesStore,
+        tenancy: tenantStore,
+        ids,
+        clock,
+      });
+      const diagnostic = await diagnostics.save({
+        actorId: owner,
+        organizationId: organization.id,
+        initiativeId: draft.id,
+        expectedVersion: null,
+        correlationId: randomUUID(),
+        beneficiaries: ["Personas que esperan atención"],
+        causes: [
+          {
+            kind: "evidence",
+            text: "La mediana supera treinta días",
+            source: "Registro de atención",
+          },
+        ],
+        constraints: [],
+        previousAttempts: [],
+        hypotheses: [],
+        scope: "Solicitudes internas del área de atención",
+        risks: [],
+        resources: ["Equipo de atención"],
+        nextExperiment: "Probar clasificación inicial durante una semana",
+      });
+      await expect(
+        diagnostics.get({
+          actorId: owner,
+          organizationId: organization.id,
+          initiativeId: draft.id,
+        }),
+      ).resolves.toMatchObject({
+        id: diagnostic.id,
+        scope: "Solicitudes internas del área de atención",
+      });
+      await expect(
+        pool.query(
+          "UPDATE initiative_diagnostics SET causes = $1 WHERE initiative_id = $2",
+          [
+            JSON.stringify([
+              { kind: "evidence", text: "Sin fuente", source: null },
+            ]),
+            draft.id,
+          ],
+        ),
+      ).rejects.toThrow("invalid diagnostic entry");
       expect(await initiativesStore.findById(draft.id)).toMatchObject({
         requestedPriority: "medium",
         operationalPriority: null,
