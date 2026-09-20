@@ -1447,6 +1447,15 @@ describe.sequential("PostgreSQL integration", () => {
       ).rejects.toThrow(
         "external dependency requires scoped execution authority",
       );
+      await expect(
+        pool.query(
+          `INSERT INTO project_change_requests (id, project_id, title, reason, impact, requested_by_actor_id, requested_at, status)
+           VALUES ($1,$2,'Unscoped change','Attempted bypass','Would alter scope','outsider','2026-01-03T00:00:00Z','pending')`,
+          [randomUUID(), activeProjectId],
+        ),
+      ).rejects.toThrow(
+        "change request requires project execution authority",
+      );
       const activeActionId = randomUUID();
       const otherActiveActionId = randomUUID();
       const closedActionId = randomUUID();
