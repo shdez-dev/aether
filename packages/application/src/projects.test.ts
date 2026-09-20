@@ -141,11 +141,23 @@ describe("ProjectService", () => {
     ).rejects.toBeInstanceOf(AccessDeniedError);
     expect(storedProject).toMatchObject({ status: "active", version: 2 });
     await expect(
-      service.changeStatus({
+      service.pause({
         actorId: "owner",
         organizationId: "organization-1",
         projectId: "project-1",
         expectedVersion: 2,
+        reason: "Dependencia externa aún no resuelta.",
+        responsibleActorId: "owner",
+        reviewOn: "2026-10-01",
+        correlationId: "correlation-pause",
+      }),
+    ).resolves.toMatchObject({ status: "paused", version: 3 });
+    await expect(
+      service.changeStatus({
+        actorId: "owner",
+        organizationId: "organization-1",
+        projectId: "project-1",
+        expectedVersion: 3,
         status: "cancelled",
         correlationId: "correlation-cancel-without-reason",
       }),
@@ -155,10 +167,10 @@ describe("ProjectService", () => {
         actorId: "owner",
         organizationId: "organization-1",
         projectId: "project-1",
-        expectedVersion: 2,
+        expectedVersion: 3,
         reason: "El patrocinador retiró el mandato.",
         correlationId: "correlation-cancel",
       }),
-    ).resolves.toMatchObject({ status: "cancelled", version: 3 });
+    ).resolves.toMatchObject({ status: "cancelled", version: 4 });
   });
 });

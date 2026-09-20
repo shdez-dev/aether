@@ -240,6 +240,8 @@ export class ProjectService {
     status: ProjectStatus;
     correlationId: string;
   }): Promise<Project> {
+    if (input.status === "paused")
+      throw new ProjectDomainError("PROJECT_PAUSE_CONTEXT_REQUIRED");
     if (input.status === "cancelled")
       throw new ProjectDomainError("PROJECT_CANCELLATION_REASON_REQUIRED");
     const project = await this.requireProject(
@@ -287,6 +289,52 @@ export class ProjectService {
       input.correlationId,
       "project.status_changed.v1",
       { fromStatus: project.status, toStatus: updated.status },
+    );
+    return updated;
+  }
+  async pause(input: {
+    actorId: string;
+    organizationId: string;
+    projectId: string;
+    expectedVersion: number;
+    reason: string;
+    responsibleActorId: string;
+    reviewOn: string;
+    correlationId: string;
+  }): Promise<Project> {
+    const project = await this.requireProject(
+      input.projectId,
+      input.organizationId,
+    );
+    await this.assertExecutionAccess(
+      input.actorId,
+      project,
+      input.correlationId,
+    );
+    await this.assertMember(input.responsibleActorId, project.organizationId);
+    if (project.version !== input.expectedVersion || !input.reason.trim())
+      throw new ProjectDomainError("PROJECT_PAUSE_CONTEXT_REQUIRED");
+    const updated = transitionProject(
+      project,
+      "paused",
+      this.dependencies.clock.now(),
+    );
+    const saved = await this.dependencies.projects.save({
+      project: updated,
+      expectedVersion: project.version,
+    });
+    if (!saved) throw new ProjectVersionConflictError();
+    await this.record(
+      updated,
+      input.actorId,
+      input.correlationId,
+      "project.paused.v1",
+      {
+        reason: input.reason.trim(),
+        responsibleActorId: input.responsibleActorId,
+        reviewOn: input.reviewOn,
+        fromStatus: project.status,
+      },
     );
     return updated;
   }

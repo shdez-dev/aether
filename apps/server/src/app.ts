@@ -92,6 +92,7 @@ import {
   ReplaceProjectLeadRequestSchema,
   TransferProjectWorkspaceRequestSchema,
   CancelProjectRequestSchema,
+  PauseProjectRequestSchema,
   CreateProjectFromInitiativeRequestSchema,
   PublishEvaluationStandardRequestSchema,
   PublishTriageStandardRequestSchema,
@@ -2444,6 +2445,37 @@ export async function buildServer(input: {
         statusCode: 200,
         body: toProjectResponse(
           await input.projects.cancel({
+            actorId: session.actorId,
+            correlationId: correlationId(reply),
+            projectId: params.projectId,
+            ...body,
+          }),
+        ),
+      }),
+    });
+  });
+  app.post("/v1/projects/:projectId/pause", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    const params = z
+      .object({ projectId: z.string().uuid() })
+      .parse(request.params);
+    const body = PauseProjectRequestSchema.parse(request.body);
+    return respondIdempotently({
+      request,
+      reply,
+      store: input.idempotency,
+      actorId: session.actorId,
+      operation: `project.pause:${params.projectId}`,
+      requestPayload: body,
+      execute: async () => ({
+        statusCode: 200,
+        body: toProjectResponse(
+          await input.projects.pause({
             actorId: session.actorId,
             correlationId: correlationId(reply),
             projectId: params.projectId,
