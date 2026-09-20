@@ -18,6 +18,7 @@ export * from "./notifications.js";
 export * from "./comments.js";
 export * from "./exports.js";
 export * from "./metrics.js";
+export * from "./capacity.js";
 export * from "./access-grants.js";
 export * from "./support-access.js";
 export * from "./worker-authorization.js";
