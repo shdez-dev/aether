@@ -3731,7 +3731,15 @@ components:
           {
             type: string,
             enum:
-              [pending_lead, planned, active, blocked, completed, cancelled],
+              [
+                pending_lead,
+                planned,
+                active,
+                paused,
+                blocked,
+                completed,
+                cancelled,
+              ],
           }
     AssignProjectLeadRequest:
       type: object
@@ -3869,7 +3877,15 @@ components:
           {
             type: string,
             enum:
-              [pending_lead, planned, active, blocked, completed, cancelled],
+              [
+                pending_lead,
+                planned,
+                active,
+                paused,
+                blocked,
+                completed,
+                cancelled,
+              ],
           }
         version: { type: integer }
         createdAt: { type: string, format: date-time }

@@ -2,6 +2,7 @@ export const ProjectStatuses = [
   "pending_lead",
   "planned",
   "active",
+  "paused",
   "blocked",
   "completed",
   "cancelled",
@@ -77,8 +78,9 @@ export type ProjectDeliverableAcceptance = Readonly<{
 const transitions: Record<ProjectStatus, readonly ProjectStatus[]> = {
   pending_lead: ["planned", "cancelled"],
   planned: ["active", "cancelled"],
-  active: ["blocked", "completed", "cancelled"],
-  blocked: ["active", "cancelled"],
+  active: ["paused", "blocked", "completed", "cancelled"],
+  paused: ["active", "cancelled"],
+  blocked: ["active", "paused", "cancelled"],
   completed: [],
   cancelled: [],
 };
@@ -174,7 +176,9 @@ export function replaceProjectLead(input: {
   const previousLeadActorId = input.project.leadActorId;
   if (
     !previousLeadActorId ||
-    !["planned", "active", "blocked"].includes(input.project.status) ||
+    !["planned", "active", "paused", "blocked"].includes(
+      input.project.status,
+    ) ||
     input.leadActorId === previousLeadActorId ||
     input.leadActorId === input.project.sponsorActorId ||
     !input.reason.trim()

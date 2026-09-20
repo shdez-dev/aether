@@ -1077,9 +1077,9 @@ export class PostgresTenantStore implements TenantStore {
       }
       const responsibilities = await client.query<{ exists: boolean }>(
         `SELECT EXISTS (
-          SELECT 1 FROM projects WHERE organization_id = $1 AND status IN ('planned', 'active', 'blocked') AND (lead_actor_id = $2 OR sponsor_actor_id = $2)
+          SELECT 1 FROM projects WHERE organization_id = $1 AND status IN ('planned', 'active', 'paused', 'blocked') AND (lead_actor_id = $2 OR sponsor_actor_id = $2)
           UNION ALL
-          SELECT 1 FROM project_next_actions JOIN projects ON projects.id = project_next_actions.project_id WHERE projects.organization_id = $1 AND projects.status IN ('planned', 'active', 'blocked') AND project_next_actions.owner_actor_id = $2 AND project_next_actions.completed_at IS NULL
+          SELECT 1 FROM project_next_actions JOIN projects ON projects.id = project_next_actions.project_id WHERE projects.organization_id = $1 AND projects.status IN ('planned', 'active', 'paused', 'blocked') AND project_next_actions.owner_actor_id = $2 AND project_next_actions.completed_at IS NULL
           UNION ALL
           SELECT 1 FROM initiative_intake_assignments WHERE organization_id = $1 AND responsible_actor_id = $2
         ) AS exists`,
@@ -1182,7 +1182,7 @@ export class PostgresTenantStore implements TenantStore {
            SELECT 1
              FROM projects
             WHERE organization_id = $1
-              AND status IN ('planned', 'active', 'blocked')
+              AND status IN ('planned', 'active', 'paused', 'blocked')
               AND lead_actor_id = $2
               AND NOT EXISTS (
                 SELECT 1
@@ -1198,7 +1198,7 @@ export class PostgresTenantStore implements TenantStore {
         return "replacement_not_active";
       }
       const conflict = await client.query<{ exists: boolean }>(
-        `SELECT EXISTS (SELECT 1 FROM projects WHERE organization_id = $1 AND status IN ('planned','active','blocked') AND ((lead_actor_id = $2 AND sponsor_actor_id = $3) OR (sponsor_actor_id = $2 AND lead_actor_id = $3) OR (participants @> jsonb_build_array(jsonb_build_object('actorId',$2)) AND participants @> jsonb_build_array(jsonb_build_object('actorId',$3))))) AS exists`,
+        `SELECT EXISTS (SELECT 1 FROM projects WHERE organization_id = $1 AND status IN ('planned','active','paused','blocked') AND ((lead_actor_id = $2 AND sponsor_actor_id = $3) OR (sponsor_actor_id = $2 AND lead_actor_id = $3) OR (participants @> jsonb_build_array(jsonb_build_object('actorId',$2)) AND participants @> jsonb_build_array(jsonb_build_object('actorId',$3))))) AS exists`,
         [input.organizationId, input.targetActorId, input.replacementActorId],
       );
       if (conflict.rows[0]?.exists) {
@@ -1206,7 +1206,7 @@ export class PostgresTenantStore implements TenantStore {
         return "replacement_conflicts_with_project_role";
       }
       await client.query(
-        `UPDATE projects SET sponsor_actor_id = CASE WHEN sponsor_actor_id = $2 THEN $3 ELSE sponsor_actor_id END, lead_actor_id = CASE WHEN lead_actor_id = $2 THEN $3 ELSE lead_actor_id END, participants = (SELECT jsonb_agg(CASE WHEN item->>'actorId' = $2 THEN jsonb_set(item, '{actorId}', to_jsonb($3::text)) ELSE item END) FROM jsonb_array_elements(participants) AS item), version = version + 1, updated_at = $4 WHERE organization_id = $1 AND status IN ('planned','active','blocked') AND (sponsor_actor_id = $2 OR lead_actor_id = $2 OR participants @> jsonb_build_array(jsonb_build_object('actorId',$2)))`,
+        `UPDATE projects SET sponsor_actor_id = CASE WHEN sponsor_actor_id = $2 THEN $3 ELSE sponsor_actor_id END, lead_actor_id = CASE WHEN lead_actor_id = $2 THEN $3 ELSE lead_actor_id END, participants = (SELECT jsonb_agg(CASE WHEN item->>'actorId' = $2 THEN jsonb_set(item, '{actorId}', to_jsonb($3::text)) ELSE item END) FROM jsonb_array_elements(participants) AS item), version = version + 1, updated_at = $4 WHERE organization_id = $1 AND status IN ('planned','active','paused','blocked') AND (sponsor_actor_id = $2 OR lead_actor_id = $2 OR participants @> jsonb_build_array(jsonb_build_object('actorId',$2)))`,
         [
           input.organizationId,
           input.targetActorId,
@@ -1215,7 +1215,7 @@ export class PostgresTenantStore implements TenantStore {
         ],
       );
       await client.query(
-        `UPDATE project_next_actions SET owner_actor_id = $3 FROM projects WHERE projects.id = project_next_actions.project_id AND projects.organization_id = $1 AND projects.status IN ('planned','active','blocked') AND project_next_actions.owner_actor_id = $2 AND project_next_actions.completed_at IS NULL`,
+        `UPDATE project_next_actions SET owner_actor_id = $3 FROM projects WHERE projects.id = project_next_actions.project_id AND projects.organization_id = $1 AND projects.status IN ('planned','active','paused','blocked') AND project_next_actions.owner_actor_id = $2 AND project_next_actions.completed_at IS NULL`,
         [input.organizationId, input.targetActorId, input.replacementActorId],
       );
       await client.query(
