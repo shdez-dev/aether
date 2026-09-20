@@ -2,6 +2,7 @@ import {
   ProjectDomainError,
   assignProjectLead,
   createProject,
+  compareProjectToBaseline,
   declareNextActionDependency,
   replaceProjectLead,
   transferProjectWorkspace,
@@ -20,6 +21,7 @@ import {
   type ProjectExternalDependency,
   type ProjectChangeRequest,
   type ProjectBaseline,
+  type ProjectBaselineDifference,
   type ProjectClosure,
   type ProjectDeliverableAcceptance,
   type ProjectParticipant,
@@ -99,6 +101,7 @@ export interface ProjectExecutionStore {
     changeRequest: ProjectChangeRequest;
     baseline: ProjectBaseline | null;
   }> | null>;
+  findLatestBaseline(projectId: string): Promise<ProjectBaseline | null>;
   hasMinimumPlan(projectId: string): Promise<boolean>;
   findNextAction(actionId: string): Promise<ProjectNextAction | null>;
   listDependencies(
@@ -910,6 +913,32 @@ export class ProjectService {
       },
     );
     return result;
+  }
+  async baselineDifference(input: {
+    actorId: string;
+    organizationId: string;
+    projectId: string;
+    correlationId?: string;
+  }): Promise<
+    Readonly<{
+      baseline: ProjectBaseline | null;
+      differences: readonly ProjectBaselineDifference[];
+    }>
+  > {
+    const project = await this.requireProject(
+      input.projectId,
+      input.organizationId,
+    );
+    await this.assertProjectRead(input.actorId, project, input.correlationId);
+    const baseline = await this.dependencies.execution.findLatestBaseline(
+      project.id,
+    );
+    return {
+      baseline,
+      differences: baseline
+        ? compareProjectToBaseline({ baseline, project })
+        : [],
+    };
   }
   async declareNextActionDependency(input: {
     actorId: string;

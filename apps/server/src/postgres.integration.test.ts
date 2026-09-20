@@ -2967,6 +2967,17 @@ describe.sequential("PostgreSQL integration", () => {
       expect(baseline.rows).toEqual([
         { version: 1, approved_by_actor_id: owner },
       ]);
+      await expect(
+        projectService.baselineDifference({
+          actorId: "lead@example.test",
+          organizationId: organization.id,
+          projectId: project.id,
+          correlationId: randomUUID(),
+        }),
+      ).resolves.toMatchObject({
+        baseline: { version: 1, snapshot: { id: project.id } },
+        differences: [],
+      });
     },
     120_000,
   );

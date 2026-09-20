@@ -140,6 +140,47 @@ export type ProjectBaseline = Readonly<{
   approvedByActorId: string;
   approvedAt: Date;
 }>;
+export const ProjectBaselineDifferenceFields = [
+  "name",
+  "objective",
+  "boundaries",
+  "successCriteria",
+  "nextMilestone",
+  "sponsorActorId",
+  "leadActorId",
+  "participants",
+  "status",
+] as const;
+export type ProjectBaselineDifferenceField =
+  (typeof ProjectBaselineDifferenceFields)[number];
+export type ProjectBaselineDifference = Readonly<{
+  field: ProjectBaselineDifferenceField;
+  baselineValue: string | null;
+  currentValue: string | null;
+}>;
+
+export function compareProjectToBaseline(input: {
+  baseline: ProjectBaseline;
+  project: Project;
+}): readonly ProjectBaselineDifference[] {
+  const valueFor = (
+    project: Project,
+    field: ProjectBaselineDifferenceField,
+  ): string | null => {
+    if (field === "participants")
+      return project.participants
+        .map((participant) => `${participant.actorId} (${participant.role})`)
+        .join(", ");
+    return project[field];
+  };
+  return ProjectBaselineDifferenceFields.flatMap((field) => {
+    const baselineValue = valueFor(input.baseline.snapshot, field);
+    const currentValue = valueFor(input.project, field);
+    return baselineValue === currentValue
+      ? []
+      : [{ field, baselineValue, currentValue }];
+  });
+}
 
 export function declareNextActionDependency(input: {
   dependency: ProjectNextActionDependency;

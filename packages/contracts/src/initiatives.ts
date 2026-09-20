@@ -605,6 +605,34 @@ export const ProjectResponseSchema = z.object({
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
+export const ProjectBaselineDifferenceResponseSchema = z.object({
+  baseline: z
+    .object({
+      id: UuidSchema,
+      changeRequestId: UuidSchema,
+      version: z.number().int().positive(),
+      approvedByActorId: z.string(),
+      approvedAt: z.string().datetime(),
+    })
+    .nullable(),
+  differences: z.array(
+    z.object({
+      field: z.enum([
+        "name",
+        "objective",
+        "boundaries",
+        "successCriteria",
+        "nextMilestone",
+        "sponsorActorId",
+        "leadActorId",
+        "participants",
+        "status",
+      ]),
+      baselineValue: z.string().nullable(),
+      currentValue: z.string().nullable(),
+    }),
+  ),
+});
 
 export type CreateInitiativeDraftRequest = z.infer<
   typeof CreateInitiativeDraftRequestSchema
@@ -682,3 +710,6 @@ export type InitiativeDecisionResponse = z.infer<
   typeof InitiativeDecisionResponseSchema
 >;
 export type ProjectResponse = z.infer<typeof ProjectResponseSchema>;
+export type ProjectBaselineDifferenceResponse = z.infer<
+  typeof ProjectBaselineDifferenceResponseSchema
+>;

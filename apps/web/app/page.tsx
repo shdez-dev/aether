@@ -10,6 +10,7 @@ import type {
   InitiativeEvaluationResponse,
   InitiativeResponse,
   OrganizationResponse,
+  ProjectBaselineDifferenceResponse,
   ProjectResponse,
   WorkspaceResponse,
 } from "@aether/contracts";
@@ -30,6 +31,20 @@ type ProjectAuditEvent = {
   eventType: string;
   actorId: string;
   occurredAt: string;
+};
+const baselineFieldLabels: Record<
+  ProjectBaselineDifferenceResponse["differences"][number]["field"],
+  string
+> = {
+  name: "Nombre",
+  objective: "Objetivo",
+  boundaries: "Límites",
+  successCriteria: "Criterios de éxito",
+  nextMilestone: "Próximo hito",
+  sponsorActorId: "Patrocinador",
+  leadActorId: "Líder",
+  participants: "Participantes",
+  status: "Estado",
 };
 
 const emptyDraft: Draft = {
@@ -91,6 +106,8 @@ export default function AetherPage() {
   const [selectedProject, setSelectedProject] =
     useState<ProjectResponse | null>(null);
   const [projectAudit, setProjectAudit] = useState<ProjectAuditEvent[]>([]);
+  const [baselineDifference, setBaselineDifference] =
+    useState<ProjectBaselineDifferenceResponse | null>(null);
   const [draft, setDraft] = useState<Draft>(emptyDraft);
   const [editing, setEditing] = useState(false);
   const [organizationName, setOrganizationName] = useState("");
@@ -332,6 +349,7 @@ export default function AetherPage() {
   useEffect(() => {
     if (!selectedProject || !organizationId) {
       setProjectAudit([]);
+      setBaselineDifference(null);
       return;
     }
     void (async () => {
@@ -342,6 +360,16 @@ export default function AetherPage() {
         setProjectAudit((await response.json()) as ProjectAuditEvent[]);
       } catch {
         setProjectAudit([]);
+      }
+      try {
+        const response = await request(
+          `projects/${selectedProject.id}/baseline-difference?organizationId=${organizationId}`,
+        );
+        setBaselineDifference(
+          (await response.json()) as ProjectBaselineDifferenceResponse,
+        );
+      } catch {
+        setBaselineDifference(null);
       }
     })();
   }, [organizationId, request, selectedProject]);
@@ -997,6 +1025,50 @@ export default function AetherPage() {
             {selectedProject ? (
               <>
                 <h2>{selectedProject.name}</h2>
+                <section
+                  className="audit"
+                  aria-label="Diferencia de línea base"
+                >
+                  <h3>Línea base</h3>
+                  {baselineDifference?.baseline ? (
+                    <>
+                      <p className="muted">
+                        Versión {baselineDifference.baseline.version} aprobada
+                        el{" "}
+                        {new Date(
+                          baselineDifference.baseline.approvedAt,
+                        ).toLocaleString("es-CL")}
+                        .
+                      </p>
+                      {baselineDifference.differences.length ? (
+                        <ol>
+                          {baselineDifference.differences.map((difference) => (
+                            <li key={difference.field}>
+                              <strong>
+                                {baselineFieldLabels[difference.field]}
+                              </strong>
+                              <br />
+                              <small>
+                                Línea base:{" "}
+                                {difference.baselineValue ?? "Sin valor"}
+                                <br />
+                                Actual: {difference.currentValue ?? "Sin valor"}
+                              </small>
+                            </li>
+                          ))}
+                        </ol>
+                      ) : (
+                        <p className="muted">
+                          El proyecto coincide con su línea base.
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    <p className="muted">
+                      Aún no hay una línea base aprobada para este proyecto.
+                    </p>
+                  )}
+                </section>
                 <form className="nested-form" onSubmit={changeProjectStatus}>
                   <label className="ui-field">
                     Estado

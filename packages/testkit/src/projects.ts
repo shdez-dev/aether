@@ -171,6 +171,13 @@ export class InMemoryProjectExecutionStore implements ProjectExecutionStore {
     if (baseline) this.baselines.push(baseline);
     return { changeRequest, baseline };
   }
+  async findLatestBaseline(projectId: string): Promise<ProjectBaseline | null> {
+    return (
+      [...this.baselines]
+        .reverse()
+        .find((baseline) => baseline.projectId === projectId) ?? null
+    );
+  }
   async hasMinimumPlan(projectId: string): Promise<boolean> {
     return (
       this.milestones.some((milestone) => milestone.projectId === projectId) &&

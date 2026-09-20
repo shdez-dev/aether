@@ -3847,6 +3847,33 @@ export class PostgresProjectExecutionStore implements ProjectExecutionStore {
       client.release();
     }
   }
+  async findLatestBaseline(projectId: string): Promise<ProjectBaseline | null> {
+    const result = await this.pool.query<{
+      id: string;
+      project_id: string;
+      change_request_id: string;
+      version: number;
+      snapshot: ProjectSnapshotRow;
+      approved_by_actor_id: string;
+      approved_at: Date;
+    }>(
+      `SELECT id, project_id, change_request_id, version, snapshot, approved_by_actor_id, approved_at
+       FROM project_baselines WHERE project_id = $1 ORDER BY version DESC LIMIT 1`,
+      [projectId],
+    );
+    const row = result.rows[0];
+    return row
+      ? {
+          id: row.id,
+          projectId: row.project_id,
+          changeRequestId: row.change_request_id,
+          version: Number(row.version),
+          snapshot: toProjectSnapshot(row.snapshot),
+          approvedByActorId: row.approved_by_actor_id,
+          approvedAt: row.approved_at,
+        }
+      : null;
+  }
   async hasMinimumPlan(projectId: string): Promise<boolean> {
     const result = await this.pool.query<{ ready: boolean }>(
       `SELECT EXISTS (SELECT 1 FROM project_milestones WHERE project_id = $1)
@@ -5684,6 +5711,18 @@ function toProject(row: ProjectRow): Project {
     version: row.version,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  };
+}
+type ProjectSnapshotRow = Omit<Project, "createdAt" | "updatedAt"> & {
+  createdAt: string;
+  updatedAt: string;
+};
+function toProjectSnapshot(snapshot: ProjectSnapshotRow): Project {
+  return {
+    ...snapshot,
+    participants: [...snapshot.participants],
+    createdAt: new Date(snapshot.createdAt),
+    updatedAt: new Date(snapshot.updatedAt),
   };
 }
 function toProjectAuditEvent(row: ProjectAuditRow): ProjectAuditEvent {

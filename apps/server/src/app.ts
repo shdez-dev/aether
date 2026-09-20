@@ -2413,6 +2413,41 @@ export async function buildServer(input: {
       }),
     );
   });
+  app.get(
+    "/v1/projects/:projectId/baseline-difference",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      const { projectId } = z
+        .object({ projectId: z.string().uuid() })
+        .parse(request.params);
+      const { organizationId } = z
+        .object({ organizationId: z.string().uuid() })
+        .parse(request.query);
+      const result = await input.projects.baselineDifference({
+        actorId: session.actorId,
+        correlationId: correlationId(reply),
+        organizationId,
+        projectId,
+      });
+      return {
+        baseline: result.baseline
+          ? {
+              id: result.baseline.id,
+              changeRequestId: result.baseline.changeRequestId,
+              version: result.baseline.version,
+              approvedByActorId: result.baseline.approvedByActorId,
+              approvedAt: result.baseline.approvedAt.toISOString(),
+            }
+          : null,
+        differences: result.differences,
+      };
+    },
+  );
   app.patch("/v1/projects/:projectId/status", async (request, reply) => {
     const session = await requireSession(
       request,

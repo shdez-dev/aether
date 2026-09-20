@@ -1984,6 +1984,25 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
+  /v1/projects/{projectId}/baseline-difference:
+    get:
+      tags: [Projects]
+      operationId: getProjectBaselineDifference
+      summary: Comparar el proyecto con su última línea base aprobada
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/OrganizationContextId"
+      responses:
+        "200":
+          description: Diferencias contra la línea base vigente, si existe.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProjectBaselineDifference" }
+        default: { $ref: "#/components/responses/Problem" }
   /v1/projects/{projectId}/status:
     patch:
       tags: [Projects]
@@ -4418,6 +4437,44 @@ components:
         version: { type: integer }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+    ProjectBaselineDifference:
+      type: object
+      required: [baseline, differences]
+      properties:
+        baseline:
+          oneOf:
+            - type: "null"
+            - type: object
+              required:
+                [id, changeRequestId, version, approvedByActorId, approvedAt]
+              properties:
+                id: { type: string, format: uuid }
+                changeRequestId: { type: string, format: uuid }
+                version: { type: integer, minimum: 1 }
+                approvedByActorId: { type: string }
+                approvedAt: { type: string, format: date-time }
+        differences:
+          type: array
+          items:
+            type: object
+            required: [field, baselineValue, currentValue]
+            properties:
+              field:
+                type: string
+                enum:
+                  [
+                    name,
+                    objective,
+                    boundaries,
+                    successCriteria,
+                    nextMilestone,
+                    sponsorActorId,
+                    leadActorId,
+                    participants,
+                    status,
+                  ]
+              baselineValue: { type: [string, "null"] }
+              currentValue: { type: [string, "null"] }
     Initiative:
       type: object
       required:

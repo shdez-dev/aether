@@ -141,6 +141,13 @@ describe("ProjectService", () => {
           if (baseline) baselines.push(baseline);
           return { changeRequest, baseline };
         },
+        async findLatestBaseline(projectId) {
+          return (
+            [...baselines]
+              .reverse()
+              .find((baseline) => baseline.projectId === projectId) ?? null
+          );
+        },
         async hasMinimumPlan() {
           return true;
         },
@@ -341,5 +348,21 @@ describe("ProjectService", () => {
         correlationId: "correlation-cancel",
       }),
     ).resolves.toMatchObject({ status: "cancelled", version: 5 });
+    await expect(
+      service.baselineDifference({
+        actorId: "owner",
+        organizationId: "organization-1",
+        projectId: "project-1",
+      }),
+    ).resolves.toMatchObject({
+      baseline: { version: 1 },
+      differences: [
+        expect.objectContaining({
+          field: "status",
+          baselineValue: "planned",
+          currentValue: "cancelled",
+        }),
+      ],
+    });
   });
 });
