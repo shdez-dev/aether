@@ -165,11 +165,56 @@ export function assignProjectLead(input: {
     updatedAt: input.updatedAt,
   };
 }
+export function replaceProjectLead(input: {
+  project: Project;
+  leadActorId: string;
+  reason: string;
+  updatedAt: Date;
+}): Project {
+  const previousLeadActorId = input.project.leadActorId;
+  if (
+    !previousLeadActorId ||
+    !["planned", "active", "blocked"].includes(input.project.status) ||
+    input.leadActorId === previousLeadActorId ||
+    input.leadActorId === input.project.sponsorActorId ||
+    !input.reason.trim()
+  )
+    throw new ProjectDomainError("PROJECT_LEAD_REPLACEMENT_INVALID");
+
+  const hasPreviousLead = input.project.participants.some(
+    (participant) =>
+      participant.actorId === previousLeadActorId &&
+      participant.role === "lead",
+  );
+  if (!hasPreviousLead) throw new ProjectDomainError("PROJECT_ROLES_INVALID");
+
+  const hasReplacement = input.project.participants.some(
+    (participant) => participant.actorId === input.leadActorId,
+  );
+  const participants = input.project.participants.map((participant) => {
+    if (participant.actorId === previousLeadActorId)
+      return { ...participant, role: "contributor" as const };
+    if (participant.actorId === input.leadActorId)
+      return { ...participant, role: "lead" as const };
+    return participant;
+  });
+  if (!hasReplacement)
+    participants.push({ actorId: input.leadActorId, role: "lead" });
+
+  return {
+    ...input.project,
+    leadActorId: input.leadActorId,
+    participants,
+    version: input.project.version + 1,
+    updatedAt: input.updatedAt,
+  };
+}
 export class ProjectDomainError extends Error {
   constructor(
     public readonly code:
       | "PROJECT_ROLES_INVALID"
       | "PROJECT_LEAD_ASSIGNMENT_INVALID"
+      | "PROJECT_LEAD_REPLACEMENT_INVALID"
       | "PROJECT_MINIMUM_PLAN_REQUIRED"
       | "PROJECT_MANDATE_REQUIRED"
       | "INVALID_PROJECT_TRANSITION"

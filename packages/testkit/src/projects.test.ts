@@ -53,6 +53,7 @@ describe("project conversion and execution", () => {
     });
     for (const [actorId, email] of [
       ["lead", "lead@test"],
+      ["replacement", "replacement@test"],
       ["observer", "observer@test"],
     ] as const) {
       const invitation = await tenants.invite({
@@ -229,7 +230,7 @@ describe("project conversion and execution", () => {
         correlationId: ids.next(),
       }),
     ).rejects.toMatchObject({ code: "PROJECT_LEAD_ASSIGNMENT_INVALID" });
-    const project = await projects.assignLead({
+    let project = await projects.assignLead({
       actorId: "owner",
       organizationId: organization.id,
       projectId: pending.id,
@@ -242,6 +243,33 @@ describe("project conversion and execution", () => {
       leadActorId: "lead",
       version: 1,
     });
+    project = await projects.replaceLead({
+      actorId: "owner",
+      organizationId: organization.id,
+      projectId: project.id,
+      expectedVersion: project.version,
+      leadActorId: "replacement",
+      reason: "El responsable original deja la iniciativa.",
+      correlationId: ids.next(),
+    });
+    expect(project).toMatchObject({
+      leadActorId: "replacement",
+      version: 2,
+      participants: expect.arrayContaining([
+        { actorId: "lead", role: "contributor" },
+        { actorId: "replacement", role: "lead" },
+      ]),
+    });
+    await expect(
+      projects.addMilestone({
+        actorId: "lead",
+        organizationId: organization.id,
+        projectId: project.id,
+        title: "No autorizado tras la sustitución",
+        dueOn: null,
+        correlationId: ids.next(),
+      }),
+    ).rejects.toBeInstanceOf(AccessDeniedError);
     await expect(
       projects.createFromInitiative({
         ...conversionInput,
@@ -268,7 +296,7 @@ describe("project conversion and execution", () => {
     ).rejects.toBeInstanceOf(AccessDeniedError);
     await expect(
       projects.changeStatus({
-        actorId: "lead",
+        actorId: "replacement",
         organizationId: organization.id,
         projectId: project.id,
         expectedVersion: project.version,
@@ -277,7 +305,7 @@ describe("project conversion and execution", () => {
       }),
     ).rejects.toMatchObject({ code: "PROJECT_MINIMUM_PLAN_REQUIRED" });
     await projects.addMilestone({
-      actorId: "lead",
+      actorId: "replacement",
       organizationId: organization.id,
       projectId: project.id,
       title: "Primer hito",
@@ -285,16 +313,16 @@ describe("project conversion and execution", () => {
       correlationId: ids.next(),
     });
     await projects.addNextAction({
-      actorId: "lead",
+      actorId: "replacement",
       organizationId: organization.id,
       projectId: project.id,
       description: "Preparar piloto",
-      ownerActorId: "lead",
+      ownerActorId: "replacement",
       dueOn: "2026-09-20",
       correlationId: ids.next(),
     });
     const active = await projects.changeStatus({
-      actorId: "lead",
+      actorId: "replacement",
       organizationId: organization.id,
       projectId: project.id,
       expectedVersion: project.version,
@@ -302,7 +330,7 @@ describe("project conversion and execution", () => {
       correlationId: ids.next(),
     });
     const completed = await projects.changeStatus({
-      actorId: "lead",
+      actorId: "replacement",
       organizationId: organization.id,
       projectId: project.id,
       expectedVersion: active.version,
@@ -318,7 +346,7 @@ describe("project conversion and execution", () => {
       resourceType: "project",
       resourceId: project.id,
       classification: "internal",
-      createdByActorId: "lead",
+      createdByActorId: "replacement",
       createdAt: new Date(),
     };
     const version: DocumentVersion = {
@@ -358,7 +386,7 @@ describe("project conversion and execution", () => {
     documentStore.versions.set(foreignVersion.id, foreignVersion);
     await expect(
       projects.acceptDeliverable({
-        actorId: "lead",
+        actorId: "replacement",
         organizationId: organization.id,
         projectId: project.id,
         name: "Documento de otro proyecto",
@@ -368,7 +396,7 @@ describe("project conversion and execution", () => {
       }),
     ).rejects.toBeInstanceOf(DocumentNotFoundError);
     const deliverable = await projects.acceptDeliverable({
-      actorId: "lead",
+      actorId: "replacement",
       organizationId: organization.id,
       projectId: project.id,
       name: "Informe final",
@@ -377,7 +405,7 @@ describe("project conversion and execution", () => {
       correlationId: ids.next(),
     });
     const closure = await projects.close({
-      actorId: "lead",
+      actorId: "replacement",
       organizationId: organization.id,
       projectId: project.id,
       outcomes: "Piloto completado",
@@ -407,6 +435,7 @@ describe("project conversion and execution", () => {
     expect(projectHistory.map((event) => event.action)).toEqual([
       "project.created_from_initiative.v1",
       "project.lead_assigned.v1",
+      "project.lead_replaced.v1",
       "project.milestone_added.v1",
       "project.next_action_added.v1",
       "project.status_changed.v1",
@@ -417,6 +446,7 @@ describe("project conversion and execution", () => {
     expect(audit.events.map((event) => event.eventType)).toEqual([
       "project.created_from_initiative.v1",
       "project.lead_assigned.v1",
+      "project.lead_replaced.v1",
       "project.milestone_added.v1",
       "project.next_action_added.v1",
       "project.status_changed.v1",

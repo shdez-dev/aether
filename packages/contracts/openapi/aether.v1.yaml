@@ -1949,6 +1949,31 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Project" }
         default: { $ref: "#/components/responses/Problem" }
+  /v1/projects/{projectId}/lead-replacements:
+    post:
+      tags: [Projects]
+      operationId: replaceProjectLead
+      summary: Sustituir el líder y preservar su continuidad como colaborador
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReplaceProjectLeadRequest" }
+      responses:
+        "200":
+          description: Líder sustituido y anterior líder conservado como colaborador.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Project" }
+        default: { $ref: "#/components/responses/Problem" }
   /v1/projects/{projectId}/milestones:
     post:
       tags: [Projects]
@@ -3716,6 +3741,15 @@ components:
         organizationId: { type: string, format: uuid }
         expectedVersion: { type: integer, minimum: 0 }
         leadActorId: { type: string, minLength: 1, maxLength: 255 }
+    ReplaceProjectLeadRequest:
+      type: object
+      additionalProperties: false
+      required: [organizationId, expectedVersion, leadActorId, reason]
+      properties:
+        organizationId: { type: string, format: uuid }
+        expectedVersion: { type: integer, minimum: 0 }
+        leadActorId: { type: string, minLength: 1, maxLength: 255 }
+        reason: { type: string, minLength: 1, maxLength: 1000 }
     AddProjectMilestoneRequest:
       type: object
       additionalProperties: false

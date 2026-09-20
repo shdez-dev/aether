@@ -2,6 +2,7 @@ import {
   ProjectDomainError,
   assignProjectLead,
   createProject,
+  replaceProjectLead,
   transitionProject,
   type InitiativeDecision,
   type Project,
@@ -312,6 +313,53 @@ export class ProjectService {
       input.correlationId,
       "project.lead_assigned.v1",
       { leadActorId: updated.leadActorId },
+    );
+    return updated;
+  }
+  async replaceLead(input: {
+    actorId: string;
+    organizationId: string;
+    projectId: string;
+    expectedVersion: number;
+    leadActorId: string;
+    reason: string;
+    correlationId: string;
+  }): Promise<Project> {
+    await this.assertOwner(input.actorId, input.organizationId);
+    const project = await this.requireProject(
+      input.projectId,
+      input.organizationId,
+    );
+    if (project.version !== input.expectedVersion)
+      throw new ProjectVersionConflictError();
+    await this.assertProjectLeadActive({
+      organizationId: project.organizationId,
+      workspaceId: project.workspaceId,
+      leadActorId: input.leadActorId,
+    });
+    const previousLeadActorId = project.leadActorId;
+    const updated = replaceProjectLead({
+      project,
+      leadActorId: input.leadActorId,
+      reason: input.reason,
+      updatedAt: this.dependencies.clock.now(),
+    });
+    const saved = await this.dependencies.projects.save({
+      project: updated,
+      expectedVersion: project.version,
+    });
+    if (!saved) throw new ProjectVersionConflictError();
+    await this.record(
+      updated,
+      input.actorId,
+      input.correlationId,
+      "project.lead_replaced.v1",
+      {
+        previousLeadActorId,
+        leadActorId: updated.leadActorId,
+        reason: input.reason.trim(),
+        previousLeadRole: "contributor",
+      },
     );
     return updated;
   }

@@ -2982,6 +2982,111 @@ describe("Project conversion idempotency", () => {
   });
 });
 
+describe("Project lead replacement endpoint", () => {
+  it("requires an explicit reason and routes the versioned replacement", async () => {
+    const authStore = new InMemoryAuthStore();
+    const auth = new AuthService({
+      store: authStore,
+      cipher: createAesGcmCipher(config.sessionEncryptionKey),
+      oidc,
+      issuer: config.oidcIssuerUrl,
+      sessionTtlSeconds: config.sessionTtlSeconds,
+      sessionRenewalWindowSeconds: config.sessionRenewalWindowSeconds,
+    });
+    const organizationId = crypto.randomUUID();
+    const workspaceId = crypto.randomUUID();
+    const projectId = crypto.randomUUID();
+    const calls: unknown[] = [];
+    const app = await buildServer({
+      config,
+      auth,
+      tenants: {} as TenantService,
+      initiatives: {} as InitiativeService,
+      evaluations: {} as EvaluationService,
+      projects: {
+        async replaceLead(input: Parameters<ProjectService["replaceLead"]>[0]) {
+          calls.push(input);
+          return {
+            id: projectId,
+            organizationId,
+            workspaceId,
+            sourceInitiativeId: crypto.randomUUID(),
+            sourceDecisionId: crypto.randomUUID(),
+            name: "Proyecto con relevo",
+            objective: "Mantener la continuidad operativa.",
+            boundaries: "Alcance del proyecto vigente.",
+            successCriteria: "Continuidad del responsable.",
+            nextMilestone: "Completar el relevo.",
+            sponsorActorId: "sponsor",
+            leadActorId: input.leadActorId,
+            participants: [
+              { actorId: "former-lead", role: "contributor" as const },
+              { actorId: input.leadActorId, role: "lead" as const },
+            ],
+            status: "active" as const,
+            version: input.expectedVersion + 1,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          };
+        },
+      } as unknown as ProjectService,
+      idempotency: new InMemoryIdempotencyStore(),
+    });
+    await createAuthenticatedSession(authStore, {
+      token: "project-replacement-session",
+      actorId: "owner",
+      actorEmail: "owner@example.test",
+    });
+    const headers = {
+      origin: config.webOrigin,
+      "x-csrf-token": "project-replacement-csrf",
+      "idempotency-key": "project-replacement-key",
+      cookie:
+        "aether_session=project-replacement-session; aether_csrf=project-replacement-csrf",
+    };
+    const response = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${projectId}/lead-replacements`,
+      headers,
+      payload: {
+        organizationId,
+        expectedVersion: 4,
+        leadActorId: "successor",
+        reason: "Relevo documentado del responsable.",
+      },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      leadActorId: "successor",
+      version: 5,
+    });
+    expect(calls).toEqual([
+      expect.objectContaining({
+        actorId: "owner",
+        organizationId,
+        projectId,
+        expectedVersion: 4,
+        leadActorId: "successor",
+        reason: "Relevo documentado del responsable.",
+      }),
+    ]);
+    const invalid = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${projectId}/lead-replacements`,
+      headers: { ...headers, "idempotency-key": "project-replacement-invalid" },
+      payload: {
+        organizationId,
+        expectedVersion: 5,
+        leadActorId: "another-successor",
+        reason: " ",
+      },
+    });
+    expect(invalid.statusCode).toBe(400);
+    expect(calls).toHaveLength(1);
+    await app.close();
+  });
+});
+
 describe("Initiative diagnostic endpoints", () => {
   it("validates evidence, serializes dates and replays a diagnostic save", async () => {
     const authStore = new InMemoryAuthStore();
