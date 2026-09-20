@@ -63,6 +63,14 @@ export function declareNextActionDependency(input: {
 }): ProjectNextActionDependency {
   if (input.dependency.actionId === input.dependency.dependsOnActionId)
     throw new ProjectDomainError("PROJECT_DEPENDENCY_INVALID");
+  if (
+    input.existing.some(
+      (dependency) =>
+        dependency.actionId === input.dependency.actionId &&
+        dependency.dependsOnActionId === input.dependency.dependsOnActionId,
+    )
+  )
+    throw new ProjectDomainError("PROJECT_DEPENDENCY_INVALID");
   const graph = new Map<string, string[]>();
   for (const dependency of [...input.existing, input.dependency]) {
     const dependencies = graph.get(dependency.actionId) ?? [];

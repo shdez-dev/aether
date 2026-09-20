@@ -19,6 +19,9 @@ describe("project lifecycle", () => {
         existing: [first],
       }),
     ).toThrow("PROJECT_DEPENDENCY_CYCLE");
+    expect(() =>
+      declareNextActionDependency({ dependency: first, existing: [first] }),
+    ).toThrow("PROJECT_DEPENDENCY_INVALID");
   });
   it("allows pausing and resuming an active project", () => {
     const now = new Date("2026-09-20T12:00:00.000Z");
