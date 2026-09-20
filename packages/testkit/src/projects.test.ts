@@ -262,14 +262,16 @@ describe("project conversion and execution", () => {
         correlationId: ids.next(),
       }),
     ).rejects.toBeInstanceOf(AccessDeniedError);
-    const active = await projects.changeStatus({
-      actorId: "lead",
-      organizationId: organization.id,
-      projectId: project.id,
-      expectedVersion: project.version,
-      status: "active",
-      correlationId: ids.next(),
-    });
+    await expect(
+      projects.changeStatus({
+        actorId: "lead",
+        organizationId: organization.id,
+        projectId: project.id,
+        expectedVersion: project.version,
+        status: "active",
+        correlationId: ids.next(),
+      }),
+    ).rejects.toMatchObject({ code: "PROJECT_MINIMUM_PLAN_REQUIRED" });
     await projects.addMilestone({
       actorId: "lead",
       organizationId: organization.id,
@@ -285,6 +287,14 @@ describe("project conversion and execution", () => {
       description: "Preparar piloto",
       ownerActorId: "lead",
       dueOn: "2026-09-20",
+      correlationId: ids.next(),
+    });
+    const active = await projects.changeStatus({
+      actorId: "lead",
+      organizationId: organization.id,
+      projectId: project.id,
+      expectedVersion: project.version,
+      status: "active",
       correlationId: ids.next(),
     });
     const completed = await projects.changeStatus({
@@ -393,9 +403,9 @@ describe("project conversion and execution", () => {
     expect(projectHistory.map((event) => event.action)).toEqual([
       "project.created_from_initiative.v1",
       "project.lead_assigned.v1",
-      "project.status_changed.v1",
       "project.milestone_added.v1",
       "project.next_action_added.v1",
+      "project.status_changed.v1",
       "project.status_changed.v1",
       "project.deliverable_accepted.v1",
       "project.closed.v1",
@@ -403,9 +413,9 @@ describe("project conversion and execution", () => {
     expect(audit.events.map((event) => event.eventType)).toEqual([
       "project.created_from_initiative.v1",
       "project.lead_assigned.v1",
-      "project.status_changed.v1",
       "project.milestone_added.v1",
       "project.next_action_added.v1",
+      "project.status_changed.v1",
       "project.status_changed.v1",
       "project.deliverable_accepted.v1",
       "project.closed.v1",

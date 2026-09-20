@@ -3594,6 +3594,15 @@ export class PostgresProjectExecutionStore implements ProjectExecutionStore {
       ],
     );
   }
+  async hasMinimumPlan(projectId: string): Promise<boolean> {
+    const result = await this.pool.query<{ ready: boolean }>(
+      `SELECT EXISTS (SELECT 1 FROM project_milestones WHERE project_id = $1)
+              AND EXISTS (SELECT 1 FROM project_next_actions WHERE project_id = $1)
+         AS ready`,
+      [projectId],
+    );
+    return result.rows[0]?.ready === true;
+  }
 }
 export class PostgresProjectClosureStore implements ProjectClosureStore {
   constructor(private readonly pool: Pool) {}

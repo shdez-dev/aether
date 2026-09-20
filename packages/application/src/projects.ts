@@ -62,6 +62,7 @@ export interface ProjectStore {
 export interface ProjectExecutionStore {
   addMilestone(milestone: ProjectMilestone): Promise<void>;
   addNextAction(action: ProjectNextAction): Promise<void>;
+  hasMinimumPlan(projectId: string): Promise<boolean>;
 }
 export interface ProjectClosureStore {
   createClosure(closure: ProjectClosure): Promise<void>;
@@ -231,6 +232,11 @@ export class ProjectService {
     await this.assertProjectLeadActive(project);
     if (project.version !== input.expectedVersion)
       throw new ProjectVersionConflictError();
+    if (
+      input.status === "active" &&
+      !(await this.dependencies.execution.hasMinimumPlan(project.id))
+    )
+      throw new ProjectDomainError("PROJECT_MINIMUM_PLAN_REQUIRED");
     const updated = transitionProject(
       project,
       input.status,

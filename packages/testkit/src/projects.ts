@@ -88,6 +88,12 @@ export class InMemoryProjectExecutionStore implements ProjectExecutionStore {
   async addNextAction(action: ProjectNextAction): Promise<void> {
     this.actions.push(action);
   }
+  async hasMinimumPlan(projectId: string): Promise<boolean> {
+    return (
+      this.milestones.some((milestone) => milestone.projectId === projectId) &&
+      this.actions.some((action) => action.projectId === projectId)
+    );
+  }
 }
 export class InMemoryProjectClosureStore implements ProjectClosureStore {
   readonly closures = new Map<string, ProjectClosure>();

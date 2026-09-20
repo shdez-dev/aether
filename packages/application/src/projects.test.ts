@@ -80,7 +80,13 @@ describe("ProjectService", () => {
     };
     const service = new ProjectService({
       projects,
-      execution: {} as never,
+      execution: {
+        async addMilestone() {},
+        async addNextAction() {},
+        async hasMinimumPlan() {
+          return true;
+        },
+      },
       closures: {} as never,
       documents: {} as never,
       audit,

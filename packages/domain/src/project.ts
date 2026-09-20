@@ -144,6 +144,7 @@ export class ProjectDomainError extends Error {
     public readonly code:
       | "PROJECT_ROLES_INVALID"
       | "PROJECT_LEAD_ASSIGNMENT_INVALID"
+      | "PROJECT_MINIMUM_PLAN_REQUIRED"
       | "INVALID_PROJECT_TRANSITION"
       | "DECISION_CONDITIONS_PENDING",
   ) {
