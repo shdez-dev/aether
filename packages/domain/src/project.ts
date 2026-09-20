@@ -91,6 +91,15 @@ export type ProjectRisk = Readonly<{
   createdByActorId: string;
   createdAt: Date;
 }>;
+export type ProjectOperationalDecision = Readonly<{
+  id: string;
+  projectId: string;
+  subject: string;
+  decision: string;
+  rationale: string;
+  decidedByActorId: string;
+  decidedAt: Date;
+}>;
 
 export function declareNextActionDependency(input: {
   dependency: ProjectNextActionDependency;

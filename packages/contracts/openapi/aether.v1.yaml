@@ -2206,6 +2206,30 @@ paths:
       responses:
         "201": { description: Riesgo registrado. }
         default: { $ref: "#/components/responses/Problem" }
+  /v1/projects/{projectId}/operational-decisions:
+    post:
+      tags: [Projects]
+      operationId: recordProjectOperationalDecision
+      summary: Registrar una decisión operativa trazable del proyecto
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              {
+                $ref: "#/components/schemas/RecordProjectOperationalDecisionRequest",
+              }
+      responses:
+        "201": { description: Decisión operativa registrada. }
+        default: { $ref: "#/components/responses/Problem" }
   /v1/projects/{projectId}/next-actions:
     post:
       tags: [Projects]
@@ -4054,6 +4078,15 @@ components:
         impact: { type: string, enum: [low, medium, high] }
         treatment: { type: string, enum: [avoid, mitigate, transfer, accept] }
         ownerActorId: { type: string, minLength: 1, maxLength: 255 }
+    RecordProjectOperationalDecisionRequest:
+      type: object
+      additionalProperties: false
+      required: [organizationId, subject, decision, rationale]
+      properties:
+        organizationId: { type: string, format: uuid }
+        subject: { type: string, minLength: 1, maxLength: 2000 }
+        decision: { type: string, minLength: 1, maxLength: 10000 }
+        rationale: { type: string, minLength: 1, maxLength: 10000 }
     AddProjectNextActionRequest:
       type: object
       additionalProperties: false

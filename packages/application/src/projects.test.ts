@@ -94,6 +94,7 @@ describe("ProjectService", () => {
         async addRisk(risk) {
           risks.push(risk);
         },
+        async addOperationalDecision() {},
         async hasMinimumPlan() {
           return true;
         },

@@ -16,6 +16,7 @@ import {
   type ProjectRisk,
   type ProjectRiskLevel,
   type ProjectRiskTreatment,
+  type ProjectOperationalDecision,
   type ProjectClosure,
   type ProjectDeliverableAcceptance,
   type ProjectParticipant,
@@ -77,6 +78,7 @@ export interface ProjectExecutionStore {
   addMilestone(milestone: ProjectMilestone): Promise<void>;
   addNextAction(action: ProjectNextAction): Promise<void>;
   addRisk(risk: ProjectRisk): Promise<void>;
+  addOperationalDecision(decision: ProjectOperationalDecision): Promise<void>;
   hasMinimumPlan(projectId: string): Promise<boolean>;
   findNextAction(actionId: string): Promise<ProjectNextAction | null>;
   listDependencies(
@@ -713,6 +715,43 @@ export class ProjectService {
       },
     );
     return risk;
+  }
+  async recordOperationalDecision(input: {
+    actorId: string;
+    organizationId: string;
+    projectId: string;
+    subject: string;
+    decision: string;
+    rationale: string;
+    correlationId: string;
+  }): Promise<ProjectOperationalDecision> {
+    const project = await this.requireProject(
+      input.projectId,
+      input.organizationId,
+    );
+    await this.assertExecutionAccess(
+      input.actorId,
+      project,
+      input.correlationId,
+    );
+    const decision: ProjectOperationalDecision = {
+      id: this.dependencies.ids.next(),
+      projectId: project.id,
+      subject: input.subject,
+      decision: input.decision,
+      rationale: input.rationale,
+      decidedByActorId: input.actorId,
+      decidedAt: this.dependencies.clock.now(),
+    };
+    await this.dependencies.execution.addOperationalDecision(decision);
+    await this.record(
+      project,
+      input.actorId,
+      input.correlationId,
+      "project.operational_decision_recorded.v1",
+      { operationalDecisionId: decision.id, subject: decision.subject },
+    );
+    return decision;
   }
   async declareNextActionDependency(input: {
     actorId: string;

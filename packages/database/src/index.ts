@@ -94,6 +94,7 @@ import type {
   ProjectNextAction,
   ProjectNextActionDependency,
   ProjectRisk,
+  ProjectOperationalDecision,
   OrganizationRole,
   WorkspaceRole,
   DocumentVersion,
@@ -3662,6 +3663,23 @@ export class PostgresProjectExecutionStore implements ProjectExecutionStore {
         risk.ownerActorId,
         risk.createdByActorId,
         risk.createdAt,
+      ],
+    );
+  }
+  async addOperationalDecision(
+    decision: ProjectOperationalDecision,
+  ): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO project_operational_decisions (id, project_id, subject, decision, rationale, decided_by_actor_id, decided_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [
+        decision.id,
+        decision.projectId,
+        decision.subject,
+        decision.decision,
+        decision.rationale,
+        decision.decidedByActorId,
+        decision.decidedAt,
       ],
     );
   }
