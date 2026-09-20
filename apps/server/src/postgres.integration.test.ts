@@ -41,6 +41,7 @@ import {
   PostgresNotificationStore,
   PostgresOutboxStore,
   PostgresOutboxAdministrationStore,
+  PostgresCapacityStore,
   PostgresProjectAuditStore,
   PostgresProjectExecutionStore,
   PostgresProjectClosureStore,
@@ -1349,7 +1350,7 @@ describe.sequential("PostgreSQL integration", () => {
       );
       await pool.query(
         `INSERT INTO projects (id, organization_id, workspace_id, source_initiative_id, source_decision_id, name, sponsor_actor_id, lead_actor_id, participants, status, created_at, updated_at) VALUES
-         ($1,$2,$3,$4,$5,'Active','sponsor','lead','[]','active','2026-01-03T00:00:00Z','2025-12-20T00:00:00Z'),
+         ($1,$2,$3,$4,$5,'Active','sponsor','lead','[{"actorId":"lead","role":"lead"}]','active','2026-01-03T00:00:00Z','2025-12-20T00:00:00Z'),
          ($6,$2,$3,$7,$8,'Closed','sponsor','lead','[]','completed','2025-12-03T00:00:00Z','2026-01-15T00:00:00Z')`,
         [
           activeProjectId,
@@ -1363,6 +1364,17 @@ describe.sequential("PostgreSQL integration", () => {
         ],
       );
       await pool.query(
+        `INSERT INTO organization_memberships (organization_id, actor_id, actor_email, role, status)
+         VALUES ($1,'owner','owner@example.test','owner','active'),
+                ($1,'lead','lead@example.test','member','active')`,
+        [organizationId],
+      );
+      await pool.query(
+        `INSERT INTO workspace_memberships (workspace_id, actor_id, role)
+         VALUES ($1,'lead','member')`,
+        [workspaceId],
+      );
+      await pool.query(
         `INSERT INTO project_milestones (id, project_id, title, due_on, completed_at, created_by_actor_id, created_at)
          VALUES ($1,$2,'Upcoming','2026-02-15',NULL,'owner','2026-01-03T00:00:00Z')`,
         [randomUUID(), activeProjectId],
@@ -1371,6 +1383,60 @@ describe.sequential("PostgreSQL integration", () => {
         `INSERT INTO project_closures (id, project_id, organization_id, workspace_id, outcomes, lessons_learned, pending_items, closed_by_actor_id, closed_at)
          VALUES ($1,$2,$3,$4,'Delivered','Reusable lesson','[]','owner','2026-01-20T00:00:00Z')`,
         [randomUUID(), closedProjectId, organizationId, workspaceId],
+      );
+      const capacityStore = new PostgresCapacityStore(pool);
+      const capacityPeriod = {
+        startsOn: "2026-02-01",
+        endsOn: "2026-02-07",
+      };
+      const availability = {
+        id: randomUUID(),
+        organizationId,
+        actorId: "lead",
+        unit: "hours" as const,
+        period: capacityPeriod,
+        availableEffort: 20,
+        declaredByActorId: "owner",
+        declaredAt: new Date("2026-01-03T00:00:00.000Z"),
+      };
+      const allocation = {
+        id: randomUUID(),
+        organizationId,
+        workspaceId,
+        projectId: activeProjectId,
+        actorId: "lead",
+        unit: "hours" as const,
+        period: capacityPeriod,
+        allocatedEffort: 12.5,
+        declaredByActorId: "owner",
+        declaredAt: availability.declaredAt,
+      };
+      await capacityStore.saveAvailability(availability);
+      await capacityStore.saveAllocation(allocation);
+      await expect(
+        capacityStore.findAvailability({
+          organizationId,
+          actorId: "lead",
+          unit: "hours",
+          period: capacityPeriod,
+        }),
+      ).resolves.toEqual(availability);
+      await expect(
+        capacityStore.listAllocations({
+          organizationId,
+          actorId: "lead",
+          unit: "hours",
+          period: capacityPeriod,
+        }),
+      ).resolves.toEqual([allocation]);
+      await expect(
+        capacityStore.saveAllocation({
+          ...allocation,
+          id: randomUUID(),
+          workspaceId: otherWorkspaceId,
+        }),
+      ).rejects.toThrow(
+        "capacity allocation must preserve project and membership scope",
       );
       const activeActionId = randomUUID();
       const otherActiveActionId = randomUUID();

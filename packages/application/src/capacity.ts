@@ -68,8 +68,14 @@ export class CapacityService {
   }): Promise<CapacityAvailability> {
     await this.assertManager(input.actorId, input.organizationId);
     await this.assertMember(input.availableActorId, input.organizationId);
+    const existing = await this.dependencies.store.findAvailability({
+      organizationId: input.organizationId,
+      actorId: input.availableActorId,
+      unit: input.unit,
+      period: input.period,
+    });
     const availability: CapacityAvailability = {
-      id: this.dependencies.ids.next(),
+      id: existing?.id ?? this.dependencies.ids.next(),
       organizationId: input.organizationId,
       actorId: input.availableActorId,
       unit: input.unit,

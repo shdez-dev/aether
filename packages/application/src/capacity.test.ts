@@ -76,7 +76,7 @@ describe("CapacityService", () => {
       clock: { now: () => new Date("2026-09-20T00:00:00.000Z") },
     });
     const period = { startsOn: "2026-10-01", endsOn: "2026-10-07" };
-    await service.declareAvailability({
+    const initialAvailability = await service.declareAvailability({
       actorId: "manager",
       organizationId: "organization",
       availableActorId: "person",
@@ -84,6 +84,15 @@ describe("CapacityService", () => {
       period,
       availableEffort: 20,
     });
+    const revisedAvailability = await service.declareAvailability({
+      actorId: "manager",
+      organizationId: "organization",
+      availableActorId: "person",
+      unit: "hours",
+      period,
+      availableEffort: 20,
+    });
+    expect(revisedAvailability.id).toBe(initialAvailability.id);
     await service.allocate({
       actorId: "manager",
       organizationId: "organization",

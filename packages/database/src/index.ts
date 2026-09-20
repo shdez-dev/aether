@@ -38,6 +38,7 @@ import type {
   SecurityAuditStore,
   ProductMetricsStore,
   ProductMetricsSnapshot,
+  CapacityStore,
   DocumentAuditEvent,
   DocumentAuditStore,
   DocumentStore,
@@ -102,6 +103,10 @@ import type {
   ProjectClosure,
   ProjectDeliverableAcceptance,
   BusinessHoursPolicy,
+  CapacityAllocation,
+  CapacityAvailability,
+  CapacityPeriod,
+  CapacityUnit,
 } from "@aether/domain";
 import type { Pool, PoolClient } from "pg";
 
@@ -3721,6 +3726,96 @@ export class PostgresProjectExecutionStore implements ProjectExecutionStore {
     );
   }
 }
+export class PostgresCapacityStore implements CapacityStore {
+  constructor(private readonly pool: Pool) {}
+
+  async saveAvailability(availability: CapacityAvailability): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO capacity_availabilities (id, organization_id, actor_id, unit, period_starts_on, period_ends_on, available_effort, declared_by_actor_id, declared_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       ON CONFLICT (organization_id, actor_id, unit, period_starts_on, period_ends_on)
+       DO UPDATE SET available_effort = EXCLUDED.available_effort,
+                     declared_by_actor_id = EXCLUDED.declared_by_actor_id,
+                     declared_at = EXCLUDED.declared_at`,
+      [
+        availability.id,
+        availability.organizationId,
+        availability.actorId,
+        availability.unit,
+        availability.period.startsOn,
+        availability.period.endsOn,
+        availability.availableEffort,
+        availability.declaredByActorId,
+        availability.declaredAt,
+      ],
+    );
+  }
+
+  async saveAllocation(allocation: CapacityAllocation): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO capacity_allocations (id, organization_id, workspace_id, project_id, actor_id, unit, period_starts_on, period_ends_on, allocated_effort, declared_by_actor_id, declared_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [
+        allocation.id,
+        allocation.organizationId,
+        allocation.workspaceId,
+        allocation.projectId,
+        allocation.actorId,
+        allocation.unit,
+        allocation.period.startsOn,
+        allocation.period.endsOn,
+        allocation.allocatedEffort,
+        allocation.declaredByActorId,
+        allocation.declaredAt,
+      ],
+    );
+  }
+
+  async findAvailability(input: {
+    organizationId: string;
+    actorId: string;
+    unit: CapacityUnit;
+    period: CapacityPeriod;
+  }): Promise<CapacityAvailability | null> {
+    const result = await this.pool.query<CapacityAvailabilityRow>(
+      `SELECT id, organization_id, actor_id, unit, period_starts_on, period_ends_on, available_effort, declared_by_actor_id, declared_at
+       FROM capacity_availabilities
+       WHERE organization_id = $1 AND actor_id = $2 AND unit = $3
+         AND period_starts_on = $4 AND period_ends_on = $5`,
+      [
+        input.organizationId,
+        input.actorId,
+        input.unit,
+        input.period.startsOn,
+        input.period.endsOn,
+      ],
+    );
+    return result.rows[0] ? toCapacityAvailability(result.rows[0]) : null;
+  }
+
+  async listAllocations(input: {
+    organizationId: string;
+    actorId: string;
+    unit: CapacityUnit;
+    period: CapacityPeriod;
+  }): Promise<readonly CapacityAllocation[]> {
+    const result = await this.pool.query<CapacityAllocationRow>(
+      `SELECT id, organization_id, workspace_id, project_id, actor_id, unit, period_starts_on, period_ends_on, allocated_effort, declared_by_actor_id, declared_at
+       FROM capacity_allocations
+       WHERE organization_id = $1 AND actor_id = $2 AND unit = $3
+         AND period_starts_on = $4 AND period_ends_on = $5
+       ORDER BY declared_at ASC, id ASC`,
+      [
+        input.organizationId,
+        input.actorId,
+        input.unit,
+        input.period.startsOn,
+        input.period.endsOn,
+      ],
+    );
+    return result.rows.map(toCapacityAllocation);
+  }
+}
 export class PostgresProjectClosureStore implements ProjectClosureStore {
   constructor(private readonly pool: Pool) {}
   async createClosure(closure: ProjectClosure): Promise<void> {
@@ -5216,6 +5311,64 @@ function toUnassignedIntakeException(
 }
 function toCalendarDate(value: string | Date): string {
   return typeof value === "string" ? value : value.toISOString().slice(0, 10);
+}
+type CapacityAvailabilityRow = Readonly<{
+  id: string;
+  organization_id: string;
+  actor_id: string;
+  unit: CapacityUnit;
+  period_starts_on: string | Date;
+  period_ends_on: string | Date;
+  available_effort: string;
+  declared_by_actor_id: string;
+  declared_at: Date;
+}>;
+type CapacityAllocationRow = Readonly<{
+  id: string;
+  organization_id: string;
+  workspace_id: string;
+  project_id: string;
+  actor_id: string;
+  unit: CapacityUnit;
+  period_starts_on: string | Date;
+  period_ends_on: string | Date;
+  allocated_effort: string;
+  declared_by_actor_id: string;
+  declared_at: Date;
+}>;
+function toCapacityAvailability(
+  row: CapacityAvailabilityRow,
+): CapacityAvailability {
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    actorId: row.actor_id,
+    unit: row.unit,
+    period: {
+      startsOn: toCalendarDate(row.period_starts_on),
+      endsOn: toCalendarDate(row.period_ends_on),
+    },
+    availableEffort: Number(row.available_effort),
+    declaredByActorId: row.declared_by_actor_id,
+    declaredAt: row.declared_at,
+  };
+}
+function toCapacityAllocation(row: CapacityAllocationRow): CapacityAllocation {
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    workspaceId: row.workspace_id,
+    projectId: row.project_id,
+    actorId: row.actor_id,
+    unit: row.unit,
+    period: {
+      startsOn: toCalendarDate(row.period_starts_on),
+      endsOn: toCalendarDate(row.period_ends_on),
+    },
+    allocatedEffort: Number(row.allocated_effort),
+    declaredByActorId: row.declared_by_actor_id,
+    declaredAt: row.declared_at,
+  };
 }
 function toTriageStandard(row: TriageStandardRow): TriageStandard {
   return {
