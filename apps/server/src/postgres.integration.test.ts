@@ -1372,6 +1372,44 @@ describe.sequential("PostgreSQL integration", () => {
          VALUES ($1,$2,$3,$4,'Delivered','Reusable lesson','[]','owner','2026-01-20T00:00:00Z')`,
         [randomUUID(), closedProjectId, organizationId, workspaceId],
       );
+      const activeActionId = randomUUID();
+      const otherActiveActionId = randomUUID();
+      const closedActionId = randomUUID();
+      await pool.query(
+        `INSERT INTO project_next_actions (id, project_id, description, owner_actor_id, due_on, completed_at, created_by_actor_id, created_at)
+         VALUES
+           ($1,$2,'Active action','owner',NULL,NULL,'owner','2026-01-03T00:00:00Z'),
+           ($3,$2,'Other active action','owner',NULL,NULL,'owner','2026-01-03T00:00:00Z'),
+           ($4,$5,'Closed action','owner',NULL,NULL,'owner','2026-01-03T00:00:00Z')`,
+        [
+          activeActionId,
+          activeProjectId,
+          otherActiveActionId,
+          closedActionId,
+          closedProjectId,
+        ],
+      );
+      await expect(
+        pool.query(
+          `INSERT INTO project_next_action_dependencies (action_id, depends_on_action_id)
+           VALUES ($1,$2)`,
+          [activeActionId, closedActionId],
+        ),
+      ).rejects.toThrow(
+        "next action dependencies must stay within one project",
+      );
+      await pool.query(
+        `INSERT INTO project_next_action_dependencies (action_id, depends_on_action_id)
+         VALUES ($1,$2)`,
+        [activeActionId, otherActiveActionId],
+      );
+      await expect(
+        pool.query(
+          `INSERT INTO project_next_action_dependencies (action_id, depends_on_action_id)
+           VALUES ($1,$2)`,
+          [otherActiveActionId, activeActionId],
+        ),
+      ).rejects.toThrow("next action dependencies cannot form a cycle");
       await pool.query(
         `INSERT INTO documents (id, organization_id, workspace_id, resource_type, resource_id, classification, created_by_actor_id, created_at)
          VALUES ($1,$2,$3,'decision',$4,'internal','owner','2026-01-03T00:00:00Z')`,
