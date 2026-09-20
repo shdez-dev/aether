@@ -213,12 +213,32 @@ export function replaceProjectLead(input: {
     updatedAt: input.updatedAt,
   };
 }
+export function transferProjectWorkspace(input: {
+  project: Project;
+  workspaceId: string;
+  reason: string;
+  updatedAt: Date;
+}): Project {
+  if (
+    input.project.status !== "planned" ||
+    input.workspaceId === input.project.workspaceId ||
+    !input.reason.trim()
+  )
+    throw new ProjectDomainError("PROJECT_WORKSPACE_TRANSFER_INVALID");
+  return {
+    ...input.project,
+    workspaceId: input.workspaceId,
+    version: input.project.version + 1,
+    updatedAt: input.updatedAt,
+  };
+}
 export class ProjectDomainError extends Error {
   constructor(
     public readonly code:
       | "PROJECT_ROLES_INVALID"
       | "PROJECT_LEAD_ASSIGNMENT_INVALID"
       | "PROJECT_LEAD_REPLACEMENT_INVALID"
+      | "PROJECT_WORKSPACE_TRANSFER_INVALID"
       | "PROJECT_MINIMUM_PLAN_REQUIRED"
       | "PROJECT_MANDATE_REQUIRED"
       | "INVALID_PROJECT_TRANSITION"

@@ -3535,6 +3535,44 @@ export class PostgresProjectStore implements ProjectStore {
     );
     return result.rowCount === 1;
   }
+  async transfer(input: {
+    project: Project;
+    expectedVersion: number;
+    auditEvent: ProjectAuditEvent;
+  }): Promise<boolean> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        "SET LOCAL aether.project_workspace_transfer = 'true'",
+      );
+      const result = await client.query(
+        `UPDATE projects
+         SET workspace_id = $2, version = $3, updated_at = $4
+         WHERE id = $1 AND version = $5 AND status = 'planned'
+           AND NOT EXISTS (
+             SELECT 1 FROM documents
+             WHERE resource_type = 'project' AND resource_id = $1
+           )`,
+        [
+          input.project.id,
+          input.project.workspaceId,
+          input.project.version,
+          input.project.updatedAt,
+          input.expectedVersion,
+        ],
+      );
+      if ((result.rowCount ?? 0) === 1)
+        await insertProjectAuditEvent(client, input.auditEvent);
+      await client.query("COMMIT");
+      return (result.rowCount ?? 0) === 1;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
   async saveWithEvent(input: {
     project: Project;
     expectedVersion: number;

@@ -52,10 +52,13 @@ describe("ProjectService", () => {
         storedProject = input.project;
         return true;
       },
+      async transfer(input) {
+        return this.save(input);
+      },
     };
     const tenancy = {
       async findWorkspace(workspaceId: string) {
-        return workspaceId === "workspace-1"
+        return ["workspace-1", "workspace-2"].includes(workspaceId)
           ? {
               id: workspaceId,
               organizationId: "organization-1",
@@ -102,15 +105,27 @@ describe("ProjectService", () => {
     });
 
     await expect(
+      service.transferWorkspace({
+        actorId: "owner",
+        organizationId: "organization-1",
+        projectId: "project-1",
+        expectedVersion: 0,
+        workspaceId: "workspace-2",
+        reason: "Cambio aprobado del contexto operativo.",
+        correlationId: "correlation-transfer",
+      }),
+    ).resolves.toMatchObject({ workspaceId: "workspace-2", version: 1 });
+
+    await expect(
       service.changeStatus({
         actorId: "lead",
         organizationId: "organization-1",
         projectId: "project-1",
-        expectedVersion: 0,
+        expectedVersion: 1,
         status: "active",
         correlationId: "correlation-1",
       }),
-    ).resolves.toMatchObject({ status: "active", version: 1 });
+    ).resolves.toMatchObject({ status: "active", version: 2 });
 
     activeRoles.delete("lead");
 
@@ -119,11 +134,11 @@ describe("ProjectService", () => {
         actorId: "lead",
         organizationId: "organization-1",
         projectId: "project-1",
-        expectedVersion: 1,
+        expectedVersion: 2,
         status: "blocked",
         correlationId: "correlation-2",
       }),
     ).rejects.toBeInstanceOf(AccessDeniedError);
-    expect(storedProject).toMatchObject({ status: "active", version: 1 });
+    expect(storedProject).toMatchObject({ status: "active", version: 2 });
   });
 });

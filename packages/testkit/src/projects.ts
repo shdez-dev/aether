@@ -51,6 +51,13 @@ export class InMemoryProjectStore implements ProjectStore {
     this.projects.set(input.project.id, input.project);
     return true;
   }
+  async transfer(input: {
+    project: Project;
+    expectedVersion: number;
+    auditEvent: ProjectAuditEvent;
+  }): Promise<boolean> {
+    return this.save(input);
+  }
   async createWithEvent(input: {
     project: Project;
     event: DurableDomainEvent;

@@ -243,6 +243,12 @@ export const ReplaceProjectLeadRequestSchema = z.object({
   leadActorId: z.string().min(1).max(255),
   reason: NonEmptyTextSchema.max(1_000),
 });
+export const TransferProjectWorkspaceRequestSchema = z.object({
+  organizationId: UuidSchema,
+  expectedVersion: z.number().int().nonnegative(),
+  workspaceId: UuidSchema,
+  reason: NonEmptyTextSchema.max(1_000),
+});
 export const AddProjectMilestoneRequestSchema = z.object({
   organizationId: UuidSchema,
   title: NonEmptyTextSchema.max(255),

@@ -3,6 +3,7 @@ import {
   assignProjectLead,
   createProject,
   replaceProjectLead,
+  transferProjectWorkspace,
   transitionProject,
   type InitiativeDecision,
   type Project,
@@ -45,6 +46,11 @@ export interface ProjectStore {
     workspaceId: string;
   }): Promise<readonly Project[]>;
   save(input: { project: Project; expectedVersion: number }): Promise<boolean>;
+  transfer(input: {
+    project: Project;
+    expectedVersion: number;
+    auditEvent: ProjectAuditEvent;
+  }): Promise<boolean>;
   createWithEvent?(input: {
     project: Project;
     event: DurableDomainEvent;
@@ -361,6 +367,62 @@ export class ProjectService {
         previousLeadRole: "contributor",
       },
     );
+    return updated;
+  }
+  async transferWorkspace(input: {
+    actorId: string;
+    organizationId: string;
+    projectId: string;
+    expectedVersion: number;
+    workspaceId: string;
+    reason: string;
+    correlationId: string;
+  }): Promise<Project> {
+    await this.assertOwner(input.actorId, input.organizationId);
+    const project = await this.requireProject(
+      input.projectId,
+      input.organizationId,
+    );
+    if (project.version !== input.expectedVersion)
+      throw new ProjectVersionConflictError();
+    const targetWorkspace = await this.dependencies.tenancy.findWorkspace(
+      input.workspaceId,
+    );
+    if (
+      !targetWorkspace ||
+      targetWorkspace.organizationId !== project.organizationId ||
+      targetWorkspace.status !== "active"
+    )
+      throw new ProjectDomainError("PROJECT_WORKSPACE_TRANSFER_INVALID");
+    await this.assertProjectLeadActive({
+      organizationId: project.organizationId,
+      workspaceId: targetWorkspace.id,
+      leadActorId: project.leadActorId,
+    });
+    const updated = transferProjectWorkspace({
+      project,
+      workspaceId: input.workspaceId,
+      reason: input.reason,
+      updatedAt: this.dependencies.clock.now(),
+    });
+    const auditEvent = this.auditEventFor(
+      updated,
+      input.actorId,
+      input.correlationId,
+      "project.workspace_transferred.v1",
+      {
+        fromWorkspaceId: project.workspaceId,
+        reason: input.reason.trim(),
+      },
+    );
+    if (
+      !(await this.dependencies.projects.transfer({
+        project: updated,
+        expectedVersion: project.version,
+        auditEvent,
+      }))
+    )
+      throw new ProjectVersionConflictError();
     return updated;
   }
   async addMilestone(input: {
