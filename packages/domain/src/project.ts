@@ -42,12 +42,27 @@ export type ProjectMilestone = Readonly<{
   createdByActorId: string;
   createdAt: Date;
 }>;
+export const ProjectNextActionPriorities = ["low", "medium", "high"] as const;
+export type ProjectNextActionPriority =
+  (typeof ProjectNextActionPriorities)[number];
+export const ProjectNextActionEffortUnits = [
+  "hours",
+  "days",
+  "points",
+] as const;
+export type ProjectNextActionEffortUnit =
+  (typeof ProjectNextActionEffortUnits)[number];
 export type ProjectNextAction = Readonly<{
   id: string;
   projectId: string;
   description: string;
   ownerActorId: string;
   dueOn: string | null;
+  priority: ProjectNextActionPriority;
+  estimatedEffort: number | null;
+  effortUnit: ProjectNextActionEffortUnit | null;
+  periodStartOn: string | null;
+  periodEndOn: string | null;
   completedAt: Date | null;
   createdByActorId: string;
   createdAt: Date;

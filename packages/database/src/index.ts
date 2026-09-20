@@ -3624,13 +3624,18 @@ export class PostgresProjectExecutionStore implements ProjectExecutionStore {
   }
   async addNextAction(action: ProjectNextAction): Promise<void> {
     await this.pool.query(
-      `INSERT INTO project_next_actions (id, project_id, description, owner_actor_id, due_on, completed_at, created_by_actor_id, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      `INSERT INTO project_next_actions (id, project_id, description, owner_actor_id, due_on, priority, estimated_effort, effort_unit, period_start_on, period_end_on, completed_at, created_by_actor_id, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
       [
         action.id,
         action.projectId,
         action.description,
         action.ownerActorId,
         action.dueOn,
+        action.priority,
+        action.estimatedEffort,
+        action.effortUnit,
+        action.periodStartOn,
+        action.periodEndOn,
         action.completedAt,
         action.createdByActorId,
         action.createdAt,
@@ -3652,12 +3657,17 @@ export class PostgresProjectExecutionStore implements ProjectExecutionStore {
       project_id: string;
       description: string;
       owner_actor_id: string;
-      due_on: string | null;
+      due_on: string | Date | null;
+      priority: ProjectNextAction["priority"];
+      estimated_effort: string | null;
+      effort_unit: ProjectNextAction["effortUnit"];
+      period_start_on: string | Date | null;
+      period_end_on: string | Date | null;
       completed_at: Date | null;
       created_by_actor_id: string;
       created_at: Date;
     }>(
-      `SELECT id, project_id, description, owner_actor_id, due_on, completed_at, created_by_actor_id, created_at FROM project_next_actions WHERE id = $1`,
+      `SELECT id, project_id, description, owner_actor_id, due_on, priority, estimated_effort, effort_unit, period_start_on, period_end_on, completed_at, created_by_actor_id, created_at FROM project_next_actions WHERE id = $1`,
       [actionId],
     );
     const row = result.rows[0];
@@ -3667,7 +3677,19 @@ export class PostgresProjectExecutionStore implements ProjectExecutionStore {
           projectId: row.project_id,
           description: row.description,
           ownerActorId: row.owner_actor_id,
-          dueOn: row.due_on,
+          dueOn: row.due_on === null ? null : toCalendarDate(row.due_on),
+          priority: row.priority,
+          estimatedEffort:
+            row.estimated_effort === null ? null : Number(row.estimated_effort),
+          effortUnit: row.effort_unit,
+          periodStartOn:
+            row.period_start_on === null
+              ? null
+              : toCalendarDate(row.period_start_on),
+          periodEndOn:
+            row.period_end_on === null
+              ? null
+              : toCalendarDate(row.period_end_on),
           completedAt: row.completed_at,
           createdByActorId: row.created_by_actor_id,
           createdAt: row.created_at,

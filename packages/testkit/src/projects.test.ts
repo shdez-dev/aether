@@ -329,6 +329,11 @@ describe("project conversion and execution", () => {
       description: "Preparar piloto",
       ownerActorId: "replacement",
       dueOn: "2026-09-20",
+      priority: "high",
+      estimatedEffort: 12,
+      effortUnit: "hours",
+      periodStartOn: "2026-09-15",
+      periodEndOn: "2026-09-20",
       correlationId: ids.next(),
     });
     const active = await projects.changeStatus({
@@ -426,6 +431,13 @@ describe("project conversion and execution", () => {
     expect(active.status).toBe("active");
     expect(execution.milestones).toHaveLength(1);
     expect(execution.actions).toHaveLength(1);
+    expect(execution.actions[0]).toMatchObject({
+      priority: "high",
+      estimatedEffort: 12,
+      effortUnit: "hours",
+      periodStartOn: "2026-09-15",
+      periodEndOn: "2026-09-20",
+    });
     expect(completed.status).toBe("completed");
     expect(deliverable.documentVersionId).toBe(documentVersionId);
     expect(closures.closures.get(project.id)).toEqual(closure);

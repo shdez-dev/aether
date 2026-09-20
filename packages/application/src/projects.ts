@@ -11,6 +11,8 @@ import {
   type ProjectMilestone,
   type ProjectNextAction,
   type ProjectNextActionDependency,
+  type ProjectNextActionEffortUnit,
+  type ProjectNextActionPriority,
   type ProjectClosure,
   type ProjectDeliverableAcceptance,
   type ProjectParticipant,
@@ -606,6 +608,11 @@ export class ProjectService {
     description: string;
     ownerActorId: string;
     dueOn: string | null;
+    priority: ProjectNextActionPriority;
+    estimatedEffort: number | null;
+    effortUnit: ProjectNextActionEffortUnit | null;
+    periodStartOn: string | null;
+    periodEndOn: string | null;
     correlationId: string;
   }): Promise<ProjectNextAction> {
     const project = await this.requireProject(
@@ -624,6 +631,11 @@ export class ProjectService {
       description: input.description,
       ownerActorId: input.ownerActorId,
       dueOn: input.dueOn,
+      priority: input.priority,
+      estimatedEffort: input.estimatedEffort,
+      effortUnit: input.effortUnit,
+      periodStartOn: input.periodStartOn,
+      periodEndOn: input.periodEndOn,
       completedAt: null,
       createdByActorId: input.actorId,
       createdAt: this.dependencies.clock.now(),
@@ -634,7 +646,15 @@ export class ProjectService {
       input.actorId,
       input.correlationId,
       "project.next_action_added.v1",
-      { actionId: action.id, ownerActorId: action.ownerActorId },
+      {
+        actionId: action.id,
+        ownerActorId: action.ownerActorId,
+        priority: action.priority,
+        estimatedEffort: action.estimatedEffort,
+        effortUnit: action.effortUnit,
+        periodStartOn: action.periodStartOn,
+        periodEndOn: action.periodEndOn,
+      },
     );
     return action;
   }

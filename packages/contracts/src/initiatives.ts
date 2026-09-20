@@ -271,12 +271,52 @@ export const AddProjectMilestoneRequestSchema = z.object({
   title: NonEmptyTextSchema.max(255),
   dueOn: z.string().date().nullable(),
 });
-export const AddProjectNextActionRequestSchema = z.object({
-  organizationId: UuidSchema,
-  description: NonEmptyTextSchema.max(2_000),
-  ownerActorId: z.string().min(1).max(255),
-  dueOn: z.string().date().nullable(),
-});
+export const ProjectNextActionPrioritySchema = z.enum([
+  "low",
+  "medium",
+  "high",
+]);
+export const ProjectNextActionEffortUnitSchema = z.enum([
+  "hours",
+  "days",
+  "points",
+]);
+export const AddProjectNextActionRequestSchema = z
+  .object({
+    organizationId: UuidSchema,
+    description: NonEmptyTextSchema.max(2_000),
+    ownerActorId: z.string().min(1).max(255),
+    dueOn: z.string().date().nullable(),
+    priority: ProjectNextActionPrioritySchema,
+    estimatedEffort: z.number().positive().max(1_000_000).nullable(),
+    effortUnit: ProjectNextActionEffortUnitSchema.nullable(),
+    periodStartOn: z.string().date().nullable(),
+    periodEndOn: z.string().date().nullable(),
+  })
+  .superRefine((value, context) => {
+    if ((value.estimatedEffort === null) !== (value.effortUnit === null))
+      context.addIssue({
+        code: "custom",
+        path: ["estimatedEffort"],
+        message: "La estimación y su unidad deben declararse juntas.",
+      });
+    if ((value.periodStartOn === null) !== (value.periodEndOn === null))
+      context.addIssue({
+        code: "custom",
+        path: ["periodStartOn"],
+        message: "El período requiere fecha de inicio y término.",
+      });
+    if (
+      value.periodStartOn !== null &&
+      value.periodEndOn !== null &&
+      value.periodStartOn > value.periodEndOn
+    )
+      context.addIssue({
+        code: "custom",
+        path: ["periodEndOn"],
+        message: "El período no puede terminar antes de comenzar.",
+      });
+  });
 export const DeclareProjectNextActionDependencyRequestSchema = z.object({
   organizationId: UuidSchema,
   actionId: UuidSchema,

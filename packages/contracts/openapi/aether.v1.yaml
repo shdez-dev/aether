@@ -3935,12 +3935,28 @@ components:
     AddProjectNextActionRequest:
       type: object
       additionalProperties: false
-      required: [organizationId, description, ownerActorId, dueOn]
+      required:
+        [
+          organizationId,
+          description,
+          ownerActorId,
+          dueOn,
+          priority,
+          estimatedEffort,
+          effortUnit,
+          periodStartOn,
+          periodEndOn,
+        ]
       properties:
         organizationId: { type: string, format: uuid }
         description: { type: string, minLength: 1, maxLength: 2000 }
         ownerActorId: { type: string }
         dueOn: { type: [string, "null"], format: date }
+        priority: { type: string, enum: [low, medium, high] }
+        estimatedEffort: { type: [number, "null"], exclusiveMinimum: 0, maximum: 1000000 }
+        effortUnit: { type: [string, "null"], enum: [hours, days, points, null] }
+        periodStartOn: { type: [string, "null"], format: date }
+        periodEndOn: { type: [string, "null"], format: date }
     DeclareProjectNextActionDependencyRequest:
       type: object
       additionalProperties: false

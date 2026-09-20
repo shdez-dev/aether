@@ -1410,6 +1410,83 @@ describe.sequential("PostgreSQL integration", () => {
           [otherActiveActionId, activeActionId],
         ),
       ).rejects.toThrow("next action dependencies cannot form a cycle");
+      const concurrentActionId = randomUUID();
+      const concurrentDependencyId = randomUUID();
+      await pool.query(
+        `INSERT INTO project_next_actions (id, project_id, description, owner_actor_id, due_on, completed_at, created_by_actor_id, created_at)
+         VALUES
+           ($1,$2,'Concurrent action','owner',NULL,NULL,'owner','2026-01-03T00:00:00Z'),
+           ($3,$2,'Concurrent dependency','owner',NULL,NULL,'owner','2026-01-03T00:00:00Z')`,
+        [concurrentActionId, activeProjectId, concurrentDependencyId],
+      );
+      const transaction = await pool.connect();
+      let committed = false;
+      try {
+        await transaction.query("BEGIN");
+        await transaction.query(
+          `INSERT INTO project_next_action_dependencies (action_id, depends_on_action_id)
+           VALUES ($1,$2)`,
+          [concurrentActionId, concurrentDependencyId],
+        );
+        const inverseDependency = pool.query(
+          `INSERT INTO project_next_action_dependencies (action_id, depends_on_action_id)
+           VALUES ($1,$2)`,
+          [concurrentDependencyId, concurrentActionId],
+        );
+        let inverseSettled = false;
+        void inverseDependency.then(
+          () => {
+            inverseSettled = true;
+          },
+          () => {
+            inverseSettled = true;
+          },
+        );
+        await new Promise<void>((resolve) => setTimeout(resolve, 25));
+        expect(inverseSettled).toBe(false);
+        await transaction.query("COMMIT");
+        committed = true;
+        await expect(inverseDependency).rejects.toThrow(
+          "next action dependencies cannot form a cycle",
+        );
+      } finally {
+        if (!committed) await transaction.query("ROLLBACK");
+        transaction.release();
+      }
+      const plannedAction = {
+        id: randomUUID(),
+        projectId: activeProjectId,
+        description: "Round-trip planning fields",
+        ownerActorId: "owner",
+        dueOn: "2026-01-12",
+        priority: "high" as const,
+        estimatedEffort: 12.5,
+        effortUnit: "hours" as const,
+        periodStartOn: "2026-01-05",
+        periodEndOn: "2026-01-12",
+        completedAt: null,
+        createdByActorId: "owner",
+        createdAt: new Date("2026-01-03T00:00:00.000Z"),
+      };
+      const executionStore = new PostgresProjectExecutionStore(pool);
+      await executionStore.addNextAction(plannedAction);
+      await expect(
+        executionStore.findNextAction(plannedAction.id),
+      ).resolves.toEqual(plannedAction);
+      await expect(
+        pool.query(
+          `INSERT INTO project_next_actions (id, project_id, description, owner_actor_id, priority, estimated_effort, effort_unit, period_start_on, period_end_on, created_by_actor_id, created_at)
+           VALUES ($1,$2,'Incomplete estimate','owner','medium',8,NULL,'2026-01-03','2026-01-04','owner','2026-01-03T00:00:00Z')`,
+          [randomUUID(), activeProjectId],
+        ),
+      ).rejects.toThrow(/project_next_actions_estimation_complete/);
+      await expect(
+        pool.query(
+          `INSERT INTO project_next_actions (id, project_id, description, owner_actor_id, priority, estimated_effort, effort_unit, period_start_on, period_end_on, created_by_actor_id, created_at)
+           VALUES ($1,$2,'Invalid period','owner','medium',8,'hours','2026-01-04','2026-01-03','owner','2026-01-03T00:00:00Z')`,
+          [randomUUID(), activeProjectId],
+        ),
+      ).rejects.toThrow(/project_next_actions_period_complete/);
       await pool.query(
         `INSERT INTO documents (id, organization_id, workspace_id, resource_type, resource_id, classification, created_by_actor_id, created_at)
          VALUES ($1,$2,$3,'decision',$4,'internal','owner','2026-01-03T00:00:00Z')`,
