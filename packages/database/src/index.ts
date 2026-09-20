@@ -3518,9 +3518,11 @@ export class PostgresProjectStore implements ProjectStore {
     expectedVersion: number;
   }): Promise<boolean> {
     const result = await this.pool.query(
-      `UPDATE projects SET status = $2, version = $3, updated_at = $4 WHERE id = $1 AND version = $5`,
+      `UPDATE projects SET lead_actor_id = $2, participants = $3, status = $4, version = $5, updated_at = $6 WHERE id = $1 AND version = $7`,
       [
         input.project.id,
+        input.project.leadActorId,
+        asJson(input.project.participants),
         input.project.status,
         input.project.version,
         input.project.updatedAt,
@@ -3538,9 +3540,11 @@ export class PostgresProjectStore implements ProjectStore {
     try {
       await client.query("BEGIN");
       const result = await client.query(
-        `UPDATE projects SET status = $2, version = $3, updated_at = $4 WHERE id = $1 AND version = $5`,
+        `UPDATE projects SET lead_actor_id = $2, participants = $3, status = $4, version = $5, updated_at = $6 WHERE id = $1 AND version = $7`,
         [
           input.project.id,
+          input.project.leadActorId,
+          asJson(input.project.participants),
           input.project.status,
           input.project.version,
           input.project.updatedAt,
@@ -4861,7 +4865,7 @@ type ProjectRow = {
   source_decision_id: string;
   name: string;
   sponsor_actor_id: string;
-  lead_actor_id: string;
+  lead_actor_id: string | null;
   participants: Project["participants"];
   status: Project["status"];
   version: number;

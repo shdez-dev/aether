@@ -1,5 +1,6 @@
 import {
   ProjectDomainError,
+  assignProjectLead,
   createProject,
   transitionProject,
   type InitiativeDecision,
@@ -107,7 +108,7 @@ export class ProjectService {
     decisionId: string;
     name: string;
     sponsorActorId: string;
-    leadActorId: string;
+    leadActorId: string | null;
     participants: readonly ProjectParticipant[];
     correlationId: string;
   }): Promise<Project> {
@@ -145,15 +146,16 @@ export class ProjectService {
     await Promise.all(
       [
         input.sponsorActorId,
-        input.leadActorId,
+        ...(input.leadActorId ? [input.leadActorId] : []),
         ...input.participants.map((participant) => participant.actorId),
       ].map((actorId) => this.assertMember(actorId, input.organizationId)),
     );
-    await this.assertProjectLeadActive({
-      organizationId: initiative.organizationId,
-      workspaceId: initiative.workspaceId,
-      leadActorId: input.leadActorId,
-    });
+    if (input.leadActorId)
+      await this.assertProjectLeadActive({
+        organizationId: initiative.organizationId,
+        workspaceId: initiative.workspaceId,
+        leadActorId: input.leadActorId,
+      });
     const now = this.dependencies.clock.now();
     const project = createProject({
       id: this.dependencies.ids.next(),
@@ -257,6 +259,45 @@ export class ProjectService {
       input.correlationId,
       "project.status_changed.v1",
       { fromStatus: project.status, toStatus: updated.status },
+    );
+    return updated;
+  }
+  async assignLead(input: {
+    actorId: string;
+    organizationId: string;
+    projectId: string;
+    expectedVersion: number;
+    leadActorId: string;
+    correlationId: string;
+  }): Promise<Project> {
+    await this.assertOwner(input.actorId, input.organizationId);
+    const project = await this.requireProject(
+      input.projectId,
+      input.organizationId,
+    );
+    if (project.version !== input.expectedVersion)
+      throw new ProjectVersionConflictError();
+    await this.assertProjectLeadActive({
+      organizationId: project.organizationId,
+      workspaceId: project.workspaceId,
+      leadActorId: input.leadActorId,
+    });
+    const updated = assignProjectLead({
+      project,
+      leadActorId: input.leadActorId,
+      updatedAt: this.dependencies.clock.now(),
+    });
+    const saved = await this.dependencies.projects.save({
+      project: updated,
+      expectedVersion: project.version,
+    });
+    if (!saved) throw new ProjectVersionConflictError();
+    await this.record(
+      updated,
+      input.actorId,
+      input.correlationId,
+      "project.lead_assigned.v1",
+      { leadActorId: updated.leadActorId },
     );
     return updated;
   }
@@ -524,6 +565,8 @@ export class ProjectService {
   private async assertProjectLeadActive(
     project: Pick<Project, "organizationId" | "workspaceId" | "leadActorId">,
   ): Promise<void> {
+    if (!project.leadActorId)
+      throw new ProjectDomainError("PROJECT_LEAD_ASSIGNMENT_INVALID");
     await this.assertProjectParticipant(
       project.leadActorId,
       project.organizationId,
@@ -625,7 +668,7 @@ export class ProjectService {
       decisionId: string;
       name: string;
       sponsorActorId: string;
-      leadActorId: string;
+      leadActorId: string | null;
       participants: readonly ProjectParticipant[];
     },
   ): boolean {

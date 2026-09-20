@@ -1,4 +1,5 @@
 export const ProjectStatuses = [
+  "pending_lead",
   "planned",
   "active",
   "blocked",
@@ -20,7 +21,7 @@ export type Project = Readonly<{
   sourceDecisionId: string;
   name: string;
   sponsorActorId: string;
-  leadActorId: string;
+  leadActorId: string | null;
   participants: readonly ProjectParticipant[];
   status: ProjectStatus;
   version: number;
@@ -70,6 +71,7 @@ export type ProjectDeliverableAcceptance = Readonly<{
 }>;
 
 const transitions: Record<ProjectStatus, readonly ProjectStatus[]> = {
+  pending_lead: ["planned", "cancelled"],
   planned: ["active", "cancelled"],
   active: ["blocked", "completed", "cancelled"],
   blocked: ["active", "cancelled"],
@@ -88,7 +90,9 @@ export function createProject(
   if (
     roles.size !== input.participants.length ||
     roles.get(input.sponsorActorId) !== "sponsor" ||
-    roles.get(input.leadActorId) !== "lead"
+    (input.leadActorId !== null && roles.get(input.leadActorId) !== "lead") ||
+    (input.leadActorId === null &&
+      input.participants.some((participant) => participant.role === "lead"))
   )
     throw new ProjectDomainError("PROJECT_ROLES_INVALID");
   if (input.sponsorActorId === input.leadActorId)
@@ -96,7 +100,7 @@ export function createProject(
   return {
     ...input,
     participants: [...input.participants],
-    status: "planned",
+    status: input.leadActorId === null ? "pending_lead" : "planned",
     version: 0,
   };
 }
@@ -114,10 +118,32 @@ export function transitionProject(
     updatedAt,
   };
 }
+export function assignProjectLead(input: {
+  project: Project;
+  leadActorId: string;
+  updatedAt: Date;
+}): Project {
+  if (input.project.status !== "pending_lead" || input.project.leadActorId)
+    throw new ProjectDomainError("PROJECT_LEAD_ASSIGNMENT_INVALID");
+  if (input.project.sponsorActorId === input.leadActorId)
+    throw new ProjectDomainError("PROJECT_ROLES_INVALID");
+  return {
+    ...input.project,
+    leadActorId: input.leadActorId,
+    participants: [
+      ...input.project.participants,
+      { actorId: input.leadActorId, role: "lead" },
+    ],
+    status: "planned",
+    version: input.project.version + 1,
+    updatedAt: input.updatedAt,
+  };
+}
 export class ProjectDomainError extends Error {
   constructor(
     public readonly code:
       | "PROJECT_ROLES_INVALID"
+      | "PROJECT_LEAD_ASSIGNMENT_INVALID"
       | "INVALID_PROJECT_TRANSITION"
       | "DECISION_CONDITIONS_PENDING",
   ) {

@@ -172,13 +172,20 @@ export const DeclareInitiativeRelationshipRequestSchema = z.object({
   targetInitiativeId: UuidSchema,
   kind: z.enum(["related", "continues"]),
 });
-export const DiagnosticEntrySchema = z.object({
-  kind: z.enum(["evidence", "opinion", "uncertainty"]),
-  text: NonEmptyTextSchema.max(2_000),
-  source: z.string().max(2_000).nullable(),
-}).superRefine((entry, context) => {
-  if (entry.kind === "evidence" && !entry.source?.trim()) context.addIssue({ code: z.ZodIssueCode.custom, path: ["source"], message: "Evidence requires a source" });
-});
+export const DiagnosticEntrySchema = z
+  .object({
+    kind: z.enum(["evidence", "opinion", "uncertainty"]),
+    text: NonEmptyTextSchema.max(2_000),
+    source: z.string().max(2_000).nullable(),
+  })
+  .superRefine((entry, context) => {
+    if (entry.kind === "evidence" && !entry.source?.trim())
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["source"],
+        message: "Evidence requires a source",
+      });
+  });
 export const SaveInitiativeDiagnosticRequestSchema = z.object({
   organizationId: UuidSchema,
   expectedVersion: z.number().int().nonnegative().nullable(),
@@ -205,13 +212,25 @@ export const CreateProjectFromInitiativeRequestSchema = z.object({
   decisionId: UuidSchema,
   name: NonEmptyTextSchema.max(255),
   sponsorActorId: z.string().min(1).max(255),
-  leadActorId: z.string().min(1).max(255),
-  participants: z.array(ProjectParticipantSchema).min(2).max(100),
+  leadActorId: z.string().min(1).max(255).nullable(),
+  participants: z.array(ProjectParticipantSchema).min(1).max(100),
 });
 export const ChangeProjectStatusRequestSchema = z.object({
   organizationId: UuidSchema,
   expectedVersion: z.number().int().nonnegative(),
-  status: z.enum(["planned", "active", "blocked", "completed", "cancelled"]),
+  status: z.enum([
+    "pending_lead",
+    "planned",
+    "active",
+    "blocked",
+    "completed",
+    "cancelled",
+  ]),
+});
+export const AssignProjectLeadRequestSchema = z.object({
+  organizationId: UuidSchema,
+  expectedVersion: z.number().int().nonnegative(),
+  leadActorId: z.string().min(1).max(255),
 });
 export const AddProjectMilestoneRequestSchema = z.object({
   organizationId: UuidSchema,
@@ -452,7 +471,7 @@ export const ProjectResponseSchema = z.object({
   sourceDecisionId: UuidSchema,
   name: z.string(),
   sponsorActorId: z.string(),
-  leadActorId: z.string(),
+  leadActorId: z.string().nullable(),
   participants: z.array(ProjectParticipantSchema),
   status: z.enum(["planned", "active", "blocked", "completed", "cancelled"]),
   version: z.number().int().nonnegative(),

@@ -171,10 +171,9 @@ describe("project conversion and execution", () => {
       decisionId,
       name: "Piloto ejecutable",
       sponsorActorId: "owner",
-      leadActorId: "lead",
+      leadActorId: null,
       participants: [
         { actorId: "owner", role: "sponsor" },
-        { actorId: "lead", role: "lead" },
         { actorId: "observer", role: "observer" },
       ] as const,
       correlationId: ids.next(),
@@ -204,14 +203,41 @@ describe("project conversion and execution", () => {
         ],
       }),
     ).rejects.toBeInstanceOf(AccessDeniedError);
-    const project = await projects.createFromInitiative(conversionInput);
-    expect(project.sourceInitiativeId).toBe(approved.id);
-    expect(project.sourceDecisionId).toBe(decisionId);
+    const pending = await projects.createFromInitiative(conversionInput);
+    expect(pending).toMatchObject({
+      sourceInitiativeId: approved.id,
+      sourceDecisionId: decisionId,
+      status: "pending_lead",
+      leadActorId: null,
+    });
     const retried = await projects.createFromInitiative({
       ...conversionInput,
       correlationId: ids.next(),
     });
-    expect(retried.id).toBe(project.id);
+    expect(retried.id).toBe(pending.id);
+    await expect(
+      projects.changeStatus({
+        actorId: "owner",
+        organizationId: organization.id,
+        projectId: pending.id,
+        expectedVersion: pending.version,
+        status: "active",
+        correlationId: ids.next(),
+      }),
+    ).rejects.toMatchObject({ code: "PROJECT_LEAD_ASSIGNMENT_INVALID" });
+    const project = await projects.assignLead({
+      actorId: "owner",
+      organizationId: organization.id,
+      projectId: pending.id,
+      expectedVersion: pending.version,
+      leadActorId: "lead",
+      correlationId: ids.next(),
+    });
+    expect(project).toMatchObject({
+      status: "planned",
+      leadActorId: "lead",
+      version: 1,
+    });
     await expect(
       projects.createFromInitiative({
         ...conversionInput,
@@ -366,6 +392,7 @@ describe("project conversion and execution", () => {
     });
     expect(projectHistory.map((event) => event.action)).toEqual([
       "project.created_from_initiative.v1",
+      "project.lead_assigned.v1",
       "project.status_changed.v1",
       "project.milestone_added.v1",
       "project.next_action_added.v1",
@@ -375,6 +402,7 @@ describe("project conversion and execution", () => {
     ]);
     expect(audit.events.map((event) => event.eventType)).toEqual([
       "project.created_from_initiative.v1",
+      "project.lead_assigned.v1",
       "project.status_changed.v1",
       "project.milestone_added.v1",
       "project.next_action_added.v1",
