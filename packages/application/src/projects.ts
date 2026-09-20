@@ -108,6 +108,10 @@ export class ProjectService {
     initiativeId: string;
     decisionId: string;
     name: string;
+    objective: string;
+    boundaries: string;
+    successCriteria: string;
+    nextMilestone: string;
     sponsorActorId: string;
     leadActorId: string | null;
     participants: readonly ProjectParticipant[];
@@ -165,6 +169,10 @@ export class ProjectService {
       sourceInitiativeId: initiative.id,
       sourceDecisionId: decision.id,
       name: input.name,
+      objective: input.objective,
+      boundaries: input.boundaries,
+      successCriteria: input.successCriteria,
+      nextMilestone: input.nextMilestone,
       sponsorActorId: input.sponsorActorId,
       leadActorId: input.leadActorId,
       participants: input.participants,
@@ -673,6 +681,10 @@ export class ProjectService {
     input: {
       decisionId: string;
       name: string;
+      objective: string;
+      boundaries: string;
+      successCriteria: string;
+      nextMilestone: string;
       sponsorActorId: string;
       leadActorId: string | null;
       participants: readonly ProjectParticipant[];
@@ -681,6 +693,10 @@ export class ProjectService {
     return (
       project.sourceDecisionId === input.decisionId &&
       project.name === input.name &&
+      project.objective === input.objective &&
+      project.boundaries === input.boundaries &&
+      project.successCriteria === input.successCriteria &&
+      project.nextMilestone === input.nextMilestone &&
       project.sponsorActorId === input.sponsorActorId &&
       project.leadActorId === input.leadActorId &&
       project.participants.length === input.participants.length &&

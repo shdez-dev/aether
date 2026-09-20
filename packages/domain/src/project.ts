@@ -20,6 +20,10 @@ export type Project = Readonly<{
   sourceInitiativeId: string;
   sourceDecisionId: string;
   name: string;
+  objective: string | null;
+  boundaries: string | null;
+  successCriteria: string | null;
+  nextMilestone: string | null;
   sponsorActorId: string;
   leadActorId: string | null;
   participants: readonly ProjectParticipant[];
@@ -79,7 +83,20 @@ const transitions: Record<ProjectStatus, readonly ProjectStatus[]> = {
   cancelled: [],
 };
 export function createProject(
-  input: Omit<Project, "status" | "version">,
+  input: Omit<
+    Project,
+    | "status"
+    | "version"
+    | "objective"
+    | "boundaries"
+    | "successCriteria"
+    | "nextMilestone"
+  > & {
+    objective: string;
+    boundaries: string;
+    successCriteria: string;
+    nextMilestone: string;
+  },
 ): Project {
   const roles = new Map(
     input.participants.map((participant) => [
@@ -97,6 +114,15 @@ export function createProject(
     throw new ProjectDomainError("PROJECT_ROLES_INVALID");
   if (input.sponsorActorId === input.leadActorId)
     throw new ProjectDomainError("PROJECT_ROLES_INVALID");
+  if (
+    ![
+      input.objective,
+      input.boundaries,
+      input.successCriteria,
+      input.nextMilestone,
+    ].every((value) => value.trim())
+  )
+    throw new ProjectDomainError("PROJECT_MANDATE_REQUIRED");
   return {
     ...input,
     participants: [...input.participants],
@@ -145,6 +171,7 @@ export class ProjectDomainError extends Error {
       | "PROJECT_ROLES_INVALID"
       | "PROJECT_LEAD_ASSIGNMENT_INVALID"
       | "PROJECT_MINIMUM_PLAN_REQUIRED"
+      | "PROJECT_MANDATE_REQUIRED"
       | "INVALID_PROJECT_TRANSITION"
       | "DECISION_CONDITIONS_PENDING",
   ) {

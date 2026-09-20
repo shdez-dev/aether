@@ -170,6 +170,10 @@ describe("project conversion and execution", () => {
       initiativeId: approved.id,
       decisionId,
       name: "Piloto ejecutable",
+      objective: "Reducir el tiempo de atención.",
+      boundaries: "Sólo solicitudes internas priorizadas.",
+      successCriteria: "Reducir la mediana de espera en 20 %.",
+      nextMilestone: "Validar el piloto inicial.",
       sponsorActorId: "owner",
       leadActorId: null,
       participants: [

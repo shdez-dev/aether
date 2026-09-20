@@ -18,6 +18,10 @@ describe("ProjectService", () => {
       sourceInitiativeId: "initiative-1",
       sourceDecisionId: "decision-1",
       name: "Proyecto protegido",
+      objective: "Proteger la ejecución.",
+      boundaries: "Sólo el workspace protegido.",
+      successCriteria: "Acceso revocado al retirar membresía.",
+      nextMilestone: "Validar acceso.",
       sponsorActorId: "sponsor",
       leadActorId: "lead",
       participants: [

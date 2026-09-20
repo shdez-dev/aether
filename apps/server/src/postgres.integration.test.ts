@@ -2537,6 +2537,10 @@ describe.sequential("PostgreSQL integration", () => {
         initiativeId: draft.id,
         decisionId: decision.id,
         name: "Proyecto de espera",
+        objective: "Reducir la espera de atención.",
+        boundaries: "Solicitudes internas priorizadas.",
+        successCriteria: "Reducir la mediana de espera.",
+        nextMilestone: "Validar el piloto.",
         sponsorActorId: owner,
         leadActorId: "lead@example.test",
         participants: [
@@ -2593,6 +2597,10 @@ describe.sequential("PostgreSQL integration", () => {
         sourceInitiativeId: draft.id,
         sourceDecisionId: decision.id,
         name: "Proyecto que debe revertirse",
+        objective: null,
+        boundaries: null,
+        successCriteria: null,
+        nextMilestone: null,
         sponsorActorId: owner,
         leadActorId: "lead@example.test",
         participants: [

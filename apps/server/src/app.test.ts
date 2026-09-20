@@ -2949,6 +2949,10 @@ describe("Project conversion idempotency", () => {
       initiativeId,
       decisionId,
       name: "Proyecto inicial",
+      objective: "Reducir tiempos de atención.",
+      boundaries: "Alcance inicial del proyecto.",
+      successCriteria: "Mejorar el servicio medido.",
+      nextMilestone: "Preparar el piloto.",
       sponsorActorId: "sponsor",
       leadActorId: "lead",
       participants: [

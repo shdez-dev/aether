@@ -3670,6 +3670,10 @@ components:
           initiativeId,
           decisionId,
           name,
+          objective,
+          boundaries,
+          successCriteria,
+          nextMilestone,
           sponsorActorId,
           leadActorId,
           participants,
@@ -3679,6 +3683,10 @@ components:
         initiativeId: { type: string, format: uuid }
         decisionId: { type: string, format: uuid }
         name: { type: string, minLength: 1, maxLength: 255 }
+        objective: { type: string, minLength: 1, maxLength: 2000 }
+        boundaries: { type: string, minLength: 1, maxLength: 2000 }
+        successCriteria: { type: string, minLength: 1, maxLength: 2000 }
+        nextMilestone: { type: string, minLength: 1, maxLength: 255 }
         sponsorActorId: { type: string }
         leadActorId: { type: [string, "null"] }
         participants:
@@ -3793,6 +3801,10 @@ components:
           sourceInitiativeId,
           sourceDecisionId,
           name,
+          objective,
+          boundaries,
+          successCriteria,
+          nextMilestone,
           sponsorActorId,
           leadActorId,
           participants,
@@ -3808,6 +3820,10 @@ components:
         sourceInitiativeId: { type: string, format: uuid }
         sourceDecisionId: { type: string, format: uuid }
         name: { type: string }
+        objective: { type: [string, "null"] }
+        boundaries: { type: [string, "null"] }
+        successCriteria: { type: [string, "null"] }
+        nextMilestone: { type: [string, "null"] }
         sponsorActorId: { type: string }
         leadActorId: { type: [string, "null"] }
         participants:

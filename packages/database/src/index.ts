@@ -3430,8 +3430,8 @@ export class PostgresProjectStore implements ProjectStore {
   constructor(private readonly pool: Pool) {}
   async create(project: Project): Promise<void> {
     await this.pool.query(
-      `INSERT INTO projects (id, organization_id, workspace_id, source_initiative_id, source_decision_id, name, sponsor_actor_id, lead_actor_id, participants, status, version, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+      `INSERT INTO projects (id, organization_id, workspace_id, source_initiative_id, source_decision_id, name, objective, boundaries, success_criteria, next_milestone, sponsor_actor_id, lead_actor_id, participants, status, version, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
       [
         project.id,
         project.organizationId,
@@ -3439,6 +3439,10 @@ export class PostgresProjectStore implements ProjectStore {
         project.sourceInitiativeId,
         project.sourceDecisionId,
         project.name,
+        project.objective,
+        project.boundaries,
+        project.successCriteria,
+        project.nextMilestone,
         project.sponsorActorId,
         project.leadActorId,
         asJson(project.participants),
@@ -3491,14 +3495,14 @@ export class PostgresProjectStore implements ProjectStore {
   }
   async findById(projectId: string): Promise<Project | null> {
     const result = await this.pool.query<ProjectRow>(
-      `SELECT id, organization_id, workspace_id, source_initiative_id, source_decision_id, name, sponsor_actor_id, lead_actor_id, participants, status, version, created_at, updated_at FROM projects WHERE id = $1`,
+      `SELECT id, organization_id, workspace_id, source_initiative_id, source_decision_id, name, objective, boundaries, success_criteria, next_milestone, sponsor_actor_id, lead_actor_id, participants, status, version, created_at, updated_at FROM projects WHERE id = $1`,
       [projectId],
     );
     return result.rows[0] ? toProject(result.rows[0]) : null;
   }
   async findByInitiative(initiativeId: string): Promise<Project | null> {
     const result = await this.pool.query<ProjectRow>(
-      `SELECT id, organization_id, workspace_id, source_initiative_id, source_decision_id, name, sponsor_actor_id, lead_actor_id, participants, status, version, created_at, updated_at FROM projects WHERE source_initiative_id = $1`,
+      `SELECT id, organization_id, workspace_id, source_initiative_id, source_decision_id, name, objective, boundaries, success_criteria, next_milestone, sponsor_actor_id, lead_actor_id, participants, status, version, created_at, updated_at FROM projects WHERE source_initiative_id = $1`,
       [initiativeId],
     );
     return result.rows[0] ? toProject(result.rows[0]) : null;
@@ -3508,7 +3512,7 @@ export class PostgresProjectStore implements ProjectStore {
     workspaceId: string;
   }): Promise<readonly Project[]> {
     const result = await this.pool.query<ProjectRow>(
-      `SELECT id, organization_id, workspace_id, source_initiative_id, source_decision_id, name, sponsor_actor_id, lead_actor_id, participants, status, version, created_at, updated_at FROM projects WHERE organization_id = $1 AND workspace_id = $2 ORDER BY updated_at DESC, id DESC`,
+      `SELECT id, organization_id, workspace_id, source_initiative_id, source_decision_id, name, objective, boundaries, success_criteria, next_milestone, sponsor_actor_id, lead_actor_id, participants, status, version, created_at, updated_at FROM projects WHERE organization_id = $1 AND workspace_id = $2 ORDER BY updated_at DESC, id DESC`,
       [input.organizationId, input.workspaceId],
     );
     return result.rows.map(toProject);
@@ -4873,6 +4877,10 @@ type ProjectRow = {
   source_initiative_id: string;
   source_decision_id: string;
   name: string;
+  objective: string | null;
+  boundaries: string | null;
+  success_criteria: string | null;
+  next_milestone: string | null;
   sponsor_actor_id: string;
   lead_actor_id: string | null;
   participants: Project["participants"];
@@ -5199,6 +5207,10 @@ function toProject(row: ProjectRow): Project {
     sourceInitiativeId: row.source_initiative_id,
     sourceDecisionId: row.source_decision_id,
     name: row.name,
+    objective: row.objective,
+    boundaries: row.boundaries,
+    successCriteria: row.success_criteria,
+    nextMilestone: row.next_milestone,
     sponsorActorId: row.sponsor_actor_id,
     leadActorId: row.lead_actor_id,
     participants: row.participants,
@@ -5375,8 +5387,8 @@ async function insertProject(
   project: Project,
 ): Promise<void> {
   await client.query(
-    `INSERT INTO projects (id, organization_id, workspace_id, source_initiative_id, source_decision_id, name, sponsor_actor_id, lead_actor_id, participants, status, version, created_at, updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+    `INSERT INTO projects (id, organization_id, workspace_id, source_initiative_id, source_decision_id, name, objective, boundaries, success_criteria, next_milestone, sponsor_actor_id, lead_actor_id, participants, status, version, created_at, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
     [
       project.id,
       project.organizationId,
@@ -5384,6 +5396,10 @@ async function insertProject(
       project.sourceInitiativeId,
       project.sourceDecisionId,
       project.name,
+      project.objective,
+      project.boundaries,
+      project.successCriteria,
+      project.nextMilestone,
       project.sponsorActorId,
       project.leadActorId,
       asJson(project.participants),
