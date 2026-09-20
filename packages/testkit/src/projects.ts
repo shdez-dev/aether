@@ -11,6 +11,7 @@ import type {
   Project,
   ProjectMilestone,
   ProjectNextAction,
+  ProjectNextActionDependency,
   ProjectClosure,
   ProjectDeliverableAcceptance,
 } from "@aether/domain";
@@ -89,6 +90,7 @@ export class InMemoryProjectStore implements ProjectStore {
 export class InMemoryProjectExecutionStore implements ProjectExecutionStore {
   readonly milestones: ProjectMilestone[] = [];
   readonly actions: ProjectNextAction[] = [];
+  readonly dependencies: ProjectNextActionDependency[] = [];
   async addMilestone(milestone: ProjectMilestone): Promise<void> {
     this.milestones.push(milestone);
   }
@@ -100,6 +102,24 @@ export class InMemoryProjectExecutionStore implements ProjectExecutionStore {
       this.milestones.some((milestone) => milestone.projectId === projectId) &&
       this.actions.some((action) => action.projectId === projectId)
     );
+  }
+  async findNextAction(actionId: string): Promise<ProjectNextAction | null> {
+    return this.actions.find((action) => action.id === actionId) ?? null;
+  }
+  async listDependencies(
+    projectId: string,
+  ): Promise<readonly ProjectNextActionDependency[]> {
+    const actionIds = new Set(
+      this.actions
+        .filter((action) => action.projectId === projectId)
+        .map((action) => action.id),
+    );
+    return this.dependencies.filter((dependency) =>
+      actionIds.has(dependency.actionId),
+    );
+  }
+  async addDependency(dependency: ProjectNextActionDependency): Promise<void> {
+    this.dependencies.push(dependency);
   }
 }
 export class InMemoryProjectClosureStore implements ProjectClosureStore {

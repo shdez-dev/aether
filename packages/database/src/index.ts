@@ -91,6 +91,7 @@ import type {
   Project,
   ProjectMilestone,
   ProjectNextAction,
+  ProjectNextActionDependency,
   OrganizationRole,
   WorkspaceRole,
   DocumentVersion,
@@ -3644,6 +3645,58 @@ export class PostgresProjectExecutionStore implements ProjectExecutionStore {
       [projectId],
     );
     return result.rows[0]?.ready === true;
+  }
+  async findNextAction(actionId: string): Promise<ProjectNextAction | null> {
+    const result = await this.pool.query<{
+      id: string;
+      project_id: string;
+      description: string;
+      owner_actor_id: string;
+      due_on: string | null;
+      completed_at: Date | null;
+      created_by_actor_id: string;
+      created_at: Date;
+    }>(
+      `SELECT id, project_id, description, owner_actor_id, due_on, completed_at, created_by_actor_id, created_at FROM project_next_actions WHERE id = $1`,
+      [actionId],
+    );
+    const row = result.rows[0];
+    return row
+      ? {
+          id: row.id,
+          projectId: row.project_id,
+          description: row.description,
+          ownerActorId: row.owner_actor_id,
+          dueOn: row.due_on,
+          completedAt: row.completed_at,
+          createdByActorId: row.created_by_actor_id,
+          createdAt: row.created_at,
+        }
+      : null;
+  }
+  async listDependencies(
+    projectId: string,
+  ): Promise<readonly ProjectNextActionDependency[]> {
+    const result = await this.pool.query<{
+      action_id: string;
+      depends_on_action_id: string;
+    }>(
+      `SELECT dependencies.action_id, dependencies.depends_on_action_id
+       FROM project_next_action_dependencies dependencies
+       JOIN project_next_actions actions ON actions.id = dependencies.action_id
+       WHERE actions.project_id = $1`,
+      [projectId],
+    );
+    return result.rows.map((row) => ({
+      actionId: row.action_id,
+      dependsOnActionId: row.depends_on_action_id,
+    }));
+  }
+  async addDependency(dependency: ProjectNextActionDependency): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO project_next_action_dependencies (action_id, depends_on_action_id) VALUES ($1,$2)`,
+      [dependency.actionId, dependency.dependsOnActionId],
+    );
   }
 }
 export class PostgresProjectClosureStore implements ProjectClosureStore {

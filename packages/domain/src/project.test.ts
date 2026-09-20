@@ -2,11 +2,24 @@ import { describe, expect, it } from "vitest";
 
 import {
   createProject,
+  declareNextActionDependency,
   transferProjectWorkspace,
   transitionProject,
 } from "./project.js";
 
 describe("project lifecycle", () => {
+  it("rejects self-references and cycles between next actions", () => {
+    const first = { actionId: "action-a", dependsOnActionId: "action-b" };
+    expect(
+      declareNextActionDependency({ dependency: first, existing: [] }),
+    ).toEqual(first);
+    expect(() =>
+      declareNextActionDependency({
+        dependency: { actionId: "action-b", dependsOnActionId: "action-a" },
+        existing: [first],
+      }),
+    ).toThrow("PROJECT_DEPENDENCY_CYCLE");
+  });
   it("allows pausing and resuming an active project", () => {
     const now = new Date("2026-09-20T12:00:00.000Z");
     const planned = createProject({

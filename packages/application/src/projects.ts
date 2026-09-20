@@ -2,6 +2,7 @@ import {
   ProjectDomainError,
   assignProjectLead,
   createProject,
+  declareNextActionDependency,
   replaceProjectLead,
   transferProjectWorkspace,
   transitionProject,
@@ -9,6 +10,7 @@ import {
   type Project,
   type ProjectMilestone,
   type ProjectNextAction,
+  type ProjectNextActionDependency,
   type ProjectClosure,
   type ProjectDeliverableAcceptance,
   type ProjectParticipant,
@@ -70,6 +72,11 @@ export interface ProjectExecutionStore {
   addMilestone(milestone: ProjectMilestone): Promise<void>;
   addNextAction(action: ProjectNextAction): Promise<void>;
   hasMinimumPlan(projectId: string): Promise<boolean>;
+  findNextAction(actionId: string): Promise<ProjectNextAction | null>;
+  listDependencies(
+    projectId: string,
+  ): Promise<readonly ProjectNextActionDependency[]>;
+  addDependency(dependency: ProjectNextActionDependency): Promise<void>;
 }
 export interface ProjectClosureStore {
   createClosure(closure: ProjectClosure): Promise<void>;
@@ -630,6 +637,50 @@ export class ProjectService {
       { actionId: action.id, ownerActorId: action.ownerActorId },
     );
     return action;
+  }
+  async declareNextActionDependency(input: {
+    actorId: string;
+    organizationId: string;
+    projectId: string;
+    actionId: string;
+    dependsOnActionId: string;
+    correlationId: string;
+  }): Promise<ProjectNextActionDependency> {
+    const project = await this.requireProject(
+      input.projectId,
+      input.organizationId,
+    );
+    await this.assertExecutionAccess(
+      input.actorId,
+      project,
+      input.correlationId,
+    );
+    const [action, dependencyAction, existing] = await Promise.all([
+      this.dependencies.execution.findNextAction(input.actionId),
+      this.dependencies.execution.findNextAction(input.dependsOnActionId),
+      this.dependencies.execution.listDependencies(project.id),
+    ]);
+    if (
+      action?.projectId !== project.id ||
+      dependencyAction?.projectId !== project.id
+    )
+      throw new ResourceNotFoundError("PROJECT_NOT_FOUND");
+    const dependency = declareNextActionDependency({
+      dependency: {
+        actionId: input.actionId,
+        dependsOnActionId: input.dependsOnActionId,
+      },
+      existing,
+    });
+    await this.dependencies.execution.addDependency(dependency);
+    await this.record(
+      project,
+      input.actorId,
+      input.correlationId,
+      "project.next_action_dependency_declared.v1",
+      dependency,
+    );
+    return dependency;
   }
   async acceptDeliverable(input: {
     actorId: string;

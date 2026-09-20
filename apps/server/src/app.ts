@@ -87,6 +87,7 @@ import {
   AuditHistoryQuerySchema,
   AddProjectMilestoneRequestSchema,
   AddProjectNextActionRequestSchema,
+  DeclareProjectNextActionDependencyRequestSchema,
   ChangeProjectStatusRequestSchema,
   AssignProjectLeadRequestSchema,
   ReplaceProjectLeadRequestSchema,
@@ -2581,6 +2582,40 @@ export async function buildServer(input: {
       },
     });
   });
+  app.post(
+    "/v1/projects/:projectId/next-action-dependencies",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      const params = z
+        .object({ projectId: z.string().uuid() })
+        .parse(request.params);
+      const body = DeclareProjectNextActionDependencyRequestSchema.parse(
+        request.body,
+      );
+      return respondIdempotently({
+        request,
+        reply,
+        store: input.idempotency,
+        actorId: session.actorId,
+        operation: `project.next_action.dependency:${params.projectId}`,
+        requestPayload: body,
+        execute: async () => ({
+          statusCode: 201,
+          body: await input.projects.declareNextActionDependency({
+            actorId: session.actorId,
+            correlationId: correlationId(reply),
+            projectId: params.projectId,
+            ...body,
+          }),
+        }),
+      });
+    },
+  );
   app.post("/v1/projects/:projectId/deliverables", async (request, reply) => {
     const session = await requireSession(
       request,

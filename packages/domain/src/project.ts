@@ -52,6 +52,39 @@ export type ProjectNextAction = Readonly<{
   createdByActorId: string;
   createdAt: Date;
 }>;
+export type ProjectNextActionDependency = Readonly<{
+  actionId: string;
+  dependsOnActionId: string;
+}>;
+
+export function declareNextActionDependency(input: {
+  dependency: ProjectNextActionDependency;
+  existing: readonly ProjectNextActionDependency[];
+}): ProjectNextActionDependency {
+  if (input.dependency.actionId === input.dependency.dependsOnActionId)
+    throw new ProjectDomainError("PROJECT_DEPENDENCY_INVALID");
+  const graph = new Map<string, string[]>();
+  for (const dependency of [...input.existing, input.dependency]) {
+    const dependencies = graph.get(dependency.actionId) ?? [];
+    dependencies.push(dependency.dependsOnActionId);
+    graph.set(dependency.actionId, dependencies);
+  }
+  const reaches = (
+    actionId: string,
+    targetId: string,
+    visited = new Set<string>(),
+  ): boolean => {
+    if (actionId === targetId) return true;
+    if (visited.has(actionId)) return false;
+    visited.add(actionId);
+    return (graph.get(actionId) ?? []).some((dependencyId) =>
+      reaches(dependencyId, targetId, visited),
+    );
+  };
+  if (reaches(input.dependency.dependsOnActionId, input.dependency.actionId))
+    throw new ProjectDomainError("PROJECT_DEPENDENCY_CYCLE");
+  return input.dependency;
+}
 export type ProjectClosure = Readonly<{
   id: string;
   projectId: string;
@@ -242,6 +275,8 @@ export class ProjectDomainError extends Error {
       | "PROJECT_CANCELLATION_REASON_REQUIRED"
       | "PROJECT_PAUSE_CONTEXT_REQUIRED"
       | "PROJECT_REPLAN_REQUIRED"
+      | "PROJECT_DEPENDENCY_INVALID"
+      | "PROJECT_DEPENDENCY_CYCLE"
       | "PROJECT_MINIMUM_PLAN_REQUIRED"
       | "PROJECT_MANDATE_REQUIRED"
       | "INVALID_PROJECT_TRANSITION"

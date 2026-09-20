@@ -93,6 +93,13 @@ describe("ProjectService", () => {
         async hasMinimumPlan() {
           return true;
         },
+        async findNextAction() {
+          return null;
+        },
+        async listDependencies() {
+          return [];
+        },
+        async addDependency() {},
       },
       closures: {} as never,
       documents: {} as never,

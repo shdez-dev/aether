@@ -277,6 +277,11 @@ export const AddProjectNextActionRequestSchema = z.object({
   ownerActorId: z.string().min(1).max(255),
   dueOn: z.string().date().nullable(),
 });
+export const DeclareProjectNextActionDependencyRequestSchema = z.object({
+  organizationId: UuidSchema,
+  actionId: UuidSchema,
+  dependsOnActionId: UuidSchema,
+});
 export const AcceptProjectDeliverableRequestSchema = z.object({
   organizationId: UuidSchema,
   name: NonEmptyTextSchema.max(255),
