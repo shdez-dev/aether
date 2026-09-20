@@ -1453,9 +1453,7 @@ describe.sequential("PostgreSQL integration", () => {
            VALUES ($1,$2,'Unscoped change','Attempted bypass','Would alter scope','outsider','2026-01-03T00:00:00Z','pending')`,
           [randomUUID(), activeProjectId],
         ),
-      ).rejects.toThrow(
-        "change request requires project execution authority",
-      );
+      ).rejects.toThrow("change request requires project execution authority");
       const activeActionId = randomUUID();
       const otherActiveActionId = randomUUID();
       const closedActionId = randomUUID();
@@ -2909,6 +2907,66 @@ describe.sequential("PostgreSQL integration", () => {
         "SELECT 1 FROM outbox_consumptions WHERE consumer = 'integration-test.v1'",
       );
       expect(consumptions.rowCount).toBe(1);
+
+      const change = await projectService.requestChange({
+        actorId: "lead@example.test",
+        organizationId: organization.id,
+        projectId: project.id,
+        title: "Ampliar la cobertura",
+        reason: "La evidencia exige incluir un canal adicional.",
+        impact: "Cambiará el próximo hito y la carga estimada.",
+        correlationId: randomUUID(),
+      });
+      await expect(
+        pool.query("SELECT 1 FROM project_baselines WHERE project_id = $1", [
+          project.id,
+        ]),
+      ).resolves.toMatchObject({ rowCount: 0 });
+      const reviews = await Promise.allSettled([
+        projectService.reviewChangeRequest({
+          actorId: owner,
+          organizationId: organization.id,
+          projectId: project.id,
+          changeRequestId: change.id,
+          outcome: "approved",
+          reviewNote: "La ampliación tiene respaldo suficiente.",
+          correlationId: randomUUID(),
+        }),
+        projectService.reviewChangeRequest({
+          actorId: "reviewer@example.test",
+          organizationId: organization.id,
+          projectId: project.id,
+          changeRequestId: change.id,
+          outcome: "rejected",
+          reviewNote: "No debe resolverse dos veces la misma solicitud.",
+          correlationId: randomUUID(),
+        }),
+      ]);
+      expect(
+        reviews.filter((result) => result.status === "fulfilled"),
+      ).toHaveLength(1);
+      expect(
+        reviews.filter((result) => result.status === "rejected"),
+      ).toHaveLength(1);
+      const reviewedChange = await pool.query<{
+        status: "approved" | "rejected";
+        reviewed_by_actor_id: string;
+      }>(
+        `SELECT status, reviewed_by_actor_id FROM project_change_requests WHERE id = $1`,
+        [change.id],
+      );
+      expect(reviewedChange.rows).toHaveLength(1);
+      expect(reviewedChange.rows[0]?.status).toBe("approved");
+      const baseline = await pool.query<{
+        version: number;
+        approved_by_actor_id: string;
+      }>(
+        `SELECT version, approved_by_actor_id FROM project_baselines WHERE change_request_id = $1`,
+        [change.id],
+      );
+      expect(baseline.rows).toEqual([
+        { version: 1, approved_by_actor_id: owner },
+      ]);
     },
     120_000,
   );

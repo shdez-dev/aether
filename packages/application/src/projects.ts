@@ -19,6 +19,7 @@ import {
   type ProjectOperationalDecision,
   type ProjectExternalDependency,
   type ProjectChangeRequest,
+  type ProjectBaseline,
   type ProjectClosure,
   type ProjectDeliverableAcceptance,
   type ProjectParticipant,
@@ -83,6 +84,21 @@ export interface ProjectExecutionStore {
   addOperationalDecision(decision: ProjectOperationalDecision): Promise<void>;
   addExternalDependency(dependency: ProjectExternalDependency): Promise<void>;
   addChangeRequest(request: ProjectChangeRequest): Promise<void>;
+  findChangeRequest(
+    changeRequestId: string,
+  ): Promise<ProjectChangeRequest | null>;
+  reviewChangeRequest(input: {
+    changeRequest: ProjectChangeRequest;
+    outcome: "approved" | "rejected";
+    reviewedByActorId: string;
+    reviewedAt: Date;
+    reviewNote: string;
+    baselineId: string | null;
+    projectSnapshot: Project;
+  }): Promise<Readonly<{
+    changeRequest: ProjectChangeRequest;
+    baseline: ProjectBaseline | null;
+  }> | null>;
   hasMinimumPlan(projectId: string): Promise<boolean>;
   findNextAction(actionId: string): Promise<ProjectNextAction | null>;
   listDependencies(
@@ -829,6 +845,9 @@ export class ProjectService {
       requestedByActorId: input.actorId,
       requestedAt: this.dependencies.clock.now(),
       status: "pending",
+      reviewedByActorId: null,
+      reviewedAt: null,
+      reviewNote: null,
     };
     await this.dependencies.execution.addChangeRequest(request);
     await this.record(
@@ -839,6 +858,58 @@ export class ProjectService {
       { changeRequestId: request.id, impact: request.impact },
     );
     return request;
+  }
+  async reviewChangeRequest(input: {
+    actorId: string;
+    organizationId: string;
+    projectId: string;
+    changeRequestId: string;
+    outcome: "approved" | "rejected";
+    reviewNote: string;
+    correlationId: string;
+  }): Promise<
+    Readonly<{
+      changeRequest: ProjectChangeRequest;
+      baseline: ProjectBaseline | null;
+    }>
+  > {
+    const project = await this.requireProject(
+      input.projectId,
+      input.organizationId,
+    );
+    await this.assertChangeReviewer(input.actorId, project.organizationId);
+    const request = await this.dependencies.execution.findChangeRequest(
+      input.changeRequestId,
+    );
+    if (!request || request.projectId !== project.id)
+      throw new ResourceNotFoundError("PROJECT_NOT_FOUND");
+    if (request.status !== "pending")
+      throw new ProjectDomainError("PROJECT_CHANGE_REQUEST_NOT_PENDING");
+    const reviewedAt = this.dependencies.clock.now();
+    const result = await this.dependencies.execution.reviewChangeRequest({
+      changeRequest: request,
+      outcome: input.outcome,
+      reviewedByActorId: input.actorId,
+      reviewedAt,
+      reviewNote: input.reviewNote,
+      baselineId:
+        input.outcome === "approved" ? this.dependencies.ids.next() : null,
+      projectSnapshot: project,
+    });
+    if (!result)
+      throw new ProjectDomainError("PROJECT_CHANGE_REQUEST_NOT_PENDING");
+    await this.record(
+      project,
+      input.actorId,
+      input.correlationId,
+      `project.change_${input.outcome}.v1`,
+      {
+        changeRequestId: result.changeRequest.id,
+        baselineId: result.baseline?.id ?? null,
+        baselineVersion: result.baseline?.version ?? null,
+      },
+    );
+    return result;
   }
   async declareNextActionDependency(input: {
     actorId: string;
@@ -1055,6 +1126,17 @@ export class ProjectService {
       }))
     )
       throw new AccessDeniedError("organization:read");
+  }
+  private async assertChangeReviewer(
+    actorId: string,
+    organizationId: string,
+  ): Promise<void> {
+    const role = await this.dependencies.tenancy.findOrganizationRole({
+      actorId,
+      organizationId,
+    });
+    if (role !== "owner" && role !== "admin")
+      throw new AccessDeniedError("organization:manage");
   }
   private async assertProjectParticipant(
     actorId: string,

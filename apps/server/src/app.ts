@@ -92,6 +92,7 @@ import {
   RecordProjectOperationalDecisionRequestSchema,
   AddProjectExternalDependencyRequestSchema,
   RequestProjectChangeSchema,
+  ReviewProjectChangeRequestSchema,
   AddProjectNextActionRequestSchema,
   DeclareProjectNextActionDependencyRequestSchema,
   ChangeProjectStatusRequestSchema,
@@ -2801,6 +2802,65 @@ export async function buildServer(input: {
           return {
             statusCode: 201,
             body: { ...change, requestedAt: change.requestedAt.toISOString() },
+          };
+        },
+      });
+    },
+  );
+  app.post(
+    "/v1/projects/:projectId/change-requests/:changeRequestId/reviews",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      const { projectId, changeRequestId } = z
+        .object({
+          projectId: z.string().uuid(),
+          changeRequestId: z.string().uuid(),
+        })
+        .parse(request.params);
+      const body = ReviewProjectChangeRequestSchema.parse(request.body);
+      return respondIdempotently({
+        request,
+        reply,
+        store: input.idempotency,
+        actorId: session.actorId,
+        operation: `project.change.review:${projectId}:${changeRequestId}`,
+        requestPayload: body,
+        execute: async () => {
+          const result = await input.projects.reviewChangeRequest({
+            actorId: session.actorId,
+            correlationId: correlationId(reply),
+            projectId,
+            changeRequestId,
+            ...body,
+          });
+          return {
+            statusCode: 200,
+            body: {
+              changeRequest: {
+                ...result.changeRequest,
+                requestedAt: result.changeRequest.requestedAt.toISOString(),
+                reviewedAt:
+                  result.changeRequest.reviewedAt?.toISOString() ?? null,
+              },
+              baseline: result.baseline
+                ? {
+                    ...result.baseline,
+                    approvedAt: result.baseline.approvedAt.toISOString(),
+                    snapshot: {
+                      ...result.baseline.snapshot,
+                      createdAt:
+                        result.baseline.snapshot.createdAt.toISOString(),
+                      updatedAt:
+                        result.baseline.snapshot.updatedAt.toISOString(),
+                    },
+                  }
+                : null,
+            },
           };
         },
       });

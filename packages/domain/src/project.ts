@@ -127,6 +127,18 @@ export type ProjectChangeRequest = Readonly<{
   requestedByActorId: string;
   requestedAt: Date;
   status: "pending" | "approved" | "rejected";
+  reviewedByActorId: string | null;
+  reviewedAt: Date | null;
+  reviewNote: string | null;
+}>;
+export type ProjectBaseline = Readonly<{
+  id: string;
+  projectId: string;
+  changeRequestId: string;
+  version: number;
+  snapshot: Project;
+  approvedByActorId: string;
+  approvedAt: Date;
 }>;
 
 export function declareNextActionDependency(input: {
@@ -359,6 +371,7 @@ export class ProjectDomainError extends Error {
       | "PROJECT_DEPENDENCY_CYCLE"
       | "PROJECT_MINIMUM_PLAN_REQUIRED"
       | "PROJECT_MANDATE_REQUIRED"
+      | "PROJECT_CHANGE_REQUEST_NOT_PENDING"
       | "INVALID_PROJECT_TRANSITION"
       | "DECISION_CONDITIONS_PENDING",
   ) {

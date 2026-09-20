@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { createProject, type Project } from "@aether/domain";
+import {
+  createProject,
+  type Project,
+  type ProjectBaseline,
+  type ProjectChangeRequest,
+} from "@aether/domain";
 
 import {
   ProjectService,
@@ -86,6 +91,9 @@ describe("ProjectService", () => {
       },
     };
     const risks: unknown[] = [];
+    const changeRequests: ProjectChangeRequest[] = [];
+    const baselines: ProjectBaseline[] = [];
+    let generatedId = 0;
     const service = new ProjectService({
       projects,
       execution: {
@@ -96,7 +104,43 @@ describe("ProjectService", () => {
         },
         async addOperationalDecision() {},
         async addExternalDependency() {},
-        async addChangeRequest() {},
+        async addChangeRequest(request) {
+          changeRequests.push(request);
+        },
+        async findChangeRequest(changeRequestId) {
+          return (
+            changeRequests.find((request) => request.id === changeRequestId) ??
+            null
+          );
+        },
+        async reviewChangeRequest(input) {
+          const index = changeRequests.findIndex(
+            (request) => request.id === input.changeRequest.id,
+          );
+          if (index < 0 || changeRequests[index]?.status !== "pending")
+            return null;
+          const changeRequest: ProjectChangeRequest = {
+            ...input.changeRequest,
+            status: input.outcome,
+            reviewedByActorId: input.reviewedByActorId,
+            reviewedAt: input.reviewedAt,
+            reviewNote: input.reviewNote,
+          };
+          changeRequests[index] = changeRequest;
+          const baseline = input.baselineId
+            ? {
+                id: input.baselineId,
+                projectId: input.projectSnapshot.id,
+                changeRequestId: changeRequest.id,
+                version: baselines.length + 1,
+                snapshot: input.projectSnapshot,
+                approvedByActorId: input.reviewedByActorId,
+                approvedAt: input.reviewedAt,
+              }
+            : null;
+          if (baseline) baselines.push(baseline);
+          return { changeRequest, baseline };
+        },
         async hasMinimumPlan() {
           return true;
         },
@@ -114,7 +158,7 @@ describe("ProjectService", () => {
       decisions: {} as never,
       initiatives: {} as never,
       tenancy,
-      ids: { next: () => "event-1" },
+      ids: { next: () => `event-${++generatedId}` },
       clock: { now: () => new Date("2026-09-18T12:01:00.000Z") },
     });
 
@@ -137,6 +181,77 @@ describe("ProjectService", () => {
       ownerActorId: "owner",
     });
     expect(risks).toHaveLength(1);
+
+    const requestedChange = await service.requestChange({
+      actorId: "lead",
+      organizationId: "organization-1",
+      projectId: "project-1",
+      title: "Ajustar el alcance",
+      reason: "La evidencia amplió la necesidad.",
+      impact: "Se replanificará el siguiente hito.",
+      correlationId: "correlation-change-request",
+    });
+    await expect(
+      service.reviewChangeRequest({
+        actorId: "lead",
+        organizationId: "organization-1",
+        projectId: "project-1",
+        changeRequestId: requestedChange.id,
+        outcome: "approved",
+        reviewNote: "El alcance y el impacto son aceptables.",
+        correlationId: "correlation-change-unscoped-review",
+      }),
+    ).rejects.toBeInstanceOf(AccessDeniedError);
+    await expect(
+      service.reviewChangeRequest({
+        actorId: "owner",
+        organizationId: "organization-1",
+        projectId: "project-1",
+        changeRequestId: requestedChange.id,
+        outcome: "approved",
+        reviewNote: "El alcance y el impacto son aceptables.",
+        correlationId: "correlation-change-approve",
+      }),
+    ).resolves.toMatchObject({
+      changeRequest: { status: "approved", reviewedByActorId: "owner" },
+      baseline: { version: 1, snapshot: { id: "project-1" } },
+    });
+    expect(baselines).toHaveLength(1);
+    await expect(
+      service.reviewChangeRequest({
+        actorId: "owner",
+        organizationId: "organization-1",
+        projectId: "project-1",
+        changeRequestId: requestedChange.id,
+        outcome: "rejected",
+        reviewNote: "No corresponde reabrir una solicitud resuelta.",
+        correlationId: "correlation-change-repeat",
+      }),
+    ).rejects.toMatchObject({ code: "PROJECT_CHANGE_REQUEST_NOT_PENDING" });
+    const rejectedChange = await service.requestChange({
+      actorId: "lead",
+      organizationId: "organization-1",
+      projectId: "project-1",
+      title: "Extender el plazo",
+      reason: "El proveedor no confirmó la entrega.",
+      impact: "El calendario pierde una semana.",
+      correlationId: "correlation-change-reject-request",
+    });
+    await expect(
+      service.reviewChangeRequest({
+        actorId: "owner",
+        organizationId: "organization-1",
+        projectId: "project-1",
+        changeRequestId: rejectedChange.id,
+        outcome: "rejected",
+        reviewNote: "Se mantiene la línea base actual.",
+        correlationId: "correlation-change-reject",
+      }),
+    ).resolves.toMatchObject({
+      changeRequest: { status: "rejected", reviewedByActorId: "owner" },
+      baseline: null,
+    });
+    expect(baselines).toHaveLength(1);
 
     await expect(
       service.transferWorkspace({

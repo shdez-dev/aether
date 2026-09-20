@@ -298,6 +298,11 @@ export const RequestProjectChangeSchema = z.object({
   reason: NonEmptyTextSchema.max(10_000),
   impact: NonEmptyTextSchema.max(10_000),
 });
+export const ReviewProjectChangeRequestSchema = z.object({
+  organizationId: UuidSchema,
+  outcome: z.enum(["approved", "rejected"]),
+  reviewNote: NonEmptyTextSchema.max(10_000),
+});
 export const ProjectNextActionPrioritySchema = z.enum([
   "low",
   "medium",

@@ -97,6 +97,7 @@ import type {
   ProjectOperationalDecision,
   ProjectExternalDependency,
   ProjectChangeRequest,
+  ProjectBaseline,
   OrganizationRole,
   WorkspaceRole,
   DocumentVersion,
@@ -3719,6 +3720,132 @@ export class PostgresProjectExecutionStore implements ProjectExecutionStore {
         request.status,
       ],
     );
+  }
+  async findChangeRequest(
+    changeRequestId: string,
+  ): Promise<ProjectChangeRequest | null> {
+    const result = await this.pool.query<{
+      id: string;
+      project_id: string;
+      title: string;
+      reason: string;
+      impact: string;
+      requested_by_actor_id: string;
+      requested_at: Date;
+      status: ProjectChangeRequest["status"];
+      reviewed_by_actor_id: string | null;
+      reviewed_at: Date | null;
+      review_note: string | null;
+    }>(
+      `SELECT id, project_id, title, reason, impact, requested_by_actor_id, requested_at, status, reviewed_by_actor_id, reviewed_at, review_note
+       FROM project_change_requests WHERE id = $1`,
+      [changeRequestId],
+    );
+    const row = result.rows[0];
+    return row
+      ? {
+          id: row.id,
+          projectId: row.project_id,
+          title: row.title,
+          reason: row.reason,
+          impact: row.impact,
+          requestedByActorId: row.requested_by_actor_id,
+          requestedAt: row.requested_at,
+          status: row.status,
+          reviewedByActorId: row.reviewed_by_actor_id,
+          reviewedAt: row.reviewed_at,
+          reviewNote: row.review_note,
+        }
+      : null;
+  }
+  async reviewChangeRequest(input: {
+    changeRequest: ProjectChangeRequest;
+    outcome: "approved" | "rejected";
+    reviewedByActorId: string;
+    reviewedAt: Date;
+    reviewNote: string;
+    baselineId: string | null;
+    projectSnapshot: Project;
+  }): Promise<Readonly<{
+    changeRequest: ProjectChangeRequest;
+    baseline: ProjectBaseline | null;
+  }> | null> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const locked = await client.query<{
+        status: ProjectChangeRequest["status"];
+      }>(
+        `SELECT status FROM project_change_requests
+         WHERE id = $1 AND project_id = $2 FOR UPDATE`,
+        [input.changeRequest.id, input.changeRequest.projectId],
+      );
+      if (locked.rows[0]?.status !== "pending") {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const changeRequest: ProjectChangeRequest = {
+        ...input.changeRequest,
+        status: input.outcome,
+        reviewedByActorId: input.reviewedByActorId,
+        reviewedAt: input.reviewedAt,
+        reviewNote: input.reviewNote,
+      };
+      await client.query(
+        `UPDATE project_change_requests
+         SET status = $2, reviewed_by_actor_id = $3, reviewed_at = $4, review_note = $5
+         WHERE id = $1`,
+        [
+          changeRequest.id,
+          changeRequest.status,
+          changeRequest.reviewedByActorId,
+          changeRequest.reviewedAt,
+          changeRequest.reviewNote,
+        ],
+      );
+      let baseline: ProjectBaseline | null = null;
+      if (input.outcome === "approved") {
+        if (!input.baselineId) throw new Error("Baseline id is required");
+        await client.query("SELECT id FROM projects WHERE id = $1 FOR UPDATE", [
+          input.projectSnapshot.id,
+        ]);
+        const versionResult = await client.query<{ version: number }>(
+          `SELECT COALESCE(MAX(version), 0) + 1 AS version
+           FROM project_baselines WHERE project_id = $1`,
+          [input.projectSnapshot.id],
+        );
+        const version = Number(versionResult.rows[0]?.version ?? 1);
+        baseline = {
+          id: input.baselineId,
+          projectId: input.projectSnapshot.id,
+          changeRequestId: changeRequest.id,
+          version,
+          snapshot: input.projectSnapshot,
+          approvedByActorId: input.reviewedByActorId,
+          approvedAt: input.reviewedAt,
+        };
+        await client.query(
+          `INSERT INTO project_baselines (id, project_id, change_request_id, version, snapshot, approved_by_actor_id, approved_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+          [
+            baseline.id,
+            baseline.projectId,
+            baseline.changeRequestId,
+            baseline.version,
+            asJson(baseline.snapshot),
+            baseline.approvedByActorId,
+            baseline.approvedAt,
+          ],
+        );
+      }
+      await client.query("COMMIT");
+      return { changeRequest, baseline };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
   async hasMinimumPlan(projectId: string): Promise<boolean> {
     const result = await this.pool.query<{ ready: boolean }>(

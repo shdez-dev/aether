@@ -16,6 +16,7 @@ import type {
   ProjectOperationalDecision,
   ProjectExternalDependency,
   ProjectChangeRequest,
+  ProjectBaseline,
   ProjectClosure,
   ProjectDeliverableAcceptance,
 } from "@aether/domain";
@@ -99,6 +100,7 @@ export class InMemoryProjectExecutionStore implements ProjectExecutionStore {
   readonly operationalDecisions: ProjectOperationalDecision[] = [];
   readonly externalDependencies: ProjectExternalDependency[] = [];
   readonly changeRequests: ProjectChangeRequest[] = [];
+  readonly baselines: ProjectBaseline[] = [];
   async addMilestone(milestone: ProjectMilestone): Promise<void> {
     this.milestones.push(milestone);
   }
@@ -120,6 +122,54 @@ export class InMemoryProjectExecutionStore implements ProjectExecutionStore {
   }
   async addChangeRequest(request: ProjectChangeRequest): Promise<void> {
     this.changeRequests.push(request);
+  }
+  async findChangeRequest(
+    changeRequestId: string,
+  ): Promise<ProjectChangeRequest | null> {
+    return (
+      this.changeRequests.find((request) => request.id === changeRequestId) ??
+      null
+    );
+  }
+  async reviewChangeRequest(input: {
+    changeRequest: ProjectChangeRequest;
+    outcome: "approved" | "rejected";
+    reviewedByActorId: string;
+    reviewedAt: Date;
+    reviewNote: string;
+    baselineId: string | null;
+    projectSnapshot: Project;
+  }): Promise<Readonly<{
+    changeRequest: ProjectChangeRequest;
+    baseline: ProjectBaseline | null;
+  }> | null> {
+    const index = this.changeRequests.findIndex(
+      (request) => request.id === input.changeRequest.id,
+    );
+    if (index < 0 || this.changeRequests[index]?.status !== "pending")
+      return null;
+    const changeRequest: ProjectChangeRequest = {
+      ...input.changeRequest,
+      status: input.outcome,
+      reviewedByActorId: input.reviewedByActorId,
+      reviewedAt: input.reviewedAt,
+      reviewNote: input.reviewNote,
+    };
+    this.changeRequests[index] = changeRequest;
+    const baseline =
+      input.outcome === "approved" && input.baselineId
+        ? {
+            id: input.baselineId,
+            projectId: input.projectSnapshot.id,
+            changeRequestId: changeRequest.id,
+            version: this.baselines.length + 1,
+            snapshot: input.projectSnapshot,
+            approvedByActorId: input.reviewedByActorId,
+            approvedAt: input.reviewedAt,
+          }
+        : null;
+    if (baseline) this.baselines.push(baseline);
+    return { changeRequest, baseline };
   }
   async hasMinimumPlan(projectId: string): Promise<boolean> {
     return (
