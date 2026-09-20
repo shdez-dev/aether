@@ -1236,6 +1236,34 @@ paths:
                 type: array
                 items: { $ref: "#/components/schemas/InitiativeRelationship" }
         default: { $ref: "#/components/responses/Problem" }
+  /v1/initiatives/{initiativeId}/diagnostic:
+    get:
+      tags: [Initiatives]
+      operationId: getInitiativeDiagnostic
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: initiativeId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/OrganizationContextId"
+      responses:
+        "200": { description: Borrador de diagnóstico o null. }
+        default: { $ref: "#/components/responses/Problem" }
+    put:
+      tags: [Initiatives]
+      operationId: saveInitiativeDiagnostic
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: initiativeId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200": { description: Borrador de diagnóstico guardado. }
+        default: { $ref: "#/components/responses/Problem" }
     post:
       tags: [Initiatives]
       operationId: declareInitiativeRelationship

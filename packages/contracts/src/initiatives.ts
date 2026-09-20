@@ -172,6 +172,22 @@ export const DeclareInitiativeRelationshipRequestSchema = z.object({
   targetInitiativeId: UuidSchema,
   kind: z.enum(["related", "continues"]),
 });
+export const DiagnosticEntrySchema = z.object({
+  kind: z.enum(["evidence", "opinion", "uncertainty"]),
+  text: NonEmptyTextSchema.max(2_000),
+  source: z.string().max(2_000).nullable(),
+}).superRefine((entry, context) => {
+  if (entry.kind === "evidence" && !entry.source?.trim()) context.addIssue({ code: z.ZodIssueCode.custom, path: ["source"], message: "Evidence requires a source" });
+});
+export const SaveInitiativeDiagnosticRequestSchema = z.object({
+  organizationId: UuidSchema,
+  expectedVersion: z.number().int().nonnegative().nullable(),
+  beneficiaries: z.array(NonEmptyTextSchema.max(255)).max(100),
+  causes: z.array(DiagnosticEntrySchema).max(100),
+  constraints: z.array(DiagnosticEntrySchema).max(100),
+  previousAttempts: z.array(DiagnosticEntrySchema).max(100),
+  hypotheses: z.array(DiagnosticEntrySchema).max(100),
+});
 export const ActivateEvaluationStandardRequestSchema = z.object({
   organizationId: UuidSchema,
 });

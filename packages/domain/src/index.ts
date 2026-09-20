@@ -2,6 +2,7 @@
 export * from "./access.js";
 export * from "./initiative.js";
 export * from "./initiative-relationship.js";
+export * from "./diagnostic.js";
 export * from "./intake.js";
 export * from "./evaluation.js";
 export * from "./triage.js";

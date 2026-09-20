@@ -12,6 +12,7 @@ import {
   OutboxAdministrationService,
   InitiativeService,
   InitiativeRelationshipService,
+  DiagnosticService,
   IntakeService,
   ProjectService,
   TenantService,
@@ -35,6 +36,7 @@ import {
   PostgresInitiativeAuditStore,
   PostgresInitiativeStore,
   PostgresInitiativeRelationshipStore,
+  PostgresDiagnosticStore,
   PostgresIntakeAssignmentStore,
   PostgresIdempotencyStore,
   PostgresProjectAuditStore,
@@ -156,6 +158,9 @@ const relationships = new InitiativeRelationshipService({
   ids: { next: randomUUID },
   clock: { now: () => new Date() },
 });
+const diagnostics = new DiagnosticService({
+  store: new PostgresDiagnosticStore(pool), initiatives: new PostgresInitiativeStore(pool), tenancy: new PostgresTenantStore(pool), ids: { next: randomUUID }, clock: { now: () => new Date() },
+});
 const documentStore = new PostgresDocumentStore(pool);
 const projects = new ProjectService({
   projects: new PostgresProjectStore(pool),
@@ -245,6 +250,7 @@ const app = await buildServer({
   evaluations,
   triage,
   relationships,
+  diagnostics,
   projects,
   documents,
   evidence,
