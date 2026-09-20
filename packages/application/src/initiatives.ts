@@ -5,6 +5,7 @@ import {
   calculateCapabilities,
   createInitiative,
   editInitiative,
+  findPotentialInitiativeDuplicates,
   isActionAllowed,
   transitionInitiative,
   setInitiativeOperationalPriority,
@@ -66,6 +67,7 @@ export interface InitiativeClock {
 export type InitiativeAccess = Readonly<{
   initiative: Initiative;
   allowedActions: readonly InitiativeAction[];
+  duplicateWarnings: readonly import("@aether/domain").InitiativeDuplicateWarning[];
 }>;
 
 export class InitiativeService {
@@ -200,10 +202,7 @@ export class InitiativeService {
       initiative.id,
       input.correlationId,
     );
-    return {
-      initiative,
-      allowedActions: await this.actionsFor(input.actorId, initiative),
-    };
+    return this.toInitiativeAccess(input.actorId, initiative);
   }
 
   async list(input: {
@@ -225,10 +224,9 @@ export class InitiativeService {
       workspaceId: input.workspaceId,
     });
     return Promise.all(
-      initiatives.map(async (initiative) => ({
-        initiative,
-        allowedActions: await this.actionsFor(input.actorId, initiative),
-      })),
+      initiatives.map((initiative) =>
+        this.toInitiativeAccess(input.actorId, initiative, initiatives),
+      ),
     );
   }
 
@@ -501,6 +499,26 @@ export class InitiativeService {
       createdByActorId: initiative.createdByActorId,
       status: initiative.status,
     });
+  }
+  private async toInitiativeAccess(
+    actorId: string,
+    initiative: Initiative,
+    candidates?: readonly Initiative[],
+  ): Promise<InitiativeAccess> {
+    const workspaceInitiatives =
+      candidates ??
+      (await this.dependencies.store.list({
+        organizationId: initiative.organizationId,
+        workspaceId: initiative.workspaceId,
+      }));
+    return {
+      initiative,
+      allowedActions: await this.actionsFor(actorId, initiative),
+      duplicateWarnings: findPotentialInitiativeDuplicates({
+        reference: initiative,
+        candidates: workspaceInitiatives,
+      }),
+    };
   }
   private async rolesFor(
     actorId: string,

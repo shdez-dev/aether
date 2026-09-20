@@ -23,6 +23,7 @@ describe("initiative UI", () => {
       createdAt: "2026-09-09T12:00:00.000Z",
       updatedAt: "2026-09-09T12:00:00.000Z",
       allowedActions: ["edit", "present"],
+      duplicateWarnings: [],
     };
     expect(initiativeStatusLabel(initiative.status)).toBe("Borrador");
     expect(canRenderInitiativeAction(initiative, "present")).toBe(true);

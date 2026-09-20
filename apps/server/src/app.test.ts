@@ -1581,9 +1581,11 @@ describe("HTTP authentication boundary", () => {
       clock: { now: () => new Date() },
     });
     const intake = new IntakeService({
-      assignments: new InMemoryIntakeAssignmentStore(initiativeStore),
+      assignments: new InMemoryIntakeAssignmentStore(
+        initiativeStore,
+        auditStore,
+      ),
       initiatives: initiativeStore,
-      audit: auditStore,
       tenancy: tenancyStore,
       ids: { next: () => crypto.randomUUID() },
       clock: { now: () => new Date() },
@@ -1599,9 +1601,8 @@ describe("HTTP authentication boundary", () => {
     });
     const triage = new TriageService({
       standards: new InMemoryTriageStandardStore(),
-      triages: new InMemoryTriageStore(),
+      triages: new InMemoryTriageStore(auditStore),
       initiatives: initiativeStore,
-      audit: auditStore,
       tenancy: tenancyStore,
       ids: { next: () => crypto.randomUUID() },
       clock: { now: () => new Date() },
@@ -2085,9 +2086,13 @@ describe("HTTP authentication boundary", () => {
     expect(unassignedBefore.statusCode).toBe(200);
     expect(unassignedBefore.json()).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ initiativeId: created.id }),
+        expect.objectContaining({
+          initiativeId: created.id,
+          updatedAt: expect.any(String),
+        }),
       ]),
     );
+    expect(unassignedBefore.json()[0]).not.toHaveProperty("presentedAt");
     const intakeAssignmentResponse = await app.inject({
       method: "POST",
       url: `/v1/initiatives/${created.id}/intake-assignments`,

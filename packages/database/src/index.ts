@@ -6,10 +6,12 @@ import type {
   LoginTransaction,
 } from "@aether/auth";
 import { ProjectAlreadyExistsError } from "@aether/application";
+import { IntakeDomainError } from "@aether/domain";
 import type {
   InitiativeAuditEvent,
   InitiativeAuditStore,
   InitiativeStore,
+  InitiativeRelationshipStore,
   IntakeAssignmentStore,
   UnassignedIntakeException,
   TriageStandardStore,
@@ -72,6 +74,7 @@ import type {
 } from "@aether/application";
 import type {
   Initiative,
+  InitiativeRelationship,
   IntakeResponsibility,
   InitiativeClassification,
   InitiativePriority,
@@ -1075,6 +1078,8 @@ export class PostgresTenantStore implements TenantStore {
           SELECT 1 FROM projects WHERE organization_id = $1 AND status IN ('planned', 'active', 'blocked') AND (lead_actor_id = $2 OR sponsor_actor_id = $2)
           UNION ALL
           SELECT 1 FROM project_next_actions JOIN projects ON projects.id = project_next_actions.project_id WHERE projects.organization_id = $1 AND projects.status IN ('planned', 'active', 'blocked') AND project_next_actions.owner_actor_id = $2 AND project_next_actions.completed_at IS NULL
+          UNION ALL
+          SELECT 1 FROM initiative_intake_assignments WHERE organization_id = $1 AND responsible_actor_id = $2
         ) AS exists`,
         [input.organizationId, input.targetActorId],
       );
@@ -2782,25 +2787,107 @@ export class PostgresInitiativeAuditStore implements InitiativeAuditStore {
   }
 }
 
-export class PostgresIntakeAssignmentStore implements IntakeAssignmentStore {
+async function insertInitiativeAuditEvent(
+  client: PoolClient,
+  event: InitiativeAuditEvent,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO initiative_audit_events (id, event_type, organization_id, workspace_id, initiative_id, actor_id, correlation_id, occurred_at, from_status, to_status, payload)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+    [
+      event.id,
+      event.eventType,
+      event.organizationId,
+      event.workspaceId,
+      event.initiativeId,
+      event.actorId,
+      event.correlationId,
+      event.occurredAt,
+      event.fromStatus,
+      event.toStatus,
+      event.payload,
+    ],
+  );
+}
+
+export class PostgresInitiativeRelationshipStore
+  implements InitiativeRelationshipStore
+{
   constructor(private readonly pool: Pool) {}
-  async create(assignment: IntakeResponsibility): Promise<void> {
+  async create(relationship: InitiativeRelationship): Promise<void> {
     await this.pool.query(
-      `INSERT INTO initiative_intake_assignments
-       (id, organization_id, workspace_id, initiative_id, responsible_actor_id,
-        assigned_by_actor_id, assigned_at, next_review_on)
+      `INSERT INTO initiative_relationships
+       (id, organization_id, workspace_id, source_initiative_id,
+        target_initiative_id, kind, declared_by_actor_id, declared_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
       [
-        assignment.id,
-        assignment.organizationId,
-        assignment.workspaceId,
-        assignment.initiativeId,
-        assignment.responsibleActorId,
-        assignment.assignedByActorId,
-        assignment.assignedAt,
-        assignment.nextReviewOn,
+        relationship.id,
+        relationship.organizationId,
+        relationship.workspaceId,
+        relationship.sourceInitiativeId,
+        relationship.targetInitiativeId,
+        relationship.kind,
+        relationship.declaredByActorId,
+        relationship.declaredAt,
       ],
     );
+  }
+  async list(input: {
+    organizationId: string;
+    initiativeId: string;
+  }): Promise<readonly InitiativeRelationship[]> {
+    const result = await this.pool.query<InitiativeRelationshipRow>(
+      `SELECT id, organization_id, workspace_id, source_initiative_id,
+              target_initiative_id, kind, declared_by_actor_id, declared_at
+       FROM initiative_relationships
+       WHERE organization_id = $1
+         AND (source_initiative_id = $2 OR target_initiative_id = $2)
+       ORDER BY declared_at ASC, id ASC`,
+      [input.organizationId, input.initiativeId],
+    );
+    return result.rows.map(toInitiativeRelationship);
+  }
+}
+
+export class PostgresIntakeAssignmentStore implements IntakeAssignmentStore {
+  constructor(private readonly pool: Pool) {}
+  async createWithAudit(input: {
+    assignment: IntakeResponsibility;
+    auditEvent: InitiativeAuditEvent;
+  }): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        `INSERT INTO initiative_intake_assignments
+         (id, organization_id, workspace_id, initiative_id, responsible_actor_id,
+          assigned_by_actor_id, assigned_at, next_review_on)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [
+          input.assignment.id,
+          input.assignment.organizationId,
+          input.assignment.workspaceId,
+          input.assignment.initiativeId,
+          input.assignment.responsibleActorId,
+          input.assignment.assignedByActorId,
+          input.assignment.assignedAt,
+          input.assignment.nextReviewOn,
+        ],
+      );
+      await insertInitiativeAuditEvent(client, input.auditEvent);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      if (
+        (error as { code?: string; constraint?: string }).code === "23505" &&
+        (error as { constraint?: string }).constraint ===
+          "initiative_intake_assignments_initiative_id_key"
+      )
+        throw new IntakeDomainError("INTAKE_ALREADY_ASSIGNED");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
   async findActiveByInitiative(
     initiativeId: string,
@@ -2819,7 +2906,7 @@ export class PostgresIntakeAssignmentStore implements IntakeAssignmentStore {
   }): Promise<readonly UnassignedIntakeException[]> {
     const result = await this.pool.query<UnassignedIntakeExceptionRow>(
       `SELECT i.organization_id, i.workspace_id, i.id AS initiative_id, i.title,
-              i.updated_at AS presented_at
+              i.updated_at
          FROM initiatives i
          LEFT JOIN initiative_intake_assignments a ON a.initiative_id = i.id
         WHERE i.organization_id = $1
@@ -2986,25 +3073,39 @@ export class PostgresTriageStandardStore implements TriageStandardStore {
 
 export class PostgresTriageStore implements TriageStore {
   constructor(private readonly pool: Pool) {}
-  async create(triage: InitiativeTriage): Promise<void> {
-    await this.pool.query(
-      `INSERT INTO initiative_triages
-       (id, organization_id, workspace_id, initiative_id, initiative_version,
-        standard_id, standard_version, criteria, assessed_by_actor_id, assessed_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-      [
-        triage.id,
-        triage.organizationId,
-        triage.workspaceId,
-        triage.initiativeId,
-        triage.initiativeVersion,
-        triage.standardId,
-        triage.standardVersion,
-        asJson(triage.criteria),
-        triage.assessedByActorId,
-        triage.assessedAt,
-      ],
-    );
+  async createWithAudit(input: {
+    triage: InitiativeTriage;
+    auditEvent: InitiativeAuditEvent;
+  }): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        `INSERT INTO initiative_triages
+         (id, organization_id, workspace_id, initiative_id, initiative_version,
+          standard_id, standard_version, criteria, assessed_by_actor_id, assessed_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        [
+          input.triage.id,
+          input.triage.organizationId,
+          input.triage.workspaceId,
+          input.triage.initiativeId,
+          input.triage.initiativeVersion,
+          input.triage.standardId,
+          input.triage.standardVersion,
+          asJson(input.triage.criteria),
+          input.triage.assessedByActorId,
+          input.triage.assessedAt,
+        ],
+      );
+      await insertInitiativeAuditEvent(client, input.auditEvent);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
   async findById(triageId: string): Promise<InitiativeTriage | null> {
     const result = await this.pool.query<InitiativeTriageRow>(
@@ -4495,6 +4596,16 @@ type EvaluationStandardRow = {
   published_at: Date;
   published_by_actor_id: string;
 };
+type InitiativeRelationshipRow = {
+  id: string;
+  organization_id: string;
+  workspace_id: string;
+  source_initiative_id: string;
+  target_initiative_id: string;
+  kind: InitiativeRelationship["kind"];
+  declared_by_actor_id: string;
+  declared_at: Date;
+};
 type IntakeResponsibilityRow = {
   id: string;
   organization_id: string;
@@ -4510,7 +4621,7 @@ type UnassignedIntakeExceptionRow = {
   workspace_id: string;
   initiative_id: string;
   title: string;
-  presented_at: Date;
+  updated_at: Date;
 };
 type TriageStandardRow = {
   id: string;
@@ -4779,6 +4890,20 @@ function toEvaluationStandard(row: EvaluationStandardRow): EvaluationStandard {
     publishedByActorId: row.published_by_actor_id,
   };
 }
+function toInitiativeRelationship(
+  row: InitiativeRelationshipRow,
+): InitiativeRelationship {
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    workspaceId: row.workspace_id,
+    sourceInitiativeId: row.source_initiative_id,
+    targetInitiativeId: row.target_initiative_id,
+    kind: row.kind,
+    declaredByActorId: row.declared_by_actor_id,
+    declaredAt: row.declared_at,
+  };
+}
 function toIntakeResponsibility(
   row: IntakeResponsibilityRow,
 ): IntakeResponsibility {
@@ -4801,7 +4926,7 @@ function toUnassignedIntakeException(
     workspaceId: row.workspace_id,
     initiativeId: row.initiative_id,
     title: row.title,
-    presentedAt: row.presented_at,
+    updatedAt: row.updated_at,
   };
 }
 function toCalendarDate(value: string | Date): string {

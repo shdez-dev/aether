@@ -17,10 +17,12 @@ no vacía. El triage no cambia por sí mismo el estado de la iniciativa ni crea
 una evaluación formal; ambos registros permanecen separados.
 
 PostgreSQL impone unicidad por iniciativa, versión de iniciativa, estándar y
-versión; valida organización, workspace y versiones al insertar; y bloquea la
-mutación de un estándar ya aplicado. Los comandos HTTP de publicación,
-adopción y triage aceptan `Idempotency-Key`, y el evento
-`initiative.triaged.v1` conserva la operación en la auditoría de la iniciativa.
+versión; valida organización, workspace, versiones y que el estándar siga
+activo al insertar. Un estándar publicado y cada resultado de triage son
+append-only; además, la activación sólo confirma si queda registrada una
+adopción. El resultado y `initiative.triaged.v1` se guardan en una única
+transacción. Los comandos HTTP de publicación, adopción y triage aceptan
+`Idempotency-Key`.
 
 ## Estándar y cobertura
 

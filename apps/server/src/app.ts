@@ -18,6 +18,7 @@ import {
   SecurityAuditStore,
   InitiativeDomainError,
   InitiativeService,
+  InitiativeRelationshipService,
   IntakeService,
   IntakeDomainError,
   InitiativeVersionConflictError,
@@ -92,6 +93,7 @@ import {
   ActivateTriageStandardRequestSchema,
   TriageInitiativeRequestSchema,
   AssignIntakeResponsibilityRequestSchema,
+  DeclareInitiativeRelationshipRequestSchema,
   StartReviewRequestSchema,
   AnnulEvaluationRequestSchema,
   SubmitInitiativeRequestSchema,
@@ -157,6 +159,7 @@ export async function buildServer(input: {
   intake?: IntakeService;
   evaluations: EvaluationService;
   triage?: TriageService;
+  relationships?: InitiativeRelationshipService;
   projects: ProjectService;
   documents?: DocumentService;
   evidence?: EvidenceService;
@@ -381,7 +384,9 @@ export async function buildServer(input: {
                         error.code === "GRANT_RESOURCE_NOT_FOUND")
                     ? 404
                     : error instanceof InitiativeVersionConflictError ||
-                        error instanceof ProjectVersionConflictError
+                        error instanceof ProjectVersionConflictError ||
+                        (error instanceof IntakeDomainError &&
+                          error.code === "INTAKE_ALREADY_ASSIGNED")
                       ? 409
                       : 400;
     if (input.securityAudit && (status === 401 || status === 403)) {
@@ -506,12 +511,18 @@ export async function buildServer(input: {
                                         : error instanceof
                                               InitiativeVersionConflictError ||
                                             error instanceof
-                                              ProjectVersionConflictError
+                                              ProjectVersionConflictError ||
+                                            (error instanceof
+                                              IntakeDomainError &&
+                                              error.code ===
+                                                "INTAKE_ALREADY_ASSIGNED")
                                           ? "CONFLICT"
                                           : error instanceof
                                                 InitiativeDomainError ||
-                                              error instanceof
-                                                IntakeDomainError ||
+                                              (error instanceof
+                                                IntakeDomainError &&
+                                                error.code !==
+                                                  "INTAKE_ALREADY_ASSIGNED") ||
                                               error instanceof
                                                 DocumentValidationError ||
                                               error instanceof
@@ -2994,6 +3005,70 @@ export async function buildServer(input: {
       }),
     });
   });
+  app.get(
+    "/v1/initiatives/:initiativeId/relationships",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      if (!input.relationships)
+        throw new Error("Initiative relationship service is not configured");
+      const params = z
+        .object({ initiativeId: z.string().uuid() })
+        .parse(request.params);
+      const query = z
+        .object({ organizationId: z.string().uuid() })
+        .parse(request.query);
+      return (
+        await input.relationships.list({
+          actorId: session.actorId,
+          ...params,
+          ...query,
+        })
+      ).map(toInitiativeRelationshipResponse);
+    },
+  );
+  app.post(
+    "/v1/initiatives/:initiativeId/relationships",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      if (!input.relationships)
+        throw new Error("Initiative relationship service is not configured");
+      const params = z
+        .object({ initiativeId: z.string().uuid() })
+        .parse(request.params);
+      const body = DeclareInitiativeRelationshipRequestSchema.parse(
+        request.body,
+      );
+      return respondIdempotently({
+        request,
+        reply,
+        store: input.idempotency,
+        actorId: session.actorId,
+        operation: `initiative.relationship:${params.initiativeId}`,
+        requestPayload: { params, body },
+        execute: async () => ({
+          statusCode: 201,
+          body: toInitiativeRelationshipResponse(
+            await input.relationships!.declare({
+              actorId: session.actorId,
+              correlationId: correlationId(reply),
+              ...params,
+              ...body,
+            }),
+          ),
+        }),
+      });
+    },
+  );
   app.post("/v1/initiatives/:initiativeId/review", async (request, reply) => {
     const session = await requireSession(
       request,
@@ -3318,12 +3393,16 @@ export async function buildServer(input: {
 async function toInitiativeResponse(
   detail: Awaited<ReturnType<InitiativeService["detail"]>>,
 ) {
-  const { initiative, allowedActions } = detail;
+  const { initiative, allowedActions, duplicateWarnings } = detail;
   return {
     ...initiative,
     createdAt: initiative.createdAt.toISOString(),
     updatedAt: initiative.updatedAt.toISOString(),
     allowedActions,
+    duplicateWarnings: duplicateWarnings.map((warning) => ({
+      ...warning,
+      createdAt: warning.createdAt.toISOString(),
+    })),
   };
 }
 
@@ -3363,15 +3442,20 @@ function toTriageResponse(
 ) {
   return { ...triage, assessedAt: triage.assessedAt.toISOString() };
 }
+function toInitiativeRelationshipResponse(
+  relationship: { declaredAt: Date } & Record<string, unknown>,
+) {
+  return { ...relationship, declaredAt: relationship.declaredAt.toISOString() };
+}
 function toIntakeResponsibilityResponse(
   assignment: { assignedAt: Date } & Record<string, unknown>,
 ) {
   return { ...assignment, assignedAt: assignment.assignedAt.toISOString() };
 }
 function toUnassignedIntakeExceptionResponse(
-  exception: { presentedAt: Date } & Record<string, unknown>,
+  exception: { updatedAt: Date } & Record<string, unknown>,
 ) {
-  return { ...exception, presentedAt: exception.presentedAt.toISOString() };
+  return { ...exception, updatedAt: exception.updatedAt.toISOString() };
 }
 function toEvaluationReviewerAssignmentResponse(
   assignment: {

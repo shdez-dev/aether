@@ -10,7 +10,7 @@ import {
 
 import {
   InitiativeVersionConflictError,
-  type InitiativeAuditStore,
+  type InitiativeAuditEvent,
   type InitiativeStore,
 } from "./initiatives.js";
 import {
@@ -34,7 +34,10 @@ export interface TriageStandardStore {
 }
 
 export interface TriageStore {
-  create(triage: InitiativeTriage): Promise<void>;
+  createWithAudit(input: {
+    triage: InitiativeTriage;
+    auditEvent: InitiativeAuditEvent;
+  }): Promise<void>;
   findById(triageId: string): Promise<InitiativeTriage | null>;
 }
 
@@ -51,7 +54,6 @@ export class TriageService {
       standards: TriageStandardStore;
       triages: TriageStore;
       initiatives: InitiativeStore;
-      audit: InitiativeAuditStore;
       tenancy: TenantStore;
       ids: TriageIdGenerator;
       clock: TriageClock;
@@ -149,8 +151,7 @@ export class TriageService {
       assessedByActorId: input.actorId,
       assessedAt,
     });
-    await this.dependencies.triages.create(triage);
-    await this.dependencies.audit.record({
+    const auditEvent: InitiativeAuditEvent = {
       id: this.dependencies.ids.next(),
       eventType: "initiative.triaged.v1",
       organizationId: initiative.organizationId,
@@ -167,7 +168,8 @@ export class TriageService {
         standardVersion: triage.standardVersion,
         initiativeVersion: triage.initiativeVersion,
       },
-    });
+    };
+    await this.dependencies.triages.createWithAudit({ triage, auditEvent });
     return triage;
   }
 

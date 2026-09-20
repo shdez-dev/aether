@@ -4,6 +4,7 @@ import {
   InitiativeDomainError,
   createInitiative,
   editInitiative,
+  findPotentialInitiativeDuplicates,
   transitionInitiative,
 } from "./initiative.js";
 
@@ -57,5 +58,33 @@ describe("Initiative aggregate", () => {
         createdAt,
       ),
     ).toThrow(InitiativeDomainError);
+  });
+
+  it("advierte coincidencias normalizadas dentro del workspace sin fusionarlas", () => {
+    const sameContent = {
+      ...draft,
+      id: "00000000-0000-4000-8000-000000000010",
+      title: "  INICIATIVA ",
+      problemStatement: "PROBLÉMA",
+      createdAt: new Date("2026-09-09T09:00:00.000Z"),
+    };
+    const otherWorkspace = {
+      ...sameContent,
+      id: "00000000-0000-4000-8000-000000000011",
+      workspaceId: "00000000-0000-4000-8000-000000000099",
+    };
+    expect(
+      findPotentialInitiativeDuplicates({
+        reference: draft,
+        candidates: [sameContent, otherWorkspace],
+      }),
+    ).toEqual([
+      {
+        initiativeId: sameContent.id,
+        title: sameContent.title,
+        createdAt: sameContent.createdAt,
+        matchedFields: ["title", "problem_statement"],
+      },
+    ]);
   });
 });

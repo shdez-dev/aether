@@ -166,6 +166,12 @@ export const AssignIntakeResponsibilityRequestSchema = z.object({
   responsibleActorId: z.string().min(1).max(255),
   nextReviewOn: z.string().date(),
 });
+export const DeclareInitiativeRelationshipRequestSchema = z.object({
+  organizationId: UuidSchema,
+  expectedVersion: z.number().int().nonnegative(),
+  targetInitiativeId: UuidSchema,
+  kind: z.enum(["related", "continues"]),
+});
 export const ActivateEvaluationStandardRequestSchema = z.object({
   organizationId: UuidSchema,
 });
@@ -233,6 +239,14 @@ export const InitiativeResponseSchema = z.object({
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
   allowedActions: z.array(InitiativeActionSchema),
+  duplicateWarnings: z.array(
+    z.object({
+      initiativeId: UuidSchema,
+      title: z.string(),
+      createdAt: z.string().datetime(),
+      matchedFields: z.array(z.enum(["title", "problem_statement"])),
+    }),
+  ),
 });
 
 export const InitiativeAuditEventSchema = z.object({
@@ -301,7 +315,17 @@ export const UnassignedIntakeExceptionResponseSchema = z.object({
   workspaceId: UuidSchema,
   initiativeId: UuidSchema,
   title: z.string(),
-  presentedAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+export const InitiativeRelationshipResponseSchema = z.object({
+  id: UuidSchema,
+  organizationId: UuidSchema,
+  workspaceId: UuidSchema,
+  sourceInitiativeId: UuidSchema,
+  targetInitiativeId: UuidSchema,
+  kind: z.enum(["related", "continues"]),
+  declaredByActorId: z.string(),
+  declaredAt: z.string().datetime(),
 });
 export const InitiativeEvaluationResponseSchema = z.object({
   id: UuidSchema,
@@ -462,6 +486,9 @@ export type TriageInitiativeRequest = z.infer<
 export type AssignIntakeResponsibilityRequest = z.infer<
   typeof AssignIntakeResponsibilityRequestSchema
 >;
+export type DeclareInitiativeRelationshipRequest = z.infer<
+  typeof DeclareInitiativeRelationshipRequestSchema
+>;
 export type InitiativeResponse = z.infer<typeof InitiativeResponseSchema>;
 export type InitiativeAuditEvent = z.infer<typeof InitiativeAuditEventSchema>;
 export type EvaluationStandardResponse = z.infer<
@@ -478,6 +505,9 @@ export type IntakeResponsibilityResponse = z.infer<
 >;
 export type UnassignedIntakeExceptionResponse = z.infer<
   typeof UnassignedIntakeExceptionResponseSchema
+>;
+export type InitiativeRelationshipResponse = z.infer<
+  typeof InitiativeRelationshipResponseSchema
 >;
 export type InitiativeEvaluationResponse = z.infer<
   typeof InitiativeEvaluationResponseSchema

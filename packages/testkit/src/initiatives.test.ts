@@ -7,6 +7,7 @@ import {
   IntakeService,
   TriageService,
   InitiativeService,
+  InitiativeRelationshipService,
   InitiativeVersionConflictError,
   NotificationService,
   TenantService,
@@ -18,6 +19,7 @@ import {
   InMemoryEvaluationStandardStore,
   InMemoryEvaluationStore,
   InMemoryInitiativeStore,
+  InMemoryInitiativeRelationshipStore,
   InMemoryIntakeAssignmentStore,
   InMemoryTriageStandardStore,
   InMemoryTriageStore,
@@ -72,6 +74,39 @@ describe("initiative vertical slice", () => {
       classification: "internal",
       requestedPriority: "medium",
     });
+    const priorInitiative = await initiatives.create({
+      actorId: "owner",
+      organizationId: organization.id,
+      workspaceId: workspace.id,
+      correlationId: ids.next(),
+      title: "Iniciativa previa",
+      problemStatement: "Contexto previo",
+      expectedOutcome: "Continuidad registrada",
+      classification: "internal",
+      requestedPriority: "low",
+    });
+    const relationships = new InitiativeRelationshipService({
+      relationships: new InMemoryInitiativeRelationshipStore(),
+      initiatives: initiativesStore,
+      audit,
+      tenancy: tenantStore,
+      ids,
+      clock,
+    });
+    const relationship = await relationships.declare({
+      actorId: "owner",
+      organizationId: organization.id,
+      initiativeId: initiative.id,
+      expectedVersion: initiative.version,
+      targetInitiativeId: priorInitiative.id,
+      kind: "continues",
+      correlationId: ids.next(),
+    });
+    expect(relationship).toMatchObject({
+      sourceInitiativeId: initiative.id,
+      targetInitiativeId: priorInitiative.id,
+      kind: "continues",
+    });
     const presented = await initiatives.present({
       actorId: "owner",
       organizationId: organization.id,
@@ -80,9 +115,8 @@ describe("initiative vertical slice", () => {
       expectedVersion: initiative.version,
     });
     const intake = new IntakeService({
-      assignments: new InMemoryIntakeAssignmentStore(initiativesStore),
+      assignments: new InMemoryIntakeAssignmentStore(initiativesStore, audit),
       initiatives: initiativesStore,
-      audit,
       tenancy: tenantStore,
       ids,
       clock,
@@ -92,9 +126,7 @@ describe("initiative vertical slice", () => {
         actorId: "owner",
         organizationId: organization.id,
       }),
-    ).toEqual([
-      expect.objectContaining({ initiativeId: initiative.id }),
-    ]);
+    ).toEqual([expect.objectContaining({ initiativeId: initiative.id })]);
     const assignment = await intake.assign({
       actorId: "owner",
       organizationId: organization.id,
@@ -116,12 +148,11 @@ describe("initiative vertical slice", () => {
       }),
     ).resolves.toEqual([]);
     const standards = new InMemoryTriageStandardStore();
-    const triages = new InMemoryTriageStore();
+    const triages = new InMemoryTriageStore(audit);
     const service = new TriageService({
       standards,
       triages,
       initiatives: initiativesStore,
-      audit,
       tenancy: tenantStore,
       ids,
       clock,
@@ -170,6 +201,10 @@ describe("initiative vertical slice", () => {
     });
     expect(audit.events).toEqual(
       expect.arrayContaining([
+        expect.objectContaining({
+          eventType: "initiative.relationship_declared.v1",
+          payload: expect.objectContaining({ relationshipId: relationship.id }),
+        }),
         expect.objectContaining({
           eventType: "initiative.triaged.v1",
           payload: expect.objectContaining({ triageId: triage.id }),

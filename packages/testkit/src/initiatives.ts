@@ -11,6 +11,7 @@ import type {
   InitiativeAuditEvent,
   InitiativeAuditStore,
   InitiativeStore,
+  InitiativeRelationshipStore,
 } from "@aether/application";
 import type {
   EvaluationStandard,
@@ -18,6 +19,7 @@ import type {
   IntakeResponsibility,
   TriageStandard,
   Initiative,
+  InitiativeRelationship,
   InitiativeDecision,
   InitiativeEvaluation,
   EvaluationReviewerAssignment,
@@ -303,8 +305,18 @@ export class InMemoryTriageStandardStore implements TriageStandardStore {
 
 export class InMemoryTriageStore implements TriageStore {
   readonly triages = new Map<string, InitiativeTriage>();
-  async create(triage: InitiativeTriage): Promise<void> {
-    this.triages.set(triage.id, triage);
+  constructor(private readonly audit: InitiativeAuditStore) {}
+  async createWithAudit(input: {
+    triage: InitiativeTriage;
+    auditEvent: InitiativeAuditEvent;
+  }): Promise<void> {
+    this.triages.set(input.triage.id, input.triage);
+    try {
+      await this.audit.record(input.auditEvent);
+    } catch (error) {
+      this.triages.delete(input.triage.id);
+      throw error;
+    }
   }
   async findById(triageId: string): Promise<InitiativeTriage | null> {
     return this.triages.get(triageId) ?? null;
@@ -313,11 +325,23 @@ export class InMemoryTriageStore implements TriageStore {
 
 export class InMemoryIntakeAssignmentStore implements IntakeAssignmentStore {
   readonly assignments = new Map<string, IntakeResponsibility>();
-  constructor(private readonly initiatives: InMemoryInitiativeStore) {}
-  async create(assignment: IntakeResponsibility): Promise<void> {
-    if (await this.findActiveByInitiative(assignment.initiativeId))
+  constructor(
+    private readonly initiatives: InMemoryInitiativeStore,
+    private readonly audit: InitiativeAuditStore,
+  ) {}
+  async createWithAudit(input: {
+    assignment: IntakeResponsibility;
+    auditEvent: InitiativeAuditEvent;
+  }): Promise<void> {
+    if (await this.findActiveByInitiative(input.assignment.initiativeId))
       throw new Error("Active intake assignment already exists");
-    this.assignments.set(assignment.id, assignment);
+    this.assignments.set(input.assignment.id, input.assignment);
+    try {
+      await this.audit.record(input.auditEvent);
+    } catch (error) {
+      this.assignments.delete(input.assignment.id);
+      throw error;
+    }
   }
   async findActiveByInitiative(
     initiativeId: string,
@@ -345,10 +369,38 @@ export class InMemoryIntakeAssignmentStore implements IntakeAssignmentStore {
         workspaceId: initiative.workspaceId,
         initiativeId: initiative.id,
         title: initiative.title,
-        presentedAt: initiative.updatedAt,
+        updatedAt: initiative.updatedAt,
       }))
       .sort((left, right) =>
-        left.presentedAt.getTime() - right.presentedAt.getTime(),
+        left.updatedAt.getTime() - right.updatedAt.getTime(),
       );
+  }
+}
+
+export class InMemoryInitiativeRelationshipStore
+  implements InitiativeRelationshipStore
+{
+  readonly relationships = new Map<string, InitiativeRelationship>();
+  async create(relationship: InitiativeRelationship): Promise<void> {
+    if (
+      [...this.relationships.values()].some(
+        (existing) =>
+          existing.sourceInitiativeId === relationship.sourceInitiativeId &&
+          existing.targetInitiativeId === relationship.targetInitiativeId,
+      )
+    )
+      throw new Error("Initiative relationship already exists");
+    this.relationships.set(relationship.id, relationship);
+  }
+  async list(input: {
+    organizationId: string;
+    initiativeId: string;
+  }): Promise<readonly InitiativeRelationship[]> {
+    return [...this.relationships.values()].filter(
+      (relationship) =>
+        relationship.organizationId === input.organizationId &&
+        (relationship.sourceInitiativeId === input.initiativeId ||
+          relationship.targetInitiativeId === input.initiativeId),
+    );
   }
 }

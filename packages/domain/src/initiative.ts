@@ -30,6 +30,12 @@ export type Initiative = Readonly<{
   createdAt: Date;
   updatedAt: Date;
 }>;
+export type InitiativeDuplicateWarning = Readonly<{
+  initiativeId: string;
+  title: string;
+  createdAt: Date;
+  matchedFields: readonly ("title" | "problem_statement")[];
+}>;
 
 const transitions: Readonly<
   Record<InitiativeStatus, readonly InitiativeStatus[]>
@@ -102,6 +108,45 @@ export function allowedTransitions(
   status: InitiativeStatus,
 ): readonly InitiativeStatus[] {
   return transitions[status];
+}
+
+export function findPotentialInitiativeDuplicates(input: {
+  reference: Initiative;
+  candidates: readonly Initiative[];
+}): readonly InitiativeDuplicateWarning[] {
+  const referenceTitle = normalizeInitiativeContent(input.reference.title);
+  const referenceProblem = normalizeInitiativeContent(
+    input.reference.problemStatement,
+  );
+  return input.candidates
+    .filter(
+      (candidate) =>
+        candidate.id !== input.reference.id &&
+        candidate.organizationId === input.reference.organizationId &&
+        candidate.workspaceId === input.reference.workspaceId &&
+        !["rejected", "cancelled"].includes(candidate.status) &&
+        normalizeInitiativeContent(candidate.title) === referenceTitle &&
+        normalizeInitiativeContent(candidate.problemStatement) ===
+          referenceProblem,
+    )
+    .sort(
+      (left, right) => left.createdAt.getTime() - right.createdAt.getTime(),
+    )
+    .map((candidate) => ({
+      initiativeId: candidate.id,
+      title: candidate.title,
+      createdAt: candidate.createdAt,
+      matchedFields: ["title", "problem_statement"],
+    }));
+}
+
+function normalizeInitiativeContent(value: string): string {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("es")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 export class InitiativeDomainError extends Error {

@@ -1768,7 +1768,6 @@ describe.sequential("PostgreSQL integration", () => {
       const intakeService = new IntakeService({
         assignments: intakeAssignments,
         initiatives: initiativesStore,
-        audit: initiativeAudit,
         tenancy: tenantStore,
         ids,
         clock,
@@ -1784,13 +1783,32 @@ describe.sequential("PostgreSQL integration", () => {
         organizationId: organization.id,
         initiativeId: draft.id,
         expectedVersion: presented.version,
-        responsibleActorId: owner,
+        responsibleActorId: "lead@example.test",
         nextReviewOn: "2026-09-24",
         correlationId: randomUUID(),
       });
       expect(
         await intakeAssignments.findActiveByInitiative(draft.id),
       ).toMatchObject({ id: intakeAssignment.id, nextReviewOn: "2026-09-24" });
+      await expect(
+        pool.query(
+          "UPDATE initiative_intake_assignments SET next_review_on = '2026-09-25' WHERE id = $1",
+          [intakeAssignment.id],
+        ),
+      ).rejects.toThrow("initiative intake assignments are append-only");
+      await expect(
+        pool.query("DELETE FROM initiative_intake_assignments WHERE id = $1", [
+          intakeAssignment.id,
+        ]),
+      ).rejects.toThrow("initiative intake assignments are append-only");
+      await expect(
+        pool.query(
+          "UPDATE organization_memberships SET status = 'suspended' WHERE organization_id = $1 AND actor_id = $2",
+          [organization.id, "lead@example.test"],
+        ),
+      ).rejects.toThrow(
+        "reassign or close intake responsibilities before revoking membership",
+      );
       await expect(
         pool.query(
           `INSERT INTO initiative_intake_assignments
@@ -1821,7 +1839,6 @@ describe.sequential("PostgreSQL integration", () => {
         standards: triageStandardStore,
         triages: triageStore,
         initiatives: initiativesStore,
-        audit: initiativeAudit,
         tenancy: tenantStore,
         ids,
         clock,
@@ -1842,6 +1859,38 @@ describe.sequential("PostgreSQL integration", () => {
           },
         ],
       });
+      await expect(
+        pool.query(
+          `UPDATE triage_standards SET criteria = $1::jsonb WHERE id = $2`,
+          [JSON.stringify([]), triageStandard.id],
+        ),
+      ).rejects.toThrow("published triage standards are immutable");
+      await expect(
+        pool.query("DELETE FROM triage_standards WHERE id = $1", [
+          triageStandard.id,
+        ]),
+      ).rejects.toThrow("published triage standards are immutable");
+      await expect(
+        pool.query(
+          `INSERT INTO initiative_triages
+           (id, organization_id, workspace_id, initiative_id, initiative_version,
+            standard_id, standard_version, criteria, assessed_by_actor_id, assessed_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,NOW())`,
+          [
+            randomUUID(),
+            organization.id,
+            workspace.id,
+            draft.id,
+            presented.version,
+            triageStandard.id,
+            triageStandard.version,
+            JSON.stringify([]),
+            owner,
+          ],
+        ),
+      ).rejects.toThrow(
+        "triage requires an active standard with matching scope",
+      );
       await triageService.activateStandard({
         actorId: owner,
         organizationId: organization.id,
@@ -1867,6 +1916,85 @@ describe.sequential("PostgreSQL integration", () => {
         standardId: triageStandard.id,
         standardVersion: 1,
       });
+      const atomicDraft = await initiativeService.create({
+        actorId: owner,
+        organizationId: organization.id,
+        workspaceId: workspace.id,
+        correlationId: randomUUID(),
+        title: "Verificar rollback de evidencia",
+        problemStatement: "La evidencia debe ser atómica.",
+        expectedOutcome: "No quedan registros sin auditoría.",
+        classification: "internal",
+        requestedPriority: "low",
+      });
+      const atomicPresented = await initiativeService.present({
+        actorId: owner,
+        organizationId: organization.id,
+        initiativeId: atomicDraft.id,
+        correlationId: randomUUID(),
+        expectedVersion: atomicDraft.version,
+      });
+      const duplicateAuditEvent = {
+        id: randomUUID(),
+        eventType: "initiative.atomicity_probe.v1",
+        organizationId: organization.id,
+        workspaceId: workspace.id,
+        initiativeId: atomicDraft.id,
+        actorId: owner,
+        correlationId: randomUUID(),
+        occurredAt: new Date(),
+        fromStatus: "presented" as const,
+        toStatus: "presented" as const,
+        payload: {},
+      };
+      await initiativeAudit.record(duplicateAuditEvent);
+      const orphanedAssignmentId = randomUUID();
+      await expect(
+        intakeAssignments.createWithAudit({
+          assignment: {
+            id: orphanedAssignmentId,
+            organizationId: organization.id,
+            workspaceId: workspace.id,
+            initiativeId: atomicDraft.id,
+            responsibleActorId: "lead@example.test",
+            assignedByActorId: owner,
+            assignedAt: new Date(),
+            nextReviewOn: "2026-09-25",
+          },
+          auditEvent: duplicateAuditEvent,
+        }),
+      ).rejects.toBeDefined();
+      await expect(
+        intakeAssignments.findActiveByInitiative(atomicDraft.id),
+      ).resolves.toBeNull();
+      const orphanedTriageId = randomUUID();
+      await expect(
+        triageStore.createWithAudit({
+          triage: {
+            id: orphanedTriageId,
+            organizationId: organization.id,
+            workspaceId: workspace.id,
+            initiativeId: atomicDraft.id,
+            initiativeVersion: atomicPresented.version,
+            standardId: triageStandard.id,
+            standardVersion: triageStandard.version,
+            criteria: [],
+            assessedByActorId: owner,
+            assessedAt: new Date(),
+          },
+          auditEvent: duplicateAuditEvent,
+        }),
+      ).rejects.toBeDefined();
+      await expect(triageStore.findById(orphanedTriageId)).resolves.toBeNull();
+      await expect(
+        pool.query(
+          "UPDATE initiative_triages SET criteria = '[]'::jsonb WHERE id = $1",
+          [triage.id],
+        ),
+      ).rejects.toThrow("initiative triages are append-only");
+      await expect(
+        pool.query("DELETE FROM initiative_triages WHERE id = $1", [triage.id]),
+      ).rejects.toThrow("initiative triages are append-only");
       await expect(
         pool.query(
           `UPDATE triage_standards SET criteria = $1::jsonb WHERE id = $2`,
@@ -1883,7 +2011,42 @@ describe.sequential("PostgreSQL integration", () => {
             triageStandard.id,
           ],
         ),
-      ).rejects.toThrow("a triage standard cannot change after it is applied");
+      ).rejects.toThrow("published triage standards are immutable");
+      const unadoptedOrganization = await tenantService.createOrganization({
+        actorId: owner,
+        actorEmail: owner,
+        name: "Organización sin adopción",
+        timezone: "UTC",
+        locale: "es-CL",
+      });
+      const unadoptedStandardId = randomUUID();
+      await pool.query(
+        `INSERT INTO triage_standards
+         (id, organization_id, name, version, criteria, is_active, published_at, published_by_actor_id)
+         VALUES ($1,$2,$3,$4,$5::jsonb,FALSE,NOW(),$6)`,
+        [
+          unadoptedStandardId,
+          unadoptedOrganization.id,
+          "Estándar sin adopción",
+          1,
+          JSON.stringify([]),
+          owner,
+        ],
+      );
+      const activationClient = await pool.connect();
+      try {
+        await activationClient.query("BEGIN");
+        await activationClient.query(
+          "UPDATE triage_standards SET is_active = TRUE WHERE id = $1",
+          [unadoptedStandardId],
+        );
+        await expect(activationClient.query("COMMIT")).rejects.toThrow(
+          "an active triage standard requires an adoption",
+        );
+      } finally {
+        await activationClient.query("ROLLBACK");
+        activationClient.release();
+      }
       await expect(
         pool.query(
           `INSERT INTO initiative_triages
@@ -1902,7 +2065,9 @@ describe.sequential("PostgreSQL integration", () => {
             owner,
           ],
         ),
-      ).rejects.toThrow("triage scope does not match initiative and standard");
+      ).rejects.toThrow(
+        "triage requires an active standard with matching scope",
+      );
       const standard = await evaluationService.publishStandard({
         actorId: owner,
         organizationId: organization.id,

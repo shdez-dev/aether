@@ -78,4 +78,18 @@ La cola `GET /v1/intake-exceptions` es una vista derivada de iniciativas
 excepción independiente, por lo que una asignación válida la retira de la cola
 sin riesgo de desincronización. PostgreSQL impone una asignación por iniciativa
 y revalida estado, organización, workspace y responsabilidad incluso frente a
-escrituras directas.
+escrituras directas. Su campo `updatedAt` representa la última actualización de
+la iniciativa (no un registro histórico de cuándo fue presentada). Mientras una
+persona tenga una asignación de intake activa, su membresía no puede suspenderse
+ni revocarse: primero debe existir una capacidad explícita de reasignación o
+cierre que conserve la trazabilidad.
+
+## Duplicados y continuidad declarada
+
+Las coincidencias exactas normalizadas de título y problema dentro del mismo
+workspace aparecen como `duplicateWarnings`; son advertencias derivadas, no
+bloquean la presentación ni fusionan iniciativas. Antes de presentar, sólo el
+solicitante activo de una iniciativa en `draft` o `returned` puede declarar una
+relación append-only `related` o `continues` hacia otra iniciativa del mismo
+workspace. La declaración conserva actor, fecha y auditoría, y el destinatario
+debe ser legible para quien la declara.

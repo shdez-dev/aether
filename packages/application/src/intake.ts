@@ -6,7 +6,7 @@ import {
 
 import {
   InitiativeVersionConflictError,
-  type InitiativeAuditStore,
+  type InitiativeAuditEvent,
   type InitiativeStore,
 } from "./initiatives.js";
 import {
@@ -21,11 +21,14 @@ export type UnassignedIntakeException = Readonly<{
   workspaceId: string;
   initiativeId: string;
   title: string;
-  presentedAt: Date;
+  updatedAt: Date;
 }>;
 
 export interface IntakeAssignmentStore {
-  create(assignment: IntakeResponsibility): Promise<void>;
+  createWithAudit(input: {
+    assignment: IntakeResponsibility;
+    auditEvent: InitiativeAuditEvent;
+  }): Promise<void>;
   findActiveByInitiative(
     initiativeId: string,
   ): Promise<IntakeResponsibility | null>;
@@ -46,7 +49,6 @@ export class IntakeService {
     private readonly dependencies: {
       assignments: IntakeAssignmentStore;
       initiatives: InitiativeStore;
-      audit: InitiativeAuditStore;
       tenancy: TenantStore;
       ids: IntakeIdGenerator;
       clock: IntakeClock;
@@ -95,8 +97,7 @@ export class IntakeService {
       assignedAt: this.dependencies.clock.now(),
       nextReviewOn: input.nextReviewOn,
     });
-    await this.dependencies.assignments.create(assignment);
-    await this.dependencies.audit.record({
+    const auditEvent: InitiativeAuditEvent = {
       id: this.dependencies.ids.next(),
       eventType: "initiative.intake_assigned.v1",
       organizationId: initiative.organizationId,
@@ -112,7 +113,8 @@ export class IntakeService {
         responsibleActorId: assignment.responsibleActorId,
         nextReviewOn: assignment.nextReviewOn,
       },
-    });
+    };
+    await this.dependencies.assignments.createWithAudit({ assignment, auditEvent });
     return assignment;
   }
 

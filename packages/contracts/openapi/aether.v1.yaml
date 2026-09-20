@@ -1214,6 +1214,53 @@ paths:
                 type: array
                 items: { $ref: "#/components/schemas/UnassignedIntakeException" }
         default: { $ref: "#/components/responses/Problem" }
+  /v1/initiatives/{initiativeId}/relationships:
+    get:
+      tags: [Initiatives]
+      operationId: listInitiativeRelationships
+      summary: Listar relaciones declaradas de una iniciativa
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: initiativeId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/OrganizationContextId"
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: Relaciones entrantes y salientes autorizadas.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/InitiativeRelationship" }
+        default: { $ref: "#/components/responses/Problem" }
+    post:
+      tags: [Initiatives]
+      operationId: declareInitiativeRelationship
+      summary: Declarar una relación o continuación sin fusionar iniciativas
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: initiativeId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DeclareInitiativeRelationshipRequest" }
+      responses:
+        "201":
+          description: Relación append-only declarada por el solicitante.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InitiativeRelationship" }
+        default: { $ref: "#/components/responses/Problem" }
   /v1/initiatives/{initiativeId}/review-assignments:
     post:
       tags: [Initiatives]
@@ -3072,15 +3119,35 @@ components:
         assignedByActorId: { type: string }
         assignedAt: { type: string, format: date-time }
         nextReviewOn: { type: string, format: date }
+    DeclareInitiativeRelationshipRequest:
+      type: object
+      required: [organizationId, expectedVersion, targetInitiativeId, kind]
+      properties:
+        organizationId: { type: string, format: uuid }
+        expectedVersion: { type: integer, minimum: 0 }
+        targetInitiativeId: { type: string, format: uuid }
+        kind: { type: string, enum: [related, continues] }
+    InitiativeRelationship:
+      type: object
+      required: [id, organizationId, workspaceId, sourceInitiativeId, targetInitiativeId, kind, declaredByActorId, declaredAt]
+      properties:
+        id: { type: string, format: uuid }
+        organizationId: { type: string, format: uuid }
+        workspaceId: { type: string, format: uuid }
+        sourceInitiativeId: { type: string, format: uuid }
+        targetInitiativeId: { type: string, format: uuid }
+        kind: { type: string, enum: [related, continues] }
+        declaredByActorId: { type: string }
+        declaredAt: { type: string, format: date-time }
     UnassignedIntakeException:
       type: object
-      required: [organizationId, workspaceId, initiativeId, title, presentedAt]
+      required: [organizationId, workspaceId, initiativeId, title, updatedAt]
       properties:
         organizationId: { type: string, format: uuid }
         workspaceId: { type: string, format: uuid }
         initiativeId: { type: string, format: uuid }
         title: { type: string }
-        presentedAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
     TriageStandard:
       type: object
       required: [id, organizationId, name, version, criteria, isActive, publishedAt, publishedByActorId]
@@ -3508,6 +3575,7 @@ components:
           createdAt,
           updatedAt,
           allowedActions,
+          duplicateWarnings,
         ]
       properties:
         id: { type: string, format: uuid }
@@ -3539,6 +3607,19 @@ components:
         allowedActions:
           type: array
           items: { type: string, enum: [edit, present, review, decide] }
+        duplicateWarnings:
+          type: array
+          description: Coincidencias exactas normalizadas en el mismo workspace; no bloquean ni fusionan iniciativas.
+          items:
+            type: object
+            required: [initiativeId, title, createdAt, matchedFields]
+            properties:
+              initiativeId: { type: string, format: uuid }
+              title: { type: string }
+              createdAt: { type: string, format: date-time }
+              matchedFields:
+                type: array
+                items: { type: string, enum: [title, problem_statement] }
     InitiativeAuditEvent:
       type: object
       required:
