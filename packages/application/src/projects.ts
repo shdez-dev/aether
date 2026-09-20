@@ -162,6 +162,11 @@ export class ProjectService {
         ...input.participants.map((participant) => participant.actorId),
       ].map((actorId) => this.assertMember(actorId, input.organizationId)),
     );
+    await this.assertProjectSponsorScoped(
+      input.sponsorActorId,
+      initiative.organizationId,
+      initiative.workspaceId,
+    );
     if (input.leadActorId)
       await this.assertProjectLeadActive({
         organizationId: initiative.organizationId,
@@ -685,6 +690,19 @@ export class ProjectService {
       }))
     )
       throw new AccessDeniedError("workspace:manage");
+  }
+  private async assertProjectSponsorScoped(
+    actorId: string,
+    organizationId: string,
+    workspaceId: string,
+  ): Promise<void> {
+    const organizationRole =
+      await this.dependencies.tenancy.findOrganizationRole({
+        actorId,
+        organizationId,
+      });
+    if (organizationRole === "owner" || organizationRole === "admin") return;
+    await this.assertProjectParticipant(actorId, organizationId, workspaceId);
   }
   private async assertProjectLeadActive(
     project: Pick<Project, "organizationId" | "workspaceId" | "leadActorId">,

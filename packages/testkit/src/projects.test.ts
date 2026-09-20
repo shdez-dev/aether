@@ -208,6 +208,16 @@ describe("project conversion and execution", () => {
         ],
       }),
     ).rejects.toBeInstanceOf(AccessDeniedError);
+    await expect(
+      projects.createFromInitiative({
+        ...conversionInput,
+        sponsorActorId: "unscoped",
+        participants: [
+          { actorId: "unscoped", role: "sponsor" },
+          { actorId: "observer", role: "observer" },
+        ],
+      }),
+    ).rejects.toBeInstanceOf(AccessDeniedError);
     const pending = await projects.createFromInitiative(conversionInput);
     expect(pending).toMatchObject({
       sourceInitiativeId: approved.id,
