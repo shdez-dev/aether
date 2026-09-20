@@ -2792,7 +2792,7 @@ export class PostgresInitiativeAuditStore implements InitiativeAuditStore {
 export class PostgresDiagnosticStore implements DiagnosticStore {
   constructor(private readonly pool: Pool) {}
   async findByInitiativeId(initiativeId: string): Promise<InitiativeDiagnostic | null> {
-    const result = await this.pool.query<DiagnosticRow>(`SELECT id, organization_id, workspace_id, initiative_id, version, beneficiaries, causes, constraints, previous_attempts, hypotheses, saved_by_actor_id, saved_at FROM initiative_diagnostics WHERE initiative_id = $1`, [initiativeId]);
+    const result = await this.pool.query<DiagnosticRow>(`SELECT id, organization_id, workspace_id, initiative_id, version, beneficiaries, causes, constraints, previous_attempts, hypotheses, scope, risks, resources, next_experiment, saved_by_actor_id, saved_at FROM initiative_diagnostics WHERE initiative_id = $1`, [initiativeId]);
     return result.rows[0] ? toDiagnostic(result.rows[0]) : null;
   }
   async saveWithAudit(input: { diagnostic: InitiativeDiagnostic; expectedVersion: number | null; auditEvent: InitiativeAuditEvent }): Promise<boolean> {
@@ -2800,8 +2800,8 @@ export class PostgresDiagnosticStore implements DiagnosticStore {
     try {
       await client.query("BEGIN");
       const result = input.expectedVersion === null
-        ? await client.query(`INSERT INTO initiative_diagnostics (id, organization_id, workspace_id, initiative_id, version, beneficiaries, causes, constraints, previous_attempts, hypotheses, saved_by_actor_id, saved_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (initiative_id) DO NOTHING`, diagnosticValues(input.diagnostic))
-        : await client.query(`UPDATE initiative_diagnostics SET version=$2, beneficiaries=$3, causes=$4, constraints=$5, previous_attempts=$6, hypotheses=$7, saved_by_actor_id=$8, saved_at=$9 WHERE initiative_id=$1 AND version=$10`, [input.diagnostic.initiativeId, input.diagnostic.version, input.diagnostic.beneficiaries, input.diagnostic.causes, input.diagnostic.constraints, input.diagnostic.previousAttempts, input.diagnostic.hypotheses, input.diagnostic.savedByActorId, input.diagnostic.savedAt, input.expectedVersion]);
+        ? await client.query(`INSERT INTO initiative_diagnostics (id, organization_id, workspace_id, initiative_id, version, beneficiaries, causes, constraints, previous_attempts, hypotheses, scope, risks, resources, next_experiment, saved_by_actor_id, saved_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) ON CONFLICT (initiative_id) DO NOTHING`, diagnosticValues(input.diagnostic))
+        : await client.query(`UPDATE initiative_diagnostics SET version=$2, beneficiaries=$3, causes=$4, constraints=$5, previous_attempts=$6, hypotheses=$7, scope=$8, risks=$9, resources=$10, next_experiment=$11, saved_by_actor_id=$12, saved_at=$13 WHERE initiative_id=$1 AND version=$14`, [input.diagnostic.initiativeId, input.diagnostic.version, input.diagnostic.beneficiaries, input.diagnostic.causes, input.diagnostic.constraints, input.diagnostic.previousAttempts, input.diagnostic.hypotheses, input.diagnostic.scope, input.diagnostic.risks, input.diagnostic.resources, input.diagnostic.nextExperiment, input.diagnostic.savedByActorId, input.diagnostic.savedAt, input.expectedVersion]);
       if (result.rowCount !== 1) { await client.query("ROLLBACK"); return false; }
       await insertInitiativeAuditEvent(client, input.auditEvent);
       await client.query("COMMIT"); return true;
@@ -4574,9 +4574,9 @@ type InitiativeAuditRow = {
   to_status: InitiativeStatus | null;
   payload: Record<string, unknown>;
 };
-type DiagnosticRow = { id:string; organization_id:string; workspace_id:string; initiative_id:string; version:number; beneficiaries:string[]; causes:InitiativeDiagnostic["causes"]; constraints:InitiativeDiagnostic["constraints"]; previous_attempts:InitiativeDiagnostic["previousAttempts"]; hypotheses:InitiativeDiagnostic["hypotheses"]; saved_by_actor_id:string; saved_at:Date };
-function diagnosticValues(d: InitiativeDiagnostic) { return [d.id,d.organizationId,d.workspaceId,d.initiativeId,d.version,d.beneficiaries,d.causes,d.constraints,d.previousAttempts,d.hypotheses,d.savedByActorId,d.savedAt]; }
-function toDiagnostic(row: DiagnosticRow): InitiativeDiagnostic { return { id:row.id, organizationId:row.organization_id, workspaceId:row.workspace_id, initiativeId:row.initiative_id, version:row.version, beneficiaries:row.beneficiaries, causes:row.causes, constraints:row.constraints, previousAttempts:row.previous_attempts, hypotheses:row.hypotheses, savedByActorId:row.saved_by_actor_id, savedAt:row.saved_at }; }
+type DiagnosticRow = { id:string; organization_id:string; workspace_id:string; initiative_id:string; version:number; beneficiaries:string[]; causes:InitiativeDiagnostic["causes"]; constraints:InitiativeDiagnostic["constraints"]; previous_attempts:InitiativeDiagnostic["previousAttempts"]; hypotheses:InitiativeDiagnostic["hypotheses"]; scope:string; risks:InitiativeDiagnostic["risks"]; resources:string[]; next_experiment:string|null; saved_by_actor_id:string; saved_at:Date };
+function diagnosticValues(d: InitiativeDiagnostic) { return [d.id,d.organizationId,d.workspaceId,d.initiativeId,d.version,d.beneficiaries,d.causes,d.constraints,d.previousAttempts,d.hypotheses,d.scope,d.risks,d.resources,d.nextExperiment,d.savedByActorId,d.savedAt]; }
+function toDiagnostic(row: DiagnosticRow): InitiativeDiagnostic { return { id:row.id, organizationId:row.organization_id, workspaceId:row.workspace_id, initiativeId:row.initiative_id, version:row.version, beneficiaries:row.beneficiaries, causes:row.causes, constraints:row.constraints, previousAttempts:row.previous_attempts, hypotheses:row.hypotheses, scope:row.scope, risks:row.risks, resources:row.resources, nextExperiment:row.next_experiment, savedByActorId:row.saved_by_actor_id, savedAt:row.saved_at }; }
 function toInitiative(row: InitiativeRow): Initiative {
   return {
     id: row.id,

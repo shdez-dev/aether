@@ -22,6 +22,10 @@ export type InitiativeDiagnostic = Readonly<{
   constraints: readonly DiagnosticEntry[];
   previousAttempts: readonly DiagnosticEntry[];
   hypotheses: readonly DiagnosticEntry[];
+  scope: string;
+  risks: readonly DiagnosticEntry[];
+  resources: readonly string[];
+  nextExperiment: string | null;
   savedByActorId: string;
   savedAt: Date;
 }>;
@@ -41,11 +45,14 @@ export function saveInitiativeDiagnostic(input: {
     input.diagnostic.constraints,
     input.diagnostic.previousAttempts,
     input.diagnostic.hypotheses,
+    input.diagnostic.risks,
   ];
   for (const section of sections)
     for (const entry of section) validateEntry(entry);
   if (input.diagnostic.beneficiaries.some((beneficiary) => !beneficiary.trim()))
     throw new DiagnosticDomainError("DIAGNOSTIC_BENEFICIARY_REQUIRED");
+  if (!input.diagnostic.scope.trim())
+    throw new DiagnosticDomainError("DIAGNOSTIC_SCOPE_REQUIRED");
   return {
     ...input.diagnostic,
     beneficiaries: [...input.diagnostic.beneficiaries],
@@ -53,6 +60,8 @@ export function saveInitiativeDiagnostic(input: {
     constraints: [...input.diagnostic.constraints],
     previousAttempts: [...input.diagnostic.previousAttempts],
     hypotheses: [...input.diagnostic.hypotheses],
+    risks: [...input.diagnostic.risks],
+    resources: [...input.diagnostic.resources],
     version: (input.current?.version ?? -1) + 1,
     savedAt: input.savedAt,
   };
@@ -69,7 +78,8 @@ export class DiagnosticDomainError extends Error {
     public readonly code:
       | "DIAGNOSTIC_BENEFICIARY_REQUIRED"
       | "DIAGNOSTIC_ENTRY_REQUIRED"
-      | "DIAGNOSTIC_EVIDENCE_SOURCE_REQUIRED",
+      | "DIAGNOSTIC_EVIDENCE_SOURCE_REQUIRED"
+      | "DIAGNOSTIC_SCOPE_REQUIRED",
   ) {
     super(code);
   }

@@ -187,6 +187,10 @@ export const SaveInitiativeDiagnosticRequestSchema = z.object({
   constraints: z.array(DiagnosticEntrySchema).max(100),
   previousAttempts: z.array(DiagnosticEntrySchema).max(100),
   hypotheses: z.array(DiagnosticEntrySchema).max(100),
+  scope: NonEmptyTextSchema.max(2_000),
+  risks: z.array(DiagnosticEntrySchema).max(100),
+  resources: z.array(NonEmptyTextSchema.max(255)).max(100),
+  nextExperiment: NonEmptyTextSchema.max(2_000).nullable(),
 });
 export const ActivateEvaluationStandardRequestSchema = z.object({
   organizationId: UuidSchema,
