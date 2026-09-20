@@ -1438,6 +1438,15 @@ describe.sequential("PostgreSQL integration", () => {
       ).rejects.toThrow(
         "capacity allocation must preserve project and membership scope",
       );
+      await expect(
+        pool.query(
+          `INSERT INTO project_external_dependencies (id, project_id, description, external_party, owner_actor_id, due_on, status, created_by_actor_id, created_at)
+           VALUES ($1,$2,'Await external approval','Outside party','owner',NULL,'open','owner','2026-01-03T00:00:00Z')`,
+          [randomUUID(), activeProjectId],
+        ),
+      ).rejects.toThrow(
+        "external dependency requires scoped execution authority",
+      );
       const activeActionId = randomUUID();
       const otherActiveActionId = randomUUID();
       const closedActionId = randomUUID();
