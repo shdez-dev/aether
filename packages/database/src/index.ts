@@ -93,6 +93,7 @@ import type {
   ProjectMilestone,
   ProjectNextAction,
   ProjectNextActionDependency,
+  ProjectRisk,
   OrganizationRole,
   WorkspaceRole,
   DocumentVersion,
@@ -3644,6 +3645,23 @@ export class PostgresProjectExecutionStore implements ProjectExecutionStore {
         action.completedAt,
         action.createdByActorId,
         action.createdAt,
+      ],
+    );
+  }
+  async addRisk(risk: ProjectRisk): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO project_risks (id, project_id, title, probability, impact, treatment, owner_actor_id, created_by_actor_id, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [
+        risk.id,
+        risk.projectId,
+        risk.title,
+        risk.probability,
+        risk.impact,
+        risk.treatment,
+        risk.ownerActorId,
+        risk.createdByActorId,
+        risk.createdAt,
       ],
     );
   }

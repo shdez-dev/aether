@@ -88,6 +88,7 @@ import {
   EscalateEvaluationReviewAbstentionRequestSchema,
   AuditHistoryQuerySchema,
   AddProjectMilestoneRequestSchema,
+  RegisterProjectRiskRequestSchema,
   AddProjectNextActionRequestSchema,
   DeclareProjectNextActionDependencyRequestSchema,
   ChangeProjectStatusRequestSchema,
@@ -2654,6 +2655,38 @@ export async function buildServer(input: {
         return {
           statusCode: 201,
           body: { ...milestone, createdAt: milestone.createdAt.toISOString() },
+        };
+      },
+    });
+  });
+  app.post("/v1/projects/:projectId/risks", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    const params = z
+      .object({ projectId: z.string().uuid() })
+      .parse(request.params);
+    const body = RegisterProjectRiskRequestSchema.parse(request.body);
+    return respondIdempotently({
+      request,
+      reply,
+      store: input.idempotency,
+      actorId: session.actorId,
+      operation: `project.risk.register:${params.projectId}`,
+      requestPayload: body,
+      execute: async () => {
+        const risk = await input.projects.addRisk({
+          actorId: session.actorId,
+          correlationId: correlationId(reply),
+          projectId: params.projectId,
+          ...body,
+        });
+        return {
+          statusCode: 201,
+          body: { ...risk, createdAt: risk.createdAt.toISOString() },
         };
       },
     });

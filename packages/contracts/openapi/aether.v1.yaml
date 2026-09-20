@@ -2185,6 +2185,27 @@ paths:
       responses:
         "201": { description: Hito creado }
         default: { $ref: "#/components/responses/Problem" }
+  /v1/projects/{projectId}/risks:
+    post:
+      tags: [Projects]
+      operationId: registerProjectRisk
+      summary: Registrar un riesgo con probabilidad, impacto, tratamiento y responsable
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RegisterProjectRiskRequest" }
+      responses:
+        "201": { description: Riesgo registrado. }
+        default: { $ref: "#/components/responses/Problem" }
   /v1/projects/{projectId}/next-actions:
     post:
       tags: [Projects]
@@ -4021,6 +4042,18 @@ components:
         organizationId: { type: string, format: uuid }
         title: { type: string, minLength: 1, maxLength: 255 }
         dueOn: { type: [string, "null"], format: date }
+    RegisterProjectRiskRequest:
+      type: object
+      additionalProperties: false
+      required:
+        [organizationId, title, probability, impact, treatment, ownerActorId]
+      properties:
+        organizationId: { type: string, format: uuid }
+        title: { type: string, minLength: 1, maxLength: 2000 }
+        probability: { type: string, enum: [low, medium, high] }
+        impact: { type: string, enum: [low, medium, high] }
+        treatment: { type: string, enum: [avoid, mitigate, transfer, accept] }
+        ownerActorId: { type: string, minLength: 1, maxLength: 255 }
     AddProjectNextActionRequest:
       type: object
       additionalProperties: false

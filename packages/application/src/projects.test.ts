@@ -85,11 +85,15 @@ describe("ProjectService", () => {
         return [];
       },
     };
+    const risks: unknown[] = [];
     const service = new ProjectService({
       projects,
       execution: {
         async addMilestone() {},
         async addNextAction() {},
+        async addRisk(risk) {
+          risks.push(risk);
+        },
         async hasMinimumPlan() {
           return true;
         },
@@ -110,6 +114,26 @@ describe("ProjectService", () => {
       ids: { next: () => "event-1" },
       clock: { now: () => new Date("2026-09-18T12:01:00.000Z") },
     });
+
+    await expect(
+      service.addRisk({
+        actorId: "owner",
+        organizationId: "organization-1",
+        projectId: "project-1",
+        title: "Proveedor externo sin confirmación.",
+        probability: "high",
+        impact: "high",
+        treatment: "mitigate",
+        ownerActorId: "owner",
+        correlationId: "correlation-risk",
+      }),
+    ).resolves.toMatchObject({
+      projectId: "project-1",
+      probability: "high",
+      treatment: "mitigate",
+      ownerActorId: "owner",
+    });
+    expect(risks).toHaveLength(1);
 
     await expect(
       service.transferWorkspace({

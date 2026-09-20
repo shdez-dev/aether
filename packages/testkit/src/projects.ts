@@ -12,6 +12,7 @@ import type {
   ProjectMilestone,
   ProjectNextAction,
   ProjectNextActionDependency,
+  ProjectRisk,
   ProjectClosure,
   ProjectDeliverableAcceptance,
 } from "@aether/domain";
@@ -91,11 +92,15 @@ export class InMemoryProjectExecutionStore implements ProjectExecutionStore {
   readonly milestones: ProjectMilestone[] = [];
   readonly actions: ProjectNextAction[] = [];
   readonly dependencies: ProjectNextActionDependency[] = [];
+  readonly risks: ProjectRisk[] = [];
   async addMilestone(milestone: ProjectMilestone): Promise<void> {
     this.milestones.push(milestone);
   }
   async addNextAction(action: ProjectNextAction): Promise<void> {
     this.actions.push(action);
+  }
+  async addRisk(risk: ProjectRisk): Promise<void> {
+    this.risks.push(risk);
   }
   async hasMinimumPlan(projectId: string): Promise<boolean> {
     return (

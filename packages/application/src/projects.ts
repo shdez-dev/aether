@@ -13,6 +13,9 @@ import {
   type ProjectNextActionDependency,
   type ProjectNextActionEffortUnit,
   type ProjectNextActionPriority,
+  type ProjectRisk,
+  type ProjectRiskLevel,
+  type ProjectRiskTreatment,
   type ProjectClosure,
   type ProjectDeliverableAcceptance,
   type ProjectParticipant,
@@ -73,6 +76,7 @@ export interface ProjectStore {
 export interface ProjectExecutionStore {
   addMilestone(milestone: ProjectMilestone): Promise<void>;
   addNextAction(action: ProjectNextAction): Promise<void>;
+  addRisk(risk: ProjectRisk): Promise<void>;
   hasMinimumPlan(projectId: string): Promise<boolean>;
   findNextAction(actionId: string): Promise<ProjectNextAction | null>;
   listDependencies(
@@ -657,6 +661,58 @@ export class ProjectService {
       },
     );
     return action;
+  }
+  async addRisk(input: {
+    actorId: string;
+    organizationId: string;
+    projectId: string;
+    title: string;
+    probability: ProjectRiskLevel;
+    impact: ProjectRiskLevel;
+    treatment: ProjectRiskTreatment;
+    ownerActorId: string;
+    correlationId: string;
+  }): Promise<ProjectRisk> {
+    const project = await this.requireProject(
+      input.projectId,
+      input.organizationId,
+    );
+    await this.assertExecutionAccess(
+      input.actorId,
+      project,
+      input.correlationId,
+    );
+    await this.assertProjectParticipant(
+      input.ownerActorId,
+      project.organizationId,
+      project.workspaceId,
+    );
+    const risk: ProjectRisk = {
+      id: this.dependencies.ids.next(),
+      projectId: project.id,
+      title: input.title,
+      probability: input.probability,
+      impact: input.impact,
+      treatment: input.treatment,
+      ownerActorId: input.ownerActorId,
+      createdByActorId: input.actorId,
+      createdAt: this.dependencies.clock.now(),
+    };
+    await this.dependencies.execution.addRisk(risk);
+    await this.record(
+      project,
+      input.actorId,
+      input.correlationId,
+      "project.risk_registered.v1",
+      {
+        riskId: risk.id,
+        probability: risk.probability,
+        impact: risk.impact,
+        treatment: risk.treatment,
+        ownerActorId: risk.ownerActorId,
+      },
+    );
+    return risk;
   }
   async declareNextActionDependency(input: {
     actorId: string;

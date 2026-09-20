@@ -271,6 +271,14 @@ export const AddProjectMilestoneRequestSchema = z.object({
   title: NonEmptyTextSchema.max(255),
   dueOn: z.string().date().nullable(),
 });
+export const RegisterProjectRiskRequestSchema = z.object({
+  organizationId: UuidSchema,
+  title: NonEmptyTextSchema.max(2_000),
+  probability: z.enum(["low", "medium", "high"]),
+  impact: z.enum(["low", "medium", "high"]),
+  treatment: z.enum(["avoid", "mitigate", "transfer", "accept"]),
+  ownerActorId: z.string().min(1).max(255),
+});
 export const ProjectNextActionPrioritySchema = z.enum([
   "low",
   "medium",

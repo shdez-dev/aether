@@ -71,6 +71,26 @@ export type ProjectNextActionDependency = Readonly<{
   actionId: string;
   dependsOnActionId: string;
 }>;
+export const ProjectRiskLevels = ["low", "medium", "high"] as const;
+export type ProjectRiskLevel = (typeof ProjectRiskLevels)[number];
+export const ProjectRiskTreatments = [
+  "avoid",
+  "mitigate",
+  "transfer",
+  "accept",
+] as const;
+export type ProjectRiskTreatment = (typeof ProjectRiskTreatments)[number];
+export type ProjectRisk = Readonly<{
+  id: string;
+  projectId: string;
+  title: string;
+  probability: ProjectRiskLevel;
+  impact: ProjectRiskLevel;
+  treatment: ProjectRiskTreatment;
+  ownerActorId: string;
+  createdByActorId: string;
+  createdAt: Date;
+}>;
 
 export function declareNextActionDependency(input: {
   dependency: ProjectNextActionDependency;
