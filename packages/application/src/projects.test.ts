@@ -96,6 +96,7 @@ describe("ProjectService", () => {
         },
         async addOperationalDecision() {},
         async addExternalDependency() {},
+        async addChangeRequest() {},
         async hasMinimumPlan() {
           return true;
         },

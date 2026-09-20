@@ -292,6 +292,12 @@ export const AddProjectExternalDependencyRequestSchema = z.object({
   ownerActorId: z.string().min(1).max(255),
   dueOn: z.string().date().nullable(),
 });
+export const RequestProjectChangeSchema = z.object({
+  organizationId: UuidSchema,
+  title: NonEmptyTextSchema.max(2_000),
+  reason: NonEmptyTextSchema.max(10_000),
+  impact: NonEmptyTextSchema.max(10_000),
+});
 export const ProjectNextActionPrioritySchema = z.enum([
   "low",
   "medium",

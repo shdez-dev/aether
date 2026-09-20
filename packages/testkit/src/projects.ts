@@ -15,6 +15,7 @@ import type {
   ProjectRisk,
   ProjectOperationalDecision,
   ProjectExternalDependency,
+  ProjectChangeRequest,
   ProjectClosure,
   ProjectDeliverableAcceptance,
 } from "@aether/domain";
@@ -97,6 +98,7 @@ export class InMemoryProjectExecutionStore implements ProjectExecutionStore {
   readonly risks: ProjectRisk[] = [];
   readonly operationalDecisions: ProjectOperationalDecision[] = [];
   readonly externalDependencies: ProjectExternalDependency[] = [];
+  readonly changeRequests: ProjectChangeRequest[] = [];
   async addMilestone(milestone: ProjectMilestone): Promise<void> {
     this.milestones.push(milestone);
   }
@@ -115,6 +117,9 @@ export class InMemoryProjectExecutionStore implements ProjectExecutionStore {
     dependency: ProjectExternalDependency,
   ): Promise<void> {
     this.externalDependencies.push(dependency);
+  }
+  async addChangeRequest(request: ProjectChangeRequest): Promise<void> {
+    this.changeRequests.push(request);
   }
   async hasMinimumPlan(projectId: string): Promise<boolean> {
     return (

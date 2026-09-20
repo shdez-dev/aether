@@ -18,6 +18,7 @@ import {
   type ProjectRiskTreatment,
   type ProjectOperationalDecision,
   type ProjectExternalDependency,
+  type ProjectChangeRequest,
   type ProjectClosure,
   type ProjectDeliverableAcceptance,
   type ProjectParticipant,
@@ -81,6 +82,7 @@ export interface ProjectExecutionStore {
   addRisk(risk: ProjectRisk): Promise<void>;
   addOperationalDecision(decision: ProjectOperationalDecision): Promise<void>;
   addExternalDependency(dependency: ProjectExternalDependency): Promise<void>;
+  addChangeRequest(request: ProjectChangeRequest): Promise<void>;
   hasMinimumPlan(projectId: string): Promise<boolean>;
   findNextAction(actionId: string): Promise<ProjectNextAction | null>;
   listDependencies(
@@ -799,6 +801,44 @@ export class ProjectService {
       { dependencyId: dependency.id, ownerActorId: dependency.ownerActorId },
     );
     return dependency;
+  }
+  async requestChange(input: {
+    actorId: string;
+    organizationId: string;
+    projectId: string;
+    title: string;
+    reason: string;
+    impact: string;
+    correlationId: string;
+  }): Promise<ProjectChangeRequest> {
+    const project = await this.requireProject(
+      input.projectId,
+      input.organizationId,
+    );
+    await this.assertExecutionAccess(
+      input.actorId,
+      project,
+      input.correlationId,
+    );
+    const request: ProjectChangeRequest = {
+      id: this.dependencies.ids.next(),
+      projectId: project.id,
+      title: input.title,
+      reason: input.reason,
+      impact: input.impact,
+      requestedByActorId: input.actorId,
+      requestedAt: this.dependencies.clock.now(),
+      status: "pending",
+    };
+    await this.dependencies.execution.addChangeRequest(request);
+    await this.record(
+      project,
+      input.actorId,
+      input.correlationId,
+      "project.change_requested.v1",
+      { changeRequestId: request.id, impact: request.impact },
+    );
+    return request;
   }
   async declareNextActionDependency(input: {
     actorId: string;

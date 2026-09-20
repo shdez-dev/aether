@@ -118,6 +118,16 @@ export type ProjectExternalDependency = Readonly<{
   createdByActorId: string;
   createdAt: Date;
 }>;
+export type ProjectChangeRequest = Readonly<{
+  id: string;
+  projectId: string;
+  title: string;
+  reason: string;
+  impact: string;
+  requestedByActorId: string;
+  requestedAt: Date;
+  status: "pending" | "approved" | "rejected";
+}>;
 
 export function declareNextActionDependency(input: {
   dependency: ProjectNextActionDependency;

@@ -96,6 +96,7 @@ import type {
   ProjectRisk,
   ProjectOperationalDecision,
   ProjectExternalDependency,
+  ProjectChangeRequest,
   OrganizationRole,
   WorkspaceRole,
   DocumentVersion,
@@ -3700,6 +3701,22 @@ export class PostgresProjectExecutionStore implements ProjectExecutionStore {
         dependency.status,
         dependency.createdByActorId,
         dependency.createdAt,
+      ],
+    );
+  }
+  async addChangeRequest(request: ProjectChangeRequest): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO project_change_requests (id, project_id, title, reason, impact, requested_by_actor_id, requested_at, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [
+        request.id,
+        request.projectId,
+        request.title,
+        request.reason,
+        request.impact,
+        request.requestedByActorId,
+        request.requestedAt,
+        request.status,
       ],
     );
   }

@@ -91,6 +91,7 @@ import {
   RegisterProjectRiskRequestSchema,
   RecordProjectOperationalDecisionRequestSchema,
   AddProjectExternalDependencyRequestSchema,
+  RequestProjectChangeSchema,
   AddProjectNextActionRequestSchema,
   DeclareProjectNextActionDependencyRequestSchema,
   ChangeProjectStatusRequestSchema,
@@ -2765,6 +2766,41 @@ export async function buildServer(input: {
               ...dependency,
               createdAt: dependency.createdAt.toISOString(),
             },
+          };
+        },
+      });
+    },
+  );
+  app.post(
+    "/v1/projects/:projectId/change-requests",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      const { projectId } = z
+        .object({ projectId: z.string().uuid() })
+        .parse(request.params);
+      const body = RequestProjectChangeSchema.parse(request.body);
+      return respondIdempotently({
+        request,
+        reply,
+        store: input.idempotency,
+        actorId: session.actorId,
+        operation: `project.change.request:${projectId}`,
+        requestPayload: body,
+        execute: async () => {
+          const change = await input.projects.requestChange({
+            actorId: session.actorId,
+            correlationId: correlationId(reply),
+            projectId,
+            ...body,
+          });
+          return {
+            statusCode: 201,
+            body: { ...change, requestedAt: change.requestedAt.toISOString() },
           };
         },
       });
