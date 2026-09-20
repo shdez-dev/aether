@@ -17,6 +17,7 @@ import {
   type ProjectRiskLevel,
   type ProjectRiskTreatment,
   type ProjectOperationalDecision,
+  type ProjectExternalDependency,
   type ProjectClosure,
   type ProjectDeliverableAcceptance,
   type ProjectParticipant,
@@ -79,6 +80,7 @@ export interface ProjectExecutionStore {
   addNextAction(action: ProjectNextAction): Promise<void>;
   addRisk(risk: ProjectRisk): Promise<void>;
   addOperationalDecision(decision: ProjectOperationalDecision): Promise<void>;
+  addExternalDependency(dependency: ProjectExternalDependency): Promise<void>;
   hasMinimumPlan(projectId: string): Promise<boolean>;
   findNextAction(actionId: string): Promise<ProjectNextAction | null>;
   listDependencies(
@@ -752,6 +754,51 @@ export class ProjectService {
       { operationalDecisionId: decision.id, subject: decision.subject },
     );
     return decision;
+  }
+  async addExternalDependency(input: {
+    actorId: string;
+    organizationId: string;
+    projectId: string;
+    description: string;
+    externalParty: string;
+    ownerActorId: string;
+    dueOn: string | null;
+    correlationId: string;
+  }): Promise<ProjectExternalDependency> {
+    const project = await this.requireProject(
+      input.projectId,
+      input.organizationId,
+    );
+    await this.assertExecutionAccess(
+      input.actorId,
+      project,
+      input.correlationId,
+    );
+    await this.assertProjectParticipant(
+      input.ownerActorId,
+      project.organizationId,
+      project.workspaceId,
+    );
+    const dependency: ProjectExternalDependency = {
+      id: this.dependencies.ids.next(),
+      projectId: project.id,
+      description: input.description,
+      externalParty: input.externalParty,
+      ownerActorId: input.ownerActorId,
+      dueOn: input.dueOn,
+      status: "open",
+      createdByActorId: input.actorId,
+      createdAt: this.dependencies.clock.now(),
+    };
+    await this.dependencies.execution.addExternalDependency(dependency);
+    await this.record(
+      project,
+      input.actorId,
+      input.correlationId,
+      "project.external_dependency_registered.v1",
+      { dependencyId: dependency.id, ownerActorId: dependency.ownerActorId },
+    );
+    return dependency;
   }
   async declareNextActionDependency(input: {
     actorId: string;

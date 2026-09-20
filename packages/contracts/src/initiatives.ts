@@ -285,6 +285,13 @@ export const RecordProjectOperationalDecisionRequestSchema = z.object({
   decision: NonEmptyTextSchema.max(10_000),
   rationale: NonEmptyTextSchema.max(10_000),
 });
+export const AddProjectExternalDependencyRequestSchema = z.object({
+  organizationId: UuidSchema,
+  description: NonEmptyTextSchema.max(2_000),
+  externalParty: NonEmptyTextSchema.max(255),
+  ownerActorId: z.string().min(1).max(255),
+  dueOn: z.string().date().nullable(),
+});
 export const ProjectNextActionPrioritySchema = z.enum([
   "low",
   "medium",

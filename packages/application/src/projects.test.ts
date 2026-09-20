@@ -95,6 +95,7 @@ describe("ProjectService", () => {
           risks.push(risk);
         },
         async addOperationalDecision() {},
+        async addExternalDependency() {},
         async hasMinimumPlan() {
           return true;
         },

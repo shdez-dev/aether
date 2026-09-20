@@ -2230,6 +2230,26 @@ paths:
       responses:
         "201": { description: Decisión operativa registrada. }
         default: { $ref: "#/components/responses/Problem" }
+  /v1/projects/{projectId}/external-dependencies:
+    post:
+      tags: [Projects]
+      operationId: addProjectExternalDependency
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AddProjectExternalDependencyRequest" }
+      responses:
+        "201": { description: Dependencia externa registrada. }
+        default: { $ref: "#/components/responses/Problem" }
   /v1/projects/{projectId}/next-actions:
     post:
       tags: [Projects]
@@ -4087,6 +4107,15 @@ components:
         subject: { type: string, minLength: 1, maxLength: 2000 }
         decision: { type: string, minLength: 1, maxLength: 10000 }
         rationale: { type: string, minLength: 1, maxLength: 10000 }
+    AddProjectExternalDependencyRequest:
+      type: object
+      required: [organizationId, description, externalParty, ownerActorId, dueOn]
+      properties:
+        organizationId: { type: string, format: uuid }
+        description: { type: string }
+        externalParty: { type: string }
+        ownerActorId: { type: string }
+        dueOn: { type: [string, "null"], format: date }
     AddProjectNextActionRequest:
       type: object
       additionalProperties: false

@@ -95,6 +95,7 @@ import type {
   ProjectNextActionDependency,
   ProjectRisk,
   ProjectOperationalDecision,
+  ProjectExternalDependency,
   OrganizationRole,
   WorkspaceRole,
   DocumentVersion,
@@ -3680,6 +3681,25 @@ export class PostgresProjectExecutionStore implements ProjectExecutionStore {
         decision.rationale,
         decision.decidedByActorId,
         decision.decidedAt,
+      ],
+    );
+  }
+  async addExternalDependency(
+    dependency: ProjectExternalDependency,
+  ): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO project_external_dependencies (id, project_id, description, external_party, owner_actor_id, due_on, status, created_by_actor_id, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [
+        dependency.id,
+        dependency.projectId,
+        dependency.description,
+        dependency.externalParty,
+        dependency.ownerActorId,
+        dependency.dueOn,
+        dependency.status,
+        dependency.createdByActorId,
+        dependency.createdAt,
       ],
     );
   }

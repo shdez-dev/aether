@@ -100,6 +100,24 @@ export type ProjectOperationalDecision = Readonly<{
   decidedByActorId: string;
   decidedAt: Date;
 }>;
+export const ProjectExternalDependencyStatuses = [
+  "open",
+  "resolved",
+  "accepted",
+] as const;
+export type ProjectExternalDependencyStatus =
+  (typeof ProjectExternalDependencyStatuses)[number];
+export type ProjectExternalDependency = Readonly<{
+  id: string;
+  projectId: string;
+  description: string;
+  externalParty: string;
+  ownerActorId: string;
+  dueOn: string | null;
+  status: ProjectExternalDependencyStatus;
+  createdByActorId: string;
+  createdAt: Date;
+}>;
 
 export function declareNextActionDependency(input: {
   dependency: ProjectNextActionDependency;

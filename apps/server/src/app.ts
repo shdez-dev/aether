@@ -90,6 +90,7 @@ import {
   AddProjectMilestoneRequestSchema,
   RegisterProjectRiskRequestSchema,
   RecordProjectOperationalDecisionRequestSchema,
+  AddProjectExternalDependencyRequestSchema,
   AddProjectNextActionRequestSchema,
   DeclareProjectNextActionDependencyRequestSchema,
   ChangeProjectStatusRequestSchema,
@@ -2724,6 +2725,46 @@ export async function buildServer(input: {
           return {
             statusCode: 201,
             body: { ...decision, decidedAt: decision.decidedAt.toISOString() },
+          };
+        },
+      });
+    },
+  );
+  app.post(
+    "/v1/projects/:projectId/external-dependencies",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      const { projectId } = z
+        .object({ projectId: z.string().uuid() })
+        .parse(request.params);
+      const body = AddProjectExternalDependencyRequestSchema.parse(
+        request.body,
+      );
+      return respondIdempotently({
+        request,
+        reply,
+        store: input.idempotency,
+        actorId: session.actorId,
+        operation: `project.external_dependency.add:${projectId}`,
+        requestPayload: body,
+        execute: async () => {
+          const dependency = await input.projects.addExternalDependency({
+            actorId: session.actorId,
+            correlationId: correlationId(reply),
+            projectId,
+            ...body,
+          });
+          return {
+            statusCode: 201,
+            body: {
+              ...dependency,
+              createdAt: dependency.createdAt.toISOString(),
+            },
           };
         },
       });
