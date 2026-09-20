@@ -240,6 +240,8 @@ export class ProjectService {
     status: ProjectStatus;
     correlationId: string;
   }): Promise<Project> {
+    if (input.status === "cancelled")
+      throw new ProjectDomainError("PROJECT_CANCELLATION_REASON_REQUIRED");
     const project = await this.requireProject(
       input.projectId,
       input.organizationId,
@@ -285,6 +287,42 @@ export class ProjectService {
       input.correlationId,
       "project.status_changed.v1",
       { fromStatus: project.status, toStatus: updated.status },
+    );
+    return updated;
+  }
+  async cancel(input: {
+    actorId: string;
+    organizationId: string;
+    projectId: string;
+    expectedVersion: number;
+    reason: string;
+    correlationId: string;
+  }): Promise<Project> {
+    await this.assertOwner(input.actorId, input.organizationId);
+    const project = await this.requireProject(
+      input.projectId,
+      input.organizationId,
+    );
+    if (project.version !== input.expectedVersion)
+      throw new ProjectVersionConflictError();
+    if (!input.reason.trim())
+      throw new ProjectDomainError("PROJECT_CANCELLATION_REASON_REQUIRED");
+    const updated = transitionProject(
+      project,
+      "cancelled",
+      this.dependencies.clock.now(),
+    );
+    const saved = await this.dependencies.projects.save({
+      project: updated,
+      expectedVersion: project.version,
+    });
+    if (!saved) throw new ProjectVersionConflictError();
+    await this.record(
+      updated,
+      input.actorId,
+      input.correlationId,
+      "project.cancelled.v1",
+      { reason: input.reason.trim(), fromStatus: project.status },
     );
     return updated;
   }

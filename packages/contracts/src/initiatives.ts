@@ -249,6 +249,11 @@ export const TransferProjectWorkspaceRequestSchema = z.object({
   workspaceId: UuidSchema,
   reason: NonEmptyTextSchema.max(1_000),
 });
+export const CancelProjectRequestSchema = z.object({
+  organizationId: UuidSchema,
+  expectedVersion: z.number().int().nonnegative(),
+  reason: NonEmptyTextSchema.max(2_000),
+});
 export const AddProjectMilestoneRequestSchema = z.object({
   organizationId: UuidSchema,
   title: NonEmptyTextSchema.max(255),
