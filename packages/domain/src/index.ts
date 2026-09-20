@@ -7,6 +7,7 @@ export * from "./intake.js";
 export * from "./evaluation.js";
 export * from "./triage.js";
 export * from "./project.js";
+export * from "./capacity.js";
 export * from "./document.js";
 export * from "./evidence.js";
 export * from "./business-hours.js";
