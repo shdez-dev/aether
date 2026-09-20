@@ -2725,7 +2725,7 @@ export class PostgresInitiativeStore implements InitiativeStore {
   }): Promise<readonly Initiative[]> {
     const result = await this.pool.query<InitiativeRow>(
       `SELECT id, organization_id, workspace_id, created_by_actor_id, title, problem_statement, expected_outcome, classification, requested_priority, operational_priority, status, version, created_at, updated_at
-       FROM initiatives WHERE organization_id = $1 AND workspace_id = $2 ORDER BY updated_at DESC`,
+       FROM initiatives WHERE organization_id = $1 AND workspace_id = $2 ORDER BY updated_at DESC, id DESC`,
       [input.organizationId, input.workspaceId],
     );
     return result.rows.map(toInitiative);
@@ -3042,7 +3042,7 @@ export class PostgresEvaluationStandardStore implements EvaluationStandardStore 
     organizationId: string;
   }): Promise<readonly EvaluationStandard[]> {
     const result = await this.pool.query<EvaluationStandardRow>(
-      `SELECT id, organization_id, name, version, criteria, is_active, published_at, published_by_actor_id FROM evaluation_standards WHERE organization_id = $1 ORDER BY is_active DESC, name, version DESC`,
+      `SELECT id, organization_id, name, version, criteria, is_active, published_at, published_by_actor_id FROM evaluation_standards WHERE organization_id = $1 ORDER BY is_active DESC, name, version DESC, id ASC`,
       [input.organizationId],
     );
     return result.rows.map(toEvaluationStandard);
@@ -3119,7 +3119,7 @@ export class PostgresTriageStandardStore implements TriageStandardStore {
     const result = await this.pool.query<TriageStandardRow>(
       `SELECT id, organization_id, name, version, criteria, is_active, published_at, published_by_actor_id
        FROM triage_standards WHERE organization_id = $1
-       ORDER BY is_active DESC, name, version DESC`,
+       ORDER BY is_active DESC, name, version DESC, id ASC`,
       [input.organizationId],
     );
     return result.rows.map(toTriageStandard);
@@ -3508,7 +3508,7 @@ export class PostgresProjectStore implements ProjectStore {
     workspaceId: string;
   }): Promise<readonly Project[]> {
     const result = await this.pool.query<ProjectRow>(
-      `SELECT id, organization_id, workspace_id, source_initiative_id, source_decision_id, name, sponsor_actor_id, lead_actor_id, participants, status, version, created_at, updated_at FROM projects WHERE organization_id = $1 AND workspace_id = $2 ORDER BY updated_at DESC`,
+      `SELECT id, organization_id, workspace_id, source_initiative_id, source_decision_id, name, sponsor_actor_id, lead_actor_id, participants, status, version, created_at, updated_at FROM projects WHERE organization_id = $1 AND workspace_id = $2 ORDER BY updated_at DESC, id DESC`,
       [input.organizationId, input.workspaceId],
     );
     return result.rows.map(toProject);
@@ -4058,7 +4058,7 @@ export class PostgresCommentStore implements CommentStore {
     resourceId: string;
   }): Promise<readonly Comment[]> {
     const r = await this.pool.query<CommentRow>(
-      `SELECT * FROM comments WHERE organization_id=$1 AND resource_type=$2 AND resource_id=$3 AND deleted_at IS NULL ORDER BY created_at ASC`,
+      `SELECT * FROM comments WHERE organization_id=$1 AND resource_type=$2 AND resource_id=$3 AND deleted_at IS NULL ORDER BY created_at ASC, id ASC`,
       [i.organizationId, i.resourceType, i.resourceId],
     );
     return r.rows.map(toComment);
