@@ -371,17 +371,28 @@ export class InMemoryIntakeAssignmentStore implements IntakeAssignmentStore {
         title: initiative.title,
         updatedAt: initiative.updatedAt,
       }))
-      .sort((left, right) =>
-        left.updatedAt.getTime() - right.updatedAt.getTime(),
+      .sort(
+        (left, right) => left.updatedAt.getTime() - right.updatedAt.getTime(),
       );
   }
 }
 
-export class InMemoryInitiativeRelationshipStore
-  implements InitiativeRelationshipStore
-{
+export class InMemoryInitiativeRelationshipStore implements InitiativeRelationshipStore {
+  constructor(
+    private readonly initiatives: InMemoryInitiativeStore,
+    private readonly audit: InMemoryInitiativeAuditStore,
+  ) {}
   readonly relationships = new Map<string, InitiativeRelationship>();
-  async create(relationship: InitiativeRelationship): Promise<void> {
+  async createWithAudit(input: {
+    relationship: InitiativeRelationship;
+    expectedSourceVersion: number;
+    auditEvent: InitiativeAuditEvent;
+  }): Promise<boolean> {
+    const relationship = input.relationship;
+    const source = this.initiatives.initiatives.get(
+      relationship.sourceInitiativeId,
+    );
+    if (!source || source.version !== input.expectedSourceVersion) return false;
     if (
       [...this.relationships.values()].some(
         (existing) =>
@@ -391,6 +402,13 @@ export class InMemoryInitiativeRelationshipStore
     )
       throw new Error("Initiative relationship already exists");
     this.relationships.set(relationship.id, relationship);
+    this.initiatives.initiatives.set(relationship.sourceInitiativeId, {
+      ...source,
+      version: source.version + 1,
+      updatedAt: relationship.declaredAt,
+    });
+    await this.audit.record(input.auditEvent);
+    return true;
   }
   async list(input: {
     organizationId: string;

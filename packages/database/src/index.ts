@@ -2874,23 +2874,56 @@ async function insertInitiativeAuditEvent(
 
 export class PostgresInitiativeRelationshipStore implements InitiativeRelationshipStore {
   constructor(private readonly pool: Pool) {}
-  async create(relationship: InitiativeRelationship): Promise<void> {
-    await this.pool.query(
-      `INSERT INTO initiative_relationships
+  async createWithAudit(input: {
+    relationship: InitiativeRelationship;
+    expectedSourceVersion: number;
+    auditEvent: InitiativeAuditEvent;
+  }): Promise<boolean> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const source = await client.query(
+        `UPDATE initiatives
+         SET version = version + 1, updated_at = $1
+         WHERE id = $2 AND organization_id = $3 AND workspace_id = $4
+           AND version = $5 AND status IN ('draft', 'returned')`,
+        [
+          input.relationship.declaredAt,
+          input.relationship.sourceInitiativeId,
+          input.relationship.organizationId,
+          input.relationship.workspaceId,
+          input.expectedSourceVersion,
+        ],
+      );
+      if (source.rowCount !== 1) {
+        await client.query("ROLLBACK");
+        return false;
+      }
+      await client.query(
+        `INSERT INTO initiative_relationships
        (id, organization_id, workspace_id, source_initiative_id,
         target_initiative_id, kind, declared_by_actor_id, declared_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-      [
-        relationship.id,
-        relationship.organizationId,
-        relationship.workspaceId,
-        relationship.sourceInitiativeId,
-        relationship.targetInitiativeId,
-        relationship.kind,
-        relationship.declaredByActorId,
-        relationship.declaredAt,
-      ],
-    );
+        [
+          input.relationship.id,
+          input.relationship.organizationId,
+          input.relationship.workspaceId,
+          input.relationship.sourceInitiativeId,
+          input.relationship.targetInitiativeId,
+          input.relationship.kind,
+          input.relationship.declaredByActorId,
+          input.relationship.declaredAt,
+        ],
+      );
+      await insertInitiativeAuditEvent(client, input.auditEvent);
+      await client.query("COMMIT");
+      return true;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
   async list(input: {
     organizationId: string;

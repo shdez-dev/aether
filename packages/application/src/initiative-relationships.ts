@@ -4,7 +4,11 @@ import {
   type InitiativeRelationshipKind,
 } from "@aether/domain";
 
-import type { InitiativeAuditStore, InitiativeStore } from "./initiatives.js";
+import type {
+  InitiativeAuditEvent,
+  InitiativeAuditStore,
+  InitiativeStore,
+} from "./initiatives.js";
 import { InitiativeVersionConflictError } from "./initiatives.js";
 import {
   AccessDeniedError,
@@ -14,7 +18,11 @@ import {
 } from "./tenancy.js";
 
 export interface InitiativeRelationshipStore {
-  create(relationship: InitiativeRelationship): Promise<void>;
+  createWithAudit(input: {
+    relationship: InitiativeRelationship;
+    expectedSourceVersion: number;
+    auditEvent: InitiativeAuditEvent;
+  }): Promise<boolean>;
   list(input: {
     organizationId: string;
     initiativeId: string;
@@ -78,8 +86,7 @@ export class InitiativeRelationshipService {
       declaredByActorId: input.actorId,
       declaredAt: this.dependencies.clock.now(),
     });
-    await this.dependencies.relationships.create(relationship);
-    await this.dependencies.audit.record({
+    const auditEvent: InitiativeAuditEvent = {
       id: this.dependencies.ids.next(),
       eventType: "initiative.relationship_declared.v1",
       organizationId: source.organizationId,
@@ -95,7 +102,13 @@ export class InitiativeRelationshipService {
         targetInitiativeId: target.id,
         kind: relationship.kind,
       },
+    };
+    const stored = await this.dependencies.relationships.createWithAudit({
+      relationship,
+      expectedSourceVersion: input.expectedVersion,
+      auditEvent,
     });
+    if (!stored) throw new InitiativeVersionConflictError();
     return relationship;
   }
 

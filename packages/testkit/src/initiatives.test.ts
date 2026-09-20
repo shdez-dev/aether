@@ -86,7 +86,10 @@ describe("initiative vertical slice", () => {
       requestedPriority: "low",
     });
     const relationships = new InitiativeRelationshipService({
-      relationships: new InMemoryInitiativeRelationshipStore(),
+      relationships: new InMemoryInitiativeRelationshipStore(
+        initiativesStore,
+        audit,
+      ),
       initiatives: initiativesStore,
       audit,
       tenancy: tenantStore,
@@ -112,7 +115,8 @@ describe("initiative vertical slice", () => {
       organizationId: organization.id,
       initiativeId: initiative.id,
       correlationId: ids.next(),
-      expectedVersion: initiative.version,
+      expectedVersion: (await initiativesStore.findById(initiative.id))!
+        .version,
     });
     const intake = new IntakeService({
       assignments: new InMemoryIntakeAssignmentStore(initiativesStore, audit),

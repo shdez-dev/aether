@@ -11,6 +11,7 @@ import {
   IntakeService,
   TriageService,
   InitiativeVersionConflictError,
+  InitiativeRelationshipService,
   InitiativeService,
   NotificationService,
   OutboxWorker,
@@ -32,6 +33,7 @@ import {
   PostgresTriageStandardStore,
   PostgresTriageStore,
   PostgresInitiativeAuditStore,
+  PostgresInitiativeRelationshipStore,
   PostgresDiagnosticStore,
   PostgresInitiativeStore,
   PostgresIntakeAssignmentStore,
@@ -1784,16 +1786,64 @@ describe.sequential("PostgreSQL integration", () => {
           ],
         ),
       ).rejects.toThrow("invalid diagnostic entry");
-      expect(await initiativesStore.findById(draft.id)).toMatchObject({
+      const relatedInitiative = await initiativeService.create({
+        actorId: owner,
+        organizationId: organization.id,
+        workspaceId: workspace.id,
+        correlationId: randomUUID(),
+        title: "Iniciativa relacionada",
+        problemStatement: "Otra necesidad del mismo contexto.",
+        expectedOutcome: "Conservar la trazabilidad.",
+        classification: "internal",
+        requestedPriority: "low",
+      });
+      const relationships = new InitiativeRelationshipService({
+        relationships: new PostgresInitiativeRelationshipStore(pool),
+        initiatives: initiativesStore,
+        audit: initiativeAudit,
+        tenancy: tenantStore,
+        ids,
+        clock,
+      });
+      await relationships.declare({
+        actorId: owner,
+        organizationId: organization.id,
+        initiativeId: draft.id,
+        expectedVersion: draft.version,
+        targetInitiativeId: relatedInitiative.id,
+        kind: "related",
+        correlationId: randomUUID(),
+      });
+      await expect(
+        relationships.declare({
+          actorId: owner,
+          organizationId: organization.id,
+          initiativeId: draft.id,
+          expectedVersion: draft.version + 1,
+          targetInitiativeId: relatedInitiative.id,
+          kind: "related",
+          correlationId: randomUUID(),
+        }),
+      ).rejects.toThrow();
+      const afterRelationship = await initiativesStore.findById(draft.id);
+      expect(afterRelationship).toMatchObject({
         requestedPriority: "medium",
         operationalPriority: null,
+        version: draft.version + 1,
       });
+      await expect(
+        pool.query<{ count: string }>(
+          `SELECT COUNT(*)::text AS count FROM initiative_audit_events
+           WHERE initiative_id = $1 AND event_type = 'initiative.relationship_declared.v1'`,
+          [draft.id],
+        ),
+      ).resolves.toMatchObject({ rows: [{ count: "1" }] });
       const reprioritized = await initiativeService.setOperationalPriority({
         actorId: owner,
         organizationId: organization.id,
         initiativeId: draft.id,
         correlationId: randomUUID(),
-        expectedVersion: draft.version,
+        expectedVersion: afterRelationship!.version,
         operationalPriority: "high",
       });
       expect(await initiativesStore.findById(draft.id)).toMatchObject({
