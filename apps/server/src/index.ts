@@ -159,7 +159,11 @@ const relationships = new InitiativeRelationshipService({
   clock: { now: () => new Date() },
 });
 const diagnostics = new DiagnosticService({
-  store: new PostgresDiagnosticStore(pool), initiatives: new PostgresInitiativeStore(pool), tenancy: new PostgresTenantStore(pool), ids: { next: randomUUID }, clock: { now: () => new Date() },
+  store: new PostgresDiagnosticStore(pool),
+  initiatives: new PostgresInitiativeStore(pool),
+  tenancy: new PostgresTenantStore(pool),
+  ids: { next: randomUUID },
+  clock: { now: () => new Date() },
 });
 const documentStore = new PostgresDocumentStore(pool);
 const projects = new ProjectService({

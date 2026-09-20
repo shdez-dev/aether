@@ -3034,24 +3034,70 @@ export async function buildServer(input: {
       ).map(toInitiativeRelationshipResponse);
     },
   );
-  app.get("/v1/initiatives/:initiativeId/diagnostic", async (request, reply) => {
-    const session = await requireSession(request, reply, input.auth, input.config);
-    if (!input.diagnostics) throw new Error("Diagnostic service is not configured");
-    const params = z.object({ initiativeId: z.string().uuid() }).parse(request.params);
-    const query = z.object({ organizationId: z.string().uuid() }).parse(request.query);
-    const diagnostic = await input.diagnostics.get({ actorId: session.actorId, ...params, ...query });
-    return diagnostic ? { ...diagnostic, savedAt: diagnostic.savedAt.toISOString() } : null;
-  });
-  app.put("/v1/initiatives/:initiativeId/diagnostic", async (request, reply) => {
-    const session = await requireSession(request, reply, input.auth, input.config);
-    if (!input.diagnostics) throw new Error("Diagnostic service is not configured");
-    const params = z.object({ initiativeId: z.string().uuid() }).parse(request.params);
-    const body = SaveInitiativeDiagnosticRequestSchema.parse(request.body);
-    return respondIdempotently({ request, reply, store: input.idempotency, actorId: session.actorId, operation: `initiative.diagnostic:${params.initiativeId}`, requestPayload: { params, body }, execute: async () => {
-      const diagnostic = await input.diagnostics!.save({ actorId: session.actorId, correlationId: correlationId(reply), ...params, ...body });
-      return { statusCode: 200, body: { ...diagnostic, savedAt: diagnostic.savedAt.toISOString() } };
-    }});
-  });
+  app.get(
+    "/v1/initiatives/:initiativeId/diagnostic",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      if (!input.diagnostics)
+        throw new Error("Diagnostic service is not configured");
+      const params = z
+        .object({ initiativeId: z.string().uuid() })
+        .parse(request.params);
+      const query = z
+        .object({ organizationId: z.string().uuid() })
+        .parse(request.query);
+      const diagnostic = await input.diagnostics.get({
+        actorId: session.actorId,
+        ...params,
+        ...query,
+      });
+      return diagnostic
+        ? { ...diagnostic, savedAt: diagnostic.savedAt.toISOString() }
+        : null;
+    },
+  );
+  app.put(
+    "/v1/initiatives/:initiativeId/diagnostic",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      if (!input.diagnostics)
+        throw new Error("Diagnostic service is not configured");
+      const params = z
+        .object({ initiativeId: z.string().uuid() })
+        .parse(request.params);
+      const body = SaveInitiativeDiagnosticRequestSchema.parse(request.body);
+      return respondIdempotently({
+        request,
+        reply,
+        store: input.idempotency,
+        actorId: session.actorId,
+        operation: `initiative.diagnostic:${params.initiativeId}`,
+        requestPayload: { params, body },
+        execute: async () => {
+          const diagnostic = await input.diagnostics!.save({
+            actorId: session.actorId,
+            correlationId: correlationId(reply),
+            ...params,
+            ...body,
+          });
+          return {
+            statusCode: 200,
+            body: { ...diagnostic, savedAt: diagnostic.savedAt.toISOString() },
+          };
+        },
+      });
+    },
+  );
   app.post(
     "/v1/initiatives/:initiativeId/relationships",
     async (request, reply) => {
