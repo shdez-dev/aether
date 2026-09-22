@@ -172,3 +172,104 @@ it("reviews date impact before sending the versioned confirmation", async () => 
     ),
   );
 });
+
+it("claims an unassigned team task before starting it with an explicit block", async () => {
+  let task = {
+    id: "team-task",
+    description: "Preparar entrega",
+    workflowStatus: "to_do",
+    position: 1,
+    ownerActorId: null as string | null,
+    executorTeamId: "team-id",
+    reviewerActorId: null,
+    blockedReason: null as string | null,
+    unblockResponsibleActorId: null as string | null,
+    dueOn: null,
+    priority: "high",
+    version: 2,
+  };
+  const request = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith("/claim") && init?.method === "POST") {
+      task = { ...task, ownerActorId: "actor", version: 3 };
+      return new Response(JSON.stringify(task));
+    }
+    if (url.endsWith("/workflow") && init?.method === "POST") {
+      task = {
+        ...task,
+        workflowStatus: "in_progress",
+        blockedReason: "Esperar insumo",
+        unblockResponsibleActorId: "lead",
+        version: 4,
+      };
+      return new Response(JSON.stringify(task));
+    }
+    return new Response(
+      JSON.stringify(
+        url.includes("/calendar?") ? { dated: [], undated: [task] } : [task],
+      ),
+    );
+  });
+  render(
+    createElement(ProjectTasks, {
+      projectId: "project",
+      organizationId: "organization",
+      refreshKey: 0,
+      request,
+    }),
+  );
+
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Gestionar tarea" }),
+  );
+  const editor = screen.getByRole("region", { name: "Gestionar tarea" });
+  expect(
+    within(editor)
+      .getByRole("option", { name: "En curso" })
+      .getAttribute("disabled"),
+  ).not.toBeNull();
+  fireEvent.click(
+    within(editor).getByRole("button", { name: "Tomar tarea del equipo" }),
+  );
+  await waitFor(() =>
+    expect(request).toHaveBeenCalledWith(
+      "projects/project/next-actions/team-task/claim",
+      expect.objectContaining({
+        body: JSON.stringify({
+          organizationId: "organization",
+          expectedVersion: 2,
+        }),
+      }),
+    ),
+  );
+  await waitFor(() => expect(screen.getByText(/actor/)).toBeTruthy());
+
+  fireEvent.click(screen.getByRole("button", { name: "Gestionar tarea" }));
+  const nextEditor = screen.getByRole("region", { name: "Gestionar tarea" });
+  fireEvent.change(within(nextEditor).getByLabelText("Estado"), {
+    target: { value: "in_progress" },
+  });
+  fireEvent.change(within(nextEditor).getByLabelText(/Motivo de bloqueo/), {
+    target: { value: "Esperar insumo" },
+  });
+  fireEvent.change(
+    within(nextEditor).getByLabelText(/Responsable de desbloqueo/),
+    { target: { value: "lead" } },
+  );
+  fireEvent.click(
+    within(nextEditor).getByRole("button", { name: "Guardar flujo" }),
+  );
+  await waitFor(() =>
+    expect(request).toHaveBeenCalledWith(
+      "projects/project/next-actions/team-task/workflow",
+      expect.objectContaining({
+        body: JSON.stringify({
+          organizationId: "organization",
+          expectedVersion: 3,
+          status: "in_progress",
+          blockedReason: "Esperar insumo",
+          unblockResponsibleActorId: "lead",
+        }),
+      }),
+    ),
+  );
+});

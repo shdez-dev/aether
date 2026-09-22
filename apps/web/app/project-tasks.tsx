@@ -38,6 +38,13 @@ const statuses: { value: WorkflowStatus; label: string }[] = [
   { value: "done", label: "Hecho" },
   { value: "cancelled", label: "Cancelado" },
 ];
+const workflowTransitions: Record<WorkflowStatus, WorkflowStatus[]> = {
+  to_do: ["in_progress", "cancelled"],
+  in_progress: ["in_review", "cancelled"],
+  in_review: ["in_progress", "done", "cancelled"],
+  done: [],
+  cancelled: [],
+};
 
 function currentMonth() {
   const today = new Date();
@@ -47,10 +54,12 @@ function currentMonth() {
 function TaskCard({
   task,
   onEditDate,
+  onManage,
   readOnly,
 }: {
   task: Task;
   onEditDate: (task: Task) => void;
+  onManage: (task: Task) => void;
   readOnly: boolean;
 }) {
   return (
@@ -88,6 +97,17 @@ function TaskCard({
           Cambiar fecha
         </button>
       ) : null}
+      {!readOnly &&
+      task.workflowStatus !== "done" &&
+      task.workflowStatus !== "cancelled" ? (
+        <button
+          className="task-link-button"
+          type="button"
+          onClick={() => onManage(task)}
+        >
+          Gestionar tarea
+        </button>
+      ) : null}
     </li>
   );
 }
@@ -122,14 +142,120 @@ export function ProjectTasks({
   const [dateImpact, setDateImpact] = useState<DateImpact | null>(null);
   const [dateBusy, setDateBusy] = useState(false);
   const [dateError, setDateError] = useState("");
+  const [workflowEdit, setWorkflowEdit] = useState<{
+    taskId: string;
+    status: WorkflowStatus;
+    blockedReason: string;
+    unblockResponsibleActorId: string;
+  } | null>(null);
+  const [workflowBusy, setWorkflowBusy] = useState(false);
+  const [workflowError, setWorkflowError] = useState("");
   const [revision, setRevision] = useState(0);
 
   const selectedTask = tasks.find((task) => task.id === dateEdit?.taskId);
+  const workflowTask = tasks.find((task) => task.id === workflowEdit?.taskId);
+  const workflowCanBlock =
+    workflowEdit?.status === "in_progress" ||
+    workflowEdit?.status === "in_review";
+  const workflowBlockReason = workflowCanBlock
+    ? workflowEdit?.blockedReason.trim() || null
+    : null;
+  const workflowUnblockActor = workflowCanBlock
+    ? workflowEdit?.unblockResponsibleActorId.trim() || null
+    : null;
+  const workflowChanged = Boolean(
+    workflowTask &&
+    workflowEdit &&
+    (workflowEdit.status !== workflowTask.workflowStatus ||
+      workflowBlockReason !== workflowTask.blockedReason ||
+      workflowUnblockActor !== workflowTask.unblockResponsibleActorId),
+  );
+  const workflowBlockValid =
+    Boolean(workflowBlockReason) === Boolean(workflowUnblockActor);
   function editDate(task: Task) {
-    if (dateBusy || readOnly) return;
+    if (dateBusy || workflowBusy || readOnly) return;
     setDateEdit({ taskId: task.id, proposedDueOn: task.dueOn ?? "" });
     setDateImpact(null);
     setDateError("");
+    setWorkflowEdit(null);
+  }
+  function manageTask(task: Task) {
+    if (dateBusy || workflowBusy || readOnly) return;
+    setWorkflowEdit({
+      taskId: task.id,
+      status: task.workflowStatus,
+      blockedReason: task.blockedReason ?? "",
+      unblockResponsibleActorId: task.unblockResponsibleActorId ?? "",
+    });
+    setWorkflowError("");
+    setDateEdit(null);
+    setDateImpact(null);
+  }
+
+  async function claimTask() {
+    if (!workflowTask || workflowBusy || readOnly) return;
+    setWorkflowBusy(true);
+    setWorkflowError("");
+    try {
+      await request(
+        `projects/${projectId}/next-actions/${workflowTask.id}/claim`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            organizationId,
+            expectedVersion: workflowTask.version,
+          }),
+        },
+      );
+      setWorkflowEdit(null);
+      setRevision((current) => current + 1);
+    } catch (caught) {
+      setWorkflowError(
+        caught instanceof Error ? caught.message : "No se pudo tomar la tarea.",
+      );
+      setRevision((current) => current + 1);
+    } finally {
+      setWorkflowBusy(false);
+    }
+  }
+
+  async function saveWorkflow() {
+    if (!workflowTask || !workflowEdit || workflowBusy || readOnly) return;
+    const canBlock =
+      workflowEdit.status === "in_progress" ||
+      workflowEdit.status === "in_review";
+    setWorkflowBusy(true);
+    setWorkflowError("");
+    try {
+      await request(
+        `projects/${projectId}/next-actions/${workflowTask.id}/workflow`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            organizationId,
+            expectedVersion: workflowTask.version,
+            status: workflowEdit.status,
+            blockedReason: canBlock
+              ? workflowEdit.blockedReason.trim() || null
+              : null,
+            unblockResponsibleActorId: canBlock
+              ? workflowEdit.unblockResponsibleActorId.trim() || null
+              : null,
+          }),
+        },
+      );
+      setWorkflowEdit(null);
+      setRevision((current) => current + 1);
+    } catch (caught) {
+      setWorkflowError(
+        caught instanceof Error
+          ? caught.message
+          : "No se pudo actualizar la tarea.",
+      );
+      setRevision((current) => current + 1);
+    } finally {
+      setWorkflowBusy(false);
+    }
   }
 
   async function previewDate() {
@@ -315,6 +441,7 @@ export function ProjectTasks({
                 key={task.id}
                 task={task}
                 onEditDate={editDate}
+                onManage={manageTask}
                 readOnly={readOnly}
               />
             ))}
@@ -347,6 +474,7 @@ export function ProjectTasks({
                           key={task.id}
                           task={task}
                           onEditDate={editDate}
+                          onManage={manageTask}
                           readOnly={readOnly}
                         />
                       ))}
@@ -373,6 +501,7 @@ export function ProjectTasks({
                   key={task.id}
                   task={task}
                   onEditDate={editDate}
+                  onManage={manageTask}
                   readOnly={readOnly}
                 />
               ))}
@@ -411,6 +540,7 @@ export function ProjectTasks({
                           key={task.id}
                           task={task}
                           onEditDate={editDate}
+                          onManage={manageTask}
                           readOnly={readOnly}
                         />
                       ))}
@@ -429,6 +559,7 @@ export function ProjectTasks({
                     key={task.id}
                     task={task}
                     onEditDate={editDate}
+                    onManage={manageTask}
                     readOnly={readOnly}
                   />
                 ))}
@@ -545,6 +676,122 @@ export function ProjectTasks({
               </button>
             </div>
           ) : null}
+        </section>
+      ) : null}
+      {!readOnly && workflowTask && workflowEdit ? (
+        <section className="task-date-editor" aria-label="Gestionar tarea">
+          <h3>Gestionar {workflowTask.description}</h3>
+          <p className="muted">
+            Versión {workflowTask.version}. Los cambios afectan la tarea
+            compartida.
+          </p>
+          {workflowTask.workflowStatus === "to_do" &&
+          !workflowTask.ownerActorId &&
+          workflowTask.executorTeamId ? (
+            <button
+              className="ui-button"
+              type="button"
+              disabled={workflowBusy}
+              onClick={() => void claimTask()}
+            >
+              Tomar tarea del equipo
+            </button>
+          ) : null}
+          <form
+            className="nested-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void saveWorkflow();
+            }}
+          >
+            <label className="ui-field task-month">
+              Estado
+              <select
+                value={workflowEdit.status}
+                disabled={workflowBusy}
+                onChange={(event) =>
+                  setWorkflowEdit({
+                    ...workflowEdit,
+                    status: event.target.value as WorkflowStatus,
+                  })
+                }
+              >
+                {[
+                  workflowTask.workflowStatus,
+                  ...workflowTransitions[workflowTask.workflowStatus],
+                ].map((item) => (
+                  <option
+                    key={item}
+                    value={item}
+                    disabled={
+                      item === "in_progress" &&
+                      workflowTask.ownerActorId === null
+                    }
+                  >
+                    {statuses.find((status) => status.value === item)?.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {workflowCanBlock ? (
+              <div className="form-grid">
+                <label className="ui-field">
+                  Motivo de bloqueo (opcional)
+                  <textarea
+                    value={workflowEdit.blockedReason}
+                    disabled={workflowBusy}
+                    onChange={(event) =>
+                      setWorkflowEdit({
+                        ...workflowEdit,
+                        blockedReason: event.target.value,
+                      })
+                    }
+                  />
+                </label>
+                <label className="ui-field">
+                  Responsable de desbloqueo (ID)
+                  <input
+                    value={workflowEdit.unblockResponsibleActorId}
+                    disabled={workflowBusy}
+                    onChange={(event) =>
+                      setWorkflowEdit({
+                        ...workflowEdit,
+                        unblockResponsibleActorId: event.target.value,
+                      })
+                    }
+                  />
+                </label>
+              </div>
+            ) : null}
+            {!workflowBlockValid ? (
+              <p role="alert">
+                El bloqueo requiere motivo y responsable juntos.
+              </p>
+            ) : null}
+            {workflowError ? <p role="alert">{workflowError}</p> : null}
+            <div className="form-actions">
+              <button
+                className="ui-button"
+                type="submit"
+                disabled={
+                  workflowBusy || !workflowChanged || !workflowBlockValid
+                }
+              >
+                Guardar flujo
+              </button>
+              <button
+                className="task-link-button"
+                type="button"
+                disabled={workflowBusy}
+                onClick={() => {
+                  setWorkflowEdit(null);
+                  setWorkflowError("");
+                }}
+              >
+                Cancelar
+              </button>
+            </div>
+          </form>
         </section>
       ) : null}
     </section>
