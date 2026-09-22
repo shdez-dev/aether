@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   createProject,
+  archiveProject,
   declareNextActionDependency,
   transferProjectWorkspace,
   transitionProject,
@@ -90,5 +91,20 @@ describe("project lifecycle", () => {
         updatedAt: now,
       }),
     ).toThrow("PROJECT_WORKSPACE_TRANSFER_INVALID");
+  });
+  it("only archives terminal projects", () => {
+    const now = new Date("2026-09-20T12:00:00.000Z");
+    const planned = createProject({
+      id: "project", organizationId: "organization", workspaceId: "workspace",
+      sourceInitiativeId: "initiative", sourceDecisionId: "decision", name: "Proyecto",
+      objective: "Resolver una necesidad priorizada.", boundaries: "Sólo el alcance acordado.",
+      successCriteria: "Entregar el resultado acordado.", nextMilestone: "Completar la preparación.",
+      sponsorActorId: "sponsor", leadActorId: "lead",
+      participants: [{ actorId: "sponsor", role: "sponsor" }, { actorId: "lead", role: "lead" }],
+      createdAt: now, updatedAt: now,
+    });
+    expect(() => archiveProject(planned, now)).toThrow("PROJECT_ARCHIVE_INVALID");
+    const completed = transitionProject(transitionProject(planned, "active", now), "completed", now);
+    expect(archiveProject(completed, now)).toMatchObject({ status: "archived" });
   });
 });
