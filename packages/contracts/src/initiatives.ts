@@ -419,6 +419,12 @@ export const ClaimProjectNextActionRequestSchema = z.object({
   organizationId: UuidSchema,
   expectedVersion: z.number().int().nonnegative(),
 });
+export const ChangeProjectTaskDateRequestSchema = z.object({
+  organizationId: UuidSchema,
+  expectedVersion: z.number().int().nonnegative(),
+  proposedDueOn: z.string().date().nullable(),
+  impactToken: z.string().regex(/^[a-f0-9]{64}$/),
+});
 export const AddProjectNextActionCollaboratorRequestSchema = z.object({
   organizationId: UuidSchema,
   actorId: z.string().min(1).max(255),

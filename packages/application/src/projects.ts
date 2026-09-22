@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import {
   ProjectDomainError,
   assignProjectLead,
@@ -68,6 +70,20 @@ export type ProjectTaskCalendar = Readonly<{
   dated: readonly ProjectNextAction[];
   undated: readonly ProjectNextAction[];
 }>;
+export type ProjectTaskDateImpact = Readonly<{
+  actionId: string;
+  expectedVersion: number;
+  currentDueOn: string | null;
+  proposedDueOn: string | null;
+  predecessors: readonly Readonly<{ actionId: string; dueOn: string | null }>[];
+  successors: readonly Readonly<{ actionId: string; dueOn: string | null }>[];
+  pendingMilestones: readonly Readonly<{
+    id: string;
+    title: string;
+    dueOn: string | null;
+  }>[];
+  impactToken: string;
+}>;
 export interface ProjectStore {
   create(project: Project): Promise<void>;
   findById(projectId: string): Promise<Project | null>;
@@ -118,6 +134,13 @@ export interface ProjectExecutionStore {
     expectedVersion: number;
     auditEvent: ProjectAuditEvent;
   }): Promise<boolean>;
+  changeNextActionDueOn(input: {
+    actionId: string;
+    projectId: string;
+    dueOn: string | null;
+    expectedVersion: number;
+    auditEvent: ProjectAuditEvent;
+  }): Promise<boolean>;
   claimNextAction(input: {
     action: ProjectNextAction;
     ownerActorId: string;
@@ -131,6 +154,7 @@ export interface ProjectExecutionStore {
     auditEvent: ProjectAuditEvent;
   }): Promise<ProjectNextAction | null>;
   addMilestone(milestone: ProjectMilestone): Promise<void>;
+  listMilestones(projectId: string): Promise<readonly ProjectMilestone[]>;
   addNextAction(action: ProjectNextAction): Promise<void>;
   updateNextAction(input: {
     action: ProjectNextAction;
@@ -1121,6 +1145,123 @@ export class ProjectService {
         ),
       undated: matching.filter((action) => action.dueOn === null),
     };
+  }
+  async previewTaskDateChange(input: {
+    actorId: string;
+    organizationId: string;
+    projectId: string;
+    actionId: string;
+    expectedVersion: number;
+    proposedDueOn: string | null;
+    correlationId: string;
+  }): Promise<ProjectTaskDateImpact> {
+    const project = await this.requireProject(
+      input.projectId,
+      input.organizationId,
+    );
+    await this.assertExecutionAccess(
+      input.actorId,
+      project,
+      input.correlationId,
+    );
+    const [actions, dependencies, milestones] = await Promise.all([
+      this.dependencies.execution.listNextActions(project.id),
+      this.dependencies.execution.listDependencies(project.id),
+      this.dependencies.execution.listMilestones(project.id),
+    ]);
+    const action = actions.find((item) => item.id === input.actionId);
+    if (!action) throw new ResourceNotFoundError("PROJECT_NOT_FOUND");
+    if (action.version !== input.expectedVersion)
+      throw new ProjectVersionConflictError();
+    if (
+      action.workflowStatus === "done" ||
+      action.workflowStatus === "cancelled"
+    )
+      throw new ProjectDomainError("PROJECT_NEXT_ACTION_DATE_IMMUTABLE");
+    if (action.dueOn === input.proposedDueOn)
+      throw new ProjectDomainError("PROJECT_NEXT_ACTION_DATE_UNCHANGED");
+    const actionById = new Map(actions.map((item) => [item.id, item]));
+    const related = (ids: readonly string[]) =>
+      ids
+        .map((id) => actionById.get(id))
+        .filter((item): item is ProjectNextAction => item !== undefined)
+        .map((item) => ({ actionId: item.id, dueOn: item.dueOn }))
+        .sort((a, b) => a.actionId.localeCompare(b.actionId));
+    const predecessors = related(
+      dependencies
+        .filter((item) => item.actionId === action.id)
+        .map((item) => item.dependsOnActionId),
+    );
+    const successors = related(
+      dependencies
+        .filter((item) => item.dependsOnActionId === action.id)
+        .map((item) => item.actionId),
+    );
+    const pendingMilestones = milestones
+      .filter((item) => item.completedAt === null)
+      .map((item) => ({ id: item.id, title: item.title, dueOn: item.dueOn }))
+      .sort((a, b) => a.id.localeCompare(b.id));
+    const context = {
+      actionId: action.id,
+      expectedVersion: action.version,
+      currentDueOn: action.dueOn,
+      proposedDueOn: input.proposedDueOn,
+      predecessors,
+      successors,
+      pendingMilestones,
+    };
+    return {
+      ...context,
+      impactToken: createHash("sha256")
+        .update(JSON.stringify(context))
+        .digest("hex"),
+    };
+  }
+  async changeTaskDate(input: {
+    actorId: string;
+    organizationId: string;
+    projectId: string;
+    actionId: string;
+    expectedVersion: number;
+    proposedDueOn: string | null;
+    impactToken: string;
+    correlationId: string;
+  }): Promise<ProjectNextAction> {
+    const impact = await this.previewTaskDateChange(input);
+    if (impact.impactToken !== input.impactToken)
+      throw new ProjectVersionConflictError();
+    const project = await this.requireProject(
+      input.projectId,
+      input.organizationId,
+    );
+    const saved = await this.dependencies.execution.changeNextActionDueOn({
+      actionId: input.actionId,
+      projectId: project.id,
+      dueOn: input.proposedDueOn,
+      expectedVersion: input.expectedVersion,
+      auditEvent: this.auditEventFor(
+        project,
+        input.actorId,
+        input.correlationId,
+        "project.next_action_date_changed.v1",
+        {
+          actionId: input.actionId,
+          previousDueOn: impact.currentDueOn,
+          dueOn: input.proposedDueOn,
+          predecessorActionIds: impact.predecessors.map(
+            (item) => item.actionId,
+          ),
+          successorActionIds: impact.successors.map((item) => item.actionId),
+          pendingMilestoneIds: impact.pendingMilestones.map((item) => item.id),
+        },
+      ),
+    });
+    if (!saved) throw new ProjectVersionConflictError();
+    const action = await this.dependencies.execution.findNextAction(
+      input.actionId,
+    );
+    if (!action) throw new ResourceNotFoundError("PROJECT_NOT_FOUND");
+    return action;
   }
   async listMyWork(input: {
     actorId: string;

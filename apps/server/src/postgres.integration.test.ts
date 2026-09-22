@@ -1480,6 +1480,46 @@ describe.sequential("PostgreSQL integration", () => {
       );
       await expect(
         pool.query(
+          `UPDATE project_next_actions SET due_on = '2026-01-08' WHERE id = $1`,
+          [activeActionId],
+        ),
+      ).rejects.toThrow("task date changes require the next version");
+      const dateStore = new PostgresProjectExecutionStore(pool);
+      const dateAuditEvent = {
+        id: randomUUID(),
+        eventType: "project.next_action_date_changed.v1",
+        organizationId,
+        workspaceId,
+        projectId: activeProjectId,
+        actorId: "owner",
+        correlationId: randomUUID(),
+        occurredAt: new Date("2026-01-03T00:00:00.000Z"),
+        payload: {
+          actionId: activeActionId,
+          previousDueOn: null,
+          dueOn: "2026-01-08",
+        },
+      };
+      const changeDate = () =>
+        dateStore.changeNextActionDueOn({
+          actionId: activeActionId,
+          projectId: activeProjectId,
+          dueOn: "2026-01-08",
+          expectedVersion: 0,
+          auditEvent: dateAuditEvent,
+        });
+      expect((await Promise.all([changeDate(), changeDate()])).sort()).toEqual([
+        false,
+        true,
+      ]);
+      await expect(
+        dateStore.findNextAction(activeActionId),
+      ).resolves.toMatchObject({
+        dueOn: "2026-01-08",
+        version: 1,
+      });
+      await expect(
+        pool.query(
           `INSERT INTO project_next_action_dependencies (action_id, depends_on_action_id)
            VALUES ($1,$2)`,
           [activeActionId, foreignActionId],
@@ -1633,6 +1673,7 @@ describe.sequential("PostgreSQL integration", () => {
       expect(persistedPlannedAction).toMatchObject({
         ...plannedAction,
         position: expect.any(Number),
+        version: 1,
       });
       const reorderAuditEvent = {
         id: randomUUID(),

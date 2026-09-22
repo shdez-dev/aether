@@ -3620,6 +3620,32 @@ export class PostgresProjectStore implements ProjectStore {
 }
 export class PostgresProjectExecutionStore implements ProjectExecutionStore {
   constructor(private readonly pool: Pool) {}
+  async listMilestones(
+    projectId: string,
+  ): Promise<readonly ProjectMilestone[]> {
+    const result = await this.pool.query<{
+      id: string;
+      project_id: string;
+      title: string;
+      due_on: string | Date | null;
+      completed_at: Date | null;
+      created_by_actor_id: string;
+      created_at: Date;
+    }>(
+      `SELECT id, project_id, title, due_on, completed_at, created_by_actor_id, created_at
+       FROM project_milestones WHERE project_id = $1 ORDER BY due_on NULLS LAST, id`,
+      [projectId],
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      projectId: row.project_id,
+      title: row.title,
+      dueOn: row.due_on === null ? null : toCalendarDate(row.due_on),
+      completedAt: row.completed_at,
+      createdByActorId: row.created_by_actor_id,
+      createdAt: row.created_at,
+    }));
+  }
   async listMyWorkCandidates(input: {
     organizationId: string;
     actorId: string;
@@ -3725,6 +3751,35 @@ export class PostgresProjectExecutionStore implements ProjectExecutionStore {
         [input.actionId, input.actorId, input.addedByActorId, input.addedAt],
       );
       if (inserted.rowCount !== 1) {
+        await client.query("ROLLBACK");
+        return false;
+      }
+      await insertProjectAuditEvent(client, input.auditEvent);
+      await client.query("COMMIT");
+      return true;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+  async changeNextActionDueOn(input: {
+    actionId: string;
+    projectId: string;
+    dueOn: string | null;
+    expectedVersion: number;
+    auditEvent: ProjectAuditEvent;
+  }): Promise<boolean> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const changed = await client.query(
+        `UPDATE project_next_actions SET due_on = $3, version = version + 1
+         WHERE id = $1 AND project_id = $2 AND version = $4`,
+        [input.actionId, input.projectId, input.dueOn, input.expectedVersion],
+      );
+      if (changed.rowCount !== 1) {
         await client.query("ROLLBACK");
         return false;
       }

@@ -151,6 +151,11 @@ export class InMemoryProjectExecutionStore implements ProjectExecutionStore {
   async addMilestone(milestone: ProjectMilestone): Promise<void> {
     this.milestones.push(milestone);
   }
+  async listMilestones(
+    projectId: string,
+  ): Promise<readonly ProjectMilestone[]> {
+    return this.milestones.filter((item) => item.projectId === projectId);
+  }
   async addNextAction(action: ProjectNextAction): Promise<void> {
     const position =
       this.actions.filter(
@@ -192,6 +197,28 @@ export class InMemoryProjectExecutionStore implements ProjectExecutionStore {
       addedAt: input.addedAt,
     });
     await this.audit?.record(input.auditEvent);
+    return true;
+  }
+  async changeNextActionDueOn(input: {
+    actionId: string;
+    projectId: string;
+    dueOn: string | null;
+    expectedVersion: number;
+    auditEvent: ProjectAuditEvent;
+  }): Promise<boolean> {
+    const index = this.actions.findIndex(
+      (item) =>
+        item.id === input.actionId &&
+        item.projectId === input.projectId &&
+        item.version === input.expectedVersion,
+    );
+    if (index < 0) return false;
+    await this.audit?.record(input.auditEvent);
+    this.actions[index] = {
+      ...this.actions[index]!,
+      dueOn: input.dueOn,
+      version: input.expectedVersion + 1,
+    };
     return true;
   }
   async listNextActionCollaborators(

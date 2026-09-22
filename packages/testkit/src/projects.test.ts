@@ -504,6 +504,49 @@ describe("project conversion and execution", () => {
         correlationId: ids.next(),
       }),
     ).rejects.toBeInstanceOf(AccessDeniedError);
+    const dateChangeInput = {
+      actorId: "replacement",
+      organizationId: organization.id,
+      projectId: project.id,
+      actionId: teamInboxAction.id,
+      expectedVersion: 1,
+      proposedDueOn: "2026-09-21",
+      correlationId: ids.next(),
+    };
+    const beforeDependency =
+      await projects.previewTaskDateChange(dateChangeInput);
+    await projects.declareNextActionDependency({
+      actorId: "replacement",
+      organizationId: organization.id,
+      projectId: project.id,
+      actionId: teamInboxAction.id,
+      dependsOnActionId: nextAction.id,
+      correlationId: ids.next(),
+    });
+    await expect(
+      projects.changeTaskDate({
+        ...dateChangeInput,
+        impactToken: beforeDependency.impactToken,
+      }),
+    ).rejects.toThrow("PROJECT_VERSION_CONFLICT");
+    const impact = await projects.previewTaskDateChange(dateChangeInput);
+    expect(impact).toMatchObject({
+      currentDueOn: null,
+      predecessors: [{ actionId: nextAction.id, dueOn: "2026-09-20" }],
+      pendingMilestones: [{ title: "Primer hito", dueOn: "2026-10-01" }],
+    });
+    await expect(
+      projects.changeTaskDate({
+        ...dateChangeInput,
+        impactToken: impact.impactToken,
+      }),
+    ).resolves.toMatchObject({ dueOn: "2026-09-21", version: 2 });
+    await expect(
+      projects.changeTaskDate({
+        ...dateChangeInput,
+        impactToken: impact.impactToken,
+      }),
+    ).rejects.toThrow("PROJECT_VERSION_CONFLICT");
     await projects.addNextActionCollaborator({
       actorId: "replacement",
       organizationId: organization.id,
@@ -604,6 +647,17 @@ describe("project conversion and execution", () => {
         correlationId: ids.next(),
       }),
     ).resolves.toMatchObject({ workflowStatus: "done", version: 4 });
+    await expect(
+      projects.previewTaskDateChange({
+        actorId: "replacement",
+        organizationId: organization.id,
+        projectId: project.id,
+        actionId: nextAction.id,
+        expectedVersion: 4,
+        proposedDueOn: "2026-09-22",
+        correlationId: ids.next(),
+      }),
+    ).rejects.toMatchObject({ code: "PROJECT_NEXT_ACTION_DATE_IMMUTABLE" });
     await expect(
       projects.listNextActions({
         actorId: "replacement",
@@ -800,6 +854,13 @@ describe("project conversion and execution", () => {
         correlationId: ids.next(),
       }),
     ).rejects.toMatchObject({ code: "PROJECT_CLOSED_IMMUTABLE" });
+    await expect(
+      projects.previewTaskDateChange({
+        ...dateChangeInput,
+        expectedVersion: 2,
+        proposedDueOn: "2026-09-22",
+      }),
+    ).rejects.toMatchObject({ code: "PROJECT_CLOSED_IMMUTABLE" });
     expect(projectStore.durableEvents.map((event) => event.eventType)).toEqual([
       "project.created.v1",
       "project.status_changed.v1",
@@ -820,6 +881,8 @@ describe("project conversion and execution", () => {
       "project.milestone_added.v1",
       "project.next_action_added.v1",
       "project.next_action_added.v1",
+      "project.next_action_dependency_declared.v1",
+      "project.next_action_date_changed.v1",
       "project.next_action_collaborator_added.v1",
       "project.next_action_workflow_changed.v1",
       "project.next_action_workflow_changed.v1",
@@ -837,6 +900,8 @@ describe("project conversion and execution", () => {
       "project.milestone_added.v1",
       "project.next_action_added.v1",
       "project.next_action_added.v1",
+      "project.next_action_dependency_declared.v1",
+      "project.next_action_date_changed.v1",
       "project.next_action_collaborator_added.v1",
       "project.next_action_workflow_changed.v1",
       "project.next_action_workflow_changed.v1",

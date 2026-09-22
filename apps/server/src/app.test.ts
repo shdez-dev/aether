@@ -299,7 +299,7 @@ describe("HTTP authentication boundary", () => {
       sessionRenewalWindowSeconds: config.sessionRenewalWindowSeconds,
     });
     const app = await buildServer({
-      config,
+      config: { ...config, rateLimitMax: 1000 },
       auth,
       tenants: {} as TenantService,
       initiatives: {} as InitiativeService,
@@ -3862,6 +3862,8 @@ describe("document project authorization endpoints", () => {
       | "claimNextAction"
       | "listMyWork"
       | "listTaskCalendar"
+      | "previewTaskDateChange"
+      | "changeTaskDate"
       | "addNextActionCollaborator"
     > = {
       async reorderNextAction(input) {
@@ -3994,6 +3996,59 @@ describe("document project authorization endpoints", () => {
           undated: [action],
         };
       },
+      async previewTaskDateChange(input) {
+        expect(input).toMatchObject({
+          actorId: "owner",
+          organizationId,
+          projectId,
+          actionId,
+          expectedVersion: 5,
+          proposedDueOn: "2026-09-25",
+        });
+        return {
+          actionId,
+          expectedVersion: 5,
+          currentDueOn: null,
+          proposedDueOn: "2026-09-25",
+          predecessors: [],
+          successors: [],
+          pendingMilestones: [],
+          impactToken: "a".repeat(64),
+        };
+      },
+      async changeTaskDate(input) {
+        expect(input).toMatchObject({
+          actorId: "owner",
+          organizationId,
+          projectId,
+          actionId,
+          expectedVersion: 5,
+          proposedDueOn: "2026-09-25",
+          impactToken: "a".repeat(64),
+        });
+        return {
+          id: actionId,
+          projectId,
+          description: "Tomada",
+          ownerActorId: "owner",
+          executorTeamId: null,
+          reviewerActorId: null,
+          dueOn: "2026-09-25",
+          priority: "medium",
+          estimatedEffort: null,
+          effortUnit: null,
+          periodStartOn: null,
+          periodEndOn: null,
+          workflowStatus: "to_do",
+          position: 1,
+          blockedReason: null,
+          unblockResponsibleActorId: null,
+          completedAt: null,
+          version: 6,
+          createdByActorId: "owner",
+          createdAt: new Date("2026-09-22T00:00:00.000Z"),
+        };
+      },
       async addNextActionCollaborator(input) {
         collaboratorAdds++;
         expect(input).toMatchObject({
@@ -4085,6 +4140,43 @@ describe("document project authorization endpoints", () => {
         })
       ).statusCode,
     ).toBe(400);
+    const dateImpactUrl = `/v1/projects/${projectId}/next-actions/${actionId}/date-impact?organizationId=${organizationId}&expectedVersion=5&proposedDueOn=2026-09-25`;
+    expect(
+      (await app.inject({ method: "GET", url: dateImpactUrl })).statusCode,
+    ).toBe(401);
+    const impactResponse = await app.inject({
+      method: "GET",
+      url: dateImpactUrl,
+      headers: { cookie: headers.cookie },
+    });
+    expect(impactResponse.statusCode).toBe(200);
+    expect(impactResponse.json()).toMatchObject({
+      impactToken: "a".repeat(64),
+    });
+    const dateRequest = {
+      method: "POST" as const,
+      url: `/v1/projects/${projectId}/next-actions/${actionId}/date`,
+      headers: { ...headers, "idempotency-key": "task-date-key" },
+      payload: {
+        organizationId,
+        expectedVersion: 5,
+        proposedDueOn: "2026-09-25",
+        impactToken: "a".repeat(64),
+      },
+    };
+    expect((await app.inject(dateRequest)).json()).toMatchObject({
+      dueOn: "2026-09-25",
+      version: 6,
+    });
+    expect((await app.inject(dateRequest)).statusCode).toBe(200);
+    expect(
+      (
+        await app.inject({
+          ...dateRequest,
+          headers: { ...dateRequest.headers, "x-csrf-token": "invalid" },
+        })
+      ).statusCode,
+    ).toBe(403);
     const collaboratorRequest = {
       method: "POST" as const,
       url: `/v1/projects/${projectId}/next-actions/${actionId}/collaborators`,

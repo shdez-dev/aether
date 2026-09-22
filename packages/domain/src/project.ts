@@ -252,18 +252,29 @@ export function reorderNextAction(input: {
   position: number;
 }): readonly ProjectNextAction[] {
   const action = input.actions.find((item) => item.id === input.actionId);
-  if (!action) throw new ProjectDomainError("PROJECT_NEXT_ACTION_ORDER_INVALID");
+  if (!action)
+    throw new ProjectDomainError("PROJECT_NEXT_ACTION_ORDER_INVALID");
   const column = input.actions
-    .filter((item) => item.projectId === action.projectId && item.workflowStatus === action.workflowStatus)
+    .filter(
+      (item) =>
+        item.projectId === action.projectId &&
+        item.workflowStatus === action.workflowStatus,
+    )
     .sort((a, b) => a.position - b.position);
-  if (!Number.isSafeInteger(input.position) || input.position < 1 || input.position > column.length)
+  if (
+    !Number.isSafeInteger(input.position) ||
+    input.position < 1 ||
+    input.position > column.length
+  )
     throw new ProjectDomainError("PROJECT_NEXT_ACTION_ORDER_INVALID");
   const ordered = column.filter((item) => item.id !== action.id);
   ordered.splice(input.position - 1, 0, action);
   return ordered.map((item, index) => ({
     ...item,
     position: index + 1,
-    version: item.version + (item.id === action.id || item.position !== index + 1 ? 1 : 0),
+    version:
+      item.version +
+      (item.id === action.id || item.position !== index + 1 ? 1 : 0),
   }));
 }
 
@@ -549,6 +560,8 @@ export class ProjectDomainError extends Error {
       | "PROJECT_NEXT_ACTION_OWNER_REQUIRED"
       | "PROJECT_NEXT_ACTION_CLAIM_INVALID"
       | "PROJECT_CALENDAR_RANGE_INVALID"
+      | "PROJECT_NEXT_ACTION_DATE_UNCHANGED"
+      | "PROJECT_NEXT_ACTION_DATE_IMMUTABLE"
       | "PROJECT_MINIMUM_PLAN_REQUIRED"
       | "PROJECT_MANDATE_REQUIRED"
       | "PROJECT_CHANGE_REQUEST_NOT_PENDING"

@@ -107,7 +107,13 @@ describe("ProjectService", () => {
           return [];
         },
         async addMilestone() {},
+        async listMilestones() {
+          return [];
+        },
         async addNextAction() {},
+        async changeNextActionDueOn() {
+          return false;
+        },
         async addNextActionCollaborator() {
           return false;
         },

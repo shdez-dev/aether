@@ -97,6 +97,7 @@ import {
   ReviewProjectChangeRequestSchema,
   AddProjectNextActionRequestSchema,
   ClaimProjectNextActionRequestSchema,
+  ChangeProjectTaskDateRequestSchema,
   AddProjectNextActionCollaboratorRequestSchema,
   ReorderProjectNextActionRequestSchema,
   TransitionProjectNextActionWorkflowRequestSchema,
@@ -3237,6 +3238,80 @@ export async function buildServer(input: {
         dated: calendar.dated.map(serialize),
         undated: calendar.undated.map(serialize),
       };
+    },
+  );
+  app.get(
+    "/v1/projects/:projectId/next-actions/:actionId/date-impact",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      const params = z
+        .object({ projectId: z.string().uuid(), actionId: z.string().uuid() })
+        .parse(request.params);
+      const query = z
+        .object({
+          organizationId: z.string().uuid(),
+          expectedVersion: z
+            .string()
+            .regex(/^\d+$/)
+            .transform(Number)
+            .pipe(z.number().int().nonnegative()),
+          proposedDueOn: z.string().date().optional(),
+        })
+        .parse(request.query);
+      return input.projects.previewTaskDateChange({
+        actorId: session.actorId,
+        projectId: params.projectId,
+        actionId: params.actionId,
+        organizationId: query.organizationId,
+        expectedVersion: query.expectedVersion,
+        proposedDueOn: query.proposedDueOn ?? null,
+        correlationId: correlationId(reply),
+      });
+    },
+  );
+  app.post(
+    "/v1/projects/:projectId/next-actions/:actionId/date",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      const params = z
+        .object({ projectId: z.string().uuid(), actionId: z.string().uuid() })
+        .parse(request.params);
+      const body = ChangeProjectTaskDateRequestSchema.parse(request.body);
+      return respondIdempotently({
+        request,
+        reply,
+        store: input.idempotency,
+        actorId: session.actorId,
+        operation: `project.next_action.date:${params.projectId}:${params.actionId}`,
+        requestPayload: body,
+        execute: async () => {
+          const action = await input.projects.changeTaskDate({
+            actorId: session.actorId,
+            correlationId: correlationId(reply),
+            projectId: params.projectId,
+            actionId: params.actionId,
+            ...body,
+          });
+          return {
+            statusCode: 200,
+            body: {
+              ...action,
+              completedAt: action.completedAt?.toISOString() ?? null,
+              createdAt: action.createdAt.toISOString(),
+            },
+          };
+        },
+      });
     },
   );
   app.post("/v1/projects/:projectId/next-actions", async (request, reply) => {
