@@ -46,9 +46,11 @@ it("shows the same task in list, board and calendar and applies the status filte
     async (url: string) =>
       new Response(
         JSON.stringify(
-          url.includes("/calendar?")
-            ? { dated: [dated], undated: [undated] }
-            : [dated, undated],
+          url.endsWith("/teams")
+            ? [{ id: "team-id", name: "Operaciones" }]
+            : url.includes("/calendar?")
+              ? { dated: [dated], undated: [undated] }
+              : [dated, undated],
         ),
         { status: 200 },
       ),
@@ -58,6 +60,7 @@ it("shows the same task in list, board and calendar and applies the status filte
     createElement(ProjectTasks, {
       projectId: "project",
       organizationId: "organization",
+      workspaceId: "workspace",
       refreshKey: 0,
       request,
     }),
@@ -89,6 +92,33 @@ it("shows the same task in list, board and calendar and applies the status filte
       expect.stringContaining("workflowStatus=in_progress"),
     ),
   );
+  fireEvent.change(screen.getByRole("combobox", { name: "Equipo ejecutor" }), {
+    target: { value: "team-id" },
+  });
+  fireEvent.change(
+    screen.getByRole("textbox", { name: "ID del responsable" }),
+    {
+      target: { value: " owner " },
+    },
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Filtrar" }));
+  await waitFor(() => {
+    const urls = request.mock.calls.map(([url]) => url);
+    expect(urls).toContain(
+      "projects/project/next-actions?organizationId=organization&workflowStatus=in_progress&executorTeamId=team-id&ownerActorId=owner",
+    );
+    expect(
+      urls.some((url) =>
+        url.startsWith(
+          "projects/project/next-actions/calendar?organizationId=organization&workflowStatus=in_progress&executorTeamId=team-id&ownerActorId=owner&fromOn=",
+        ),
+      ),
+    ).toBe(true);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Lista" }));
+  expect(
+    screen.queryByRole("button", { name: "Subir Preparar informe" }),
+  ).toBeNull();
 });
 
 it("reviews date impact before sending the versioned confirmation", async () => {
@@ -107,6 +137,7 @@ it("reviews date impact before sending the versioned confirmation", async () => 
     version: 7,
   };
   const request = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith("/teams")) return new Response("[]");
     if (url.includes("/date-impact?"))
       return new Response(
         JSON.stringify({
@@ -136,6 +167,7 @@ it("reviews date impact before sending the versioned confirmation", async () => 
     createElement(ProjectTasks, {
       projectId: "project",
       organizationId: "organization",
+      workspaceId: "workspace",
       refreshKey: 0,
       request,
     }),
@@ -189,6 +221,7 @@ it("claims an unassigned team task before starting it with an explicit block", a
     version: 2,
   };
   const request = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith("/teams")) return new Response("[]");
     if (url.endsWith("/claim") && init?.method === "POST") {
       task = { ...task, ownerActorId: "actor", version: 3 };
       return new Response(JSON.stringify(task));
@@ -213,6 +246,7 @@ it("claims an unassigned team task before starting it with an explicit block", a
     createElement(ProjectTasks, {
       projectId: "project",
       organizationId: "organization",
+      workspaceId: "workspace",
       refreshKey: 0,
       request,
     }),
@@ -297,6 +331,7 @@ it("moves a task within its shared column using its current version", async () =
   };
   let tasks = [first, second];
   const request = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith("/teams")) return new Response("[]");
     if (url.endsWith("/reorder") && init?.method === "POST") {
       tasks = [
         { ...second, position: 1, version: 5 },
@@ -314,6 +349,7 @@ it("moves a task within its shared column using its current version", async () =
     createElement(ProjectTasks, {
       projectId: "project",
       organizationId: "organization",
+      workspaceId: "workspace",
       refreshKey: 0,
       request,
     }),

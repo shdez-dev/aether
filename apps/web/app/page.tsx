@@ -1160,6 +1160,7 @@ export default function AetherPage() {
           key={selectedProject.id}
           projectId={selectedProject.id}
           organizationId={organizationId}
+          workspaceId={selectedProject.workspaceId}
           refreshKey={selectedProject}
           request={request}
           onChanged={() => setWorkRevision((current) => current + 1)}

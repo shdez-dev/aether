@@ -223,6 +223,18 @@ textarea {
   gap: 1rem;
   flex-wrap: wrap;
 }
+.task-filters {
+  display: flex;
+  align-items: end;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.task-owner-filter {
+  display: flex;
+  align-items: end;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
 .task-view-switch {
   display: flex;
   gap: 0.5rem;

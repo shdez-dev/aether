@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { TeamResponse } from "@aether/contracts";
 
 type WorkflowStatus =
   "to_do" | "in_progress" | "in_review" | "done" | "cancelled";
@@ -142,6 +143,7 @@ function TaskCard({
 export function ProjectTasks({
   projectId,
   organizationId,
+  workspaceId,
   refreshKey,
   request,
   onChanged,
@@ -149,6 +151,7 @@ export function ProjectTasks({
 }: {
   projectId: string;
   organizationId: string;
+  workspaceId: string;
   refreshKey: unknown;
   request: (url: string, init?: RequestInit) => Promise<Response>;
   onChanged?: () => void;
@@ -157,6 +160,11 @@ export function ProjectTasks({
   const [view, setView] = useState<View>("list");
   const [month, setMonth] = useState(currentMonth);
   const [status, setStatus] = useState<WorkflowStatus | "">("");
+  const [executorTeamId, setExecutorTeamId] = useState("");
+  const [ownerDraft, setOwnerDraft] = useState("");
+  const [ownerActorId, setOwnerActorId] = useState("");
+  const [teams, setTeams] = useState<TeamResponse[]>([]);
+  const [teamsError, setTeamsError] = useState("");
   const [tasks, setTasks] = useState<Task[]>([]);
   const [calendar, setCalendar] = useState<Calendar>({
     dated: [],
@@ -182,6 +190,7 @@ export function ProjectTasks({
   const [orderBusy, setOrderBusy] = useState(false);
   const [orderError, setOrderError] = useState("");
   const [revision, setRevision] = useState(0);
+  const canReorder = !executorTeamId && !ownerActorId;
 
   const selectedTask = tasks.find((task) => task.id === dateEdit?.taskId);
   const workflowTask = tasks.find((task) => task.id === workflowEdit?.taskId);
@@ -393,11 +402,38 @@ export function ProjectTasks({
 
   useEffect(() => {
     let active = true;
+    setTeamsError("");
+    void request(
+      `organizations/${organizationId}/workspaces/${workspaceId}/teams`,
+    )
+      .then(async (response) => {
+        const data = (await response.json()) as TeamResponse[];
+        if (active) setTeams(data);
+      })
+      .catch((caught: unknown) => {
+        if (active) {
+          setTeams([]);
+          setTeamsError(
+            caught instanceof Error
+              ? caught.message
+              : "No se pudieron cargar los equipos.",
+          );
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [organizationId, workspaceId, request]);
+
+  useEffect(() => {
+    let active = true;
     const [year, monthNumber] = month.split("-").map(Number);
     if (!year || !monthNumber) return;
     const endDay = new Date(year, monthNumber, 0).getDate();
     const query = new URLSearchParams({ organizationId });
     if (status) query.set("workflowStatus", status);
+    if (executorTeamId) query.set("executorTeamId", executorTeamId);
+    if (ownerActorId) query.set("ownerActorId", ownerActorId);
     const calendarQuery = new URLSearchParams(query);
     calendarQuery.set("fromOn", `${month}-01`);
     calendarQuery.set("toOn", `${month}-${String(endDay).padStart(2, "0")}`);
@@ -434,7 +470,17 @@ export function ProjectTasks({
     return () => {
       active = false;
     };
-  }, [projectId, organizationId, refreshKey, request, month, status, revision]);
+  }, [
+    projectId,
+    organizationId,
+    refreshKey,
+    request,
+    month,
+    status,
+    executorTeamId,
+    ownerActorId,
+    revision,
+  ]);
 
   const [year, monthNumber] = month.split("-").map(Number);
   const dayCount =
@@ -460,23 +506,64 @@ export function ProjectTasks({
             Lista, tablero y calendario muestran las mismas tareas.
           </p>
         </div>
-        <label className="ui-field">
-          Estado
-          <select
-            value={status}
-            onChange={(event) =>
-              setStatus(event.target.value as WorkflowStatus | "")
-            }
+        <div className="task-filters">
+          <label className="ui-field">
+            Estado
+            <select
+              value={status}
+              onChange={(event) =>
+                setStatus(event.target.value as WorkflowStatus | "")
+              }
+            >
+              <option value="">Todos</option>
+              {statuses.map((item) => (
+                <option key={item.value} value={item.value}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="ui-field">
+            Equipo ejecutor
+            <select
+              value={executorTeamId}
+              onChange={(event) => setExecutorTeamId(event.target.value)}
+            >
+              <option value="">Todos</option>
+              {teams.map((team) => (
+                <option key={team.id} value={team.id}>
+                  {team.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <form
+            className="task-owner-filter"
+            onSubmit={(event) => {
+              event.preventDefault();
+              setOwnerActorId(ownerDraft.trim());
+            }}
           >
-            <option value="">Todos</option>
-            {statuses.map((item) => (
-              <option key={item.value} value={item.value}>
-                {item.label}
-              </option>
-            ))}
-          </select>
-        </label>
+            <label className="ui-field">
+              ID del responsable
+              <input
+                value={ownerDraft}
+                maxLength={255}
+                onChange={(event) => setOwnerDraft(event.target.value)}
+              />
+            </label>
+            <button type="submit" className="ui-button">
+              Filtrar
+            </button>
+          </form>
+        </div>
       </div>
+      {teamsError ? <p role="alert">{teamsError}</p> : null}
+      {!canReorder ? (
+        <p className="muted">
+          Quita los filtros de equipo y responsable para reordenar tareas.
+        </p>
+      ) : null}
       <div
         className="task-view-switch"
         role="group"
@@ -509,7 +596,7 @@ export function ProjectTasks({
                 task={task}
                 onEditDate={editDate}
                 onManage={manageTask}
-                onMove={moveTask}
+                {...(canReorder ? { onMove: moveTask } : {})}
                 lastPosition={statusCounts.get(task.workflowStatus) ?? 0}
                 orderBusy={orderBusy}
                 readOnly={readOnly}
@@ -545,7 +632,7 @@ export function ProjectTasks({
                           task={task}
                           onEditDate={editDate}
                           onManage={manageTask}
-                          onMove={moveTask}
+                          {...(canReorder ? { onMove: moveTask } : {})}
                           lastPosition={
                             statusCounts.get(task.workflowStatus) ?? 0
                           }
