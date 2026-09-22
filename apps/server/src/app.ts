@@ -2646,12 +2646,34 @@ export async function buildServer(input: {
     });
   });
   app.post("/v1/projects/:projectId/archive", async (request, reply) => {
-    const session = await requireSession(request, reply, input.auth, input.config);
-    const { projectId } = z.object({ projectId: z.string().uuid() }).parse(request.params);
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    const { projectId } = z
+      .object({ projectId: z.string().uuid() })
+      .parse(request.params);
     const body = ArchiveProjectRequestSchema.parse(request.body);
-    return respondIdempotently({ request, reply, store: input.idempotency, actorId: session.actorId,
-      operation: `project.archive:${projectId}`, requestPayload: body,
-      execute: async () => ({ statusCode: 200, body: toProjectResponse(await input.projects.archive({ actorId: session.actorId, correlationId: correlationId(reply), projectId, ...body })) }),
+    return respondIdempotently({
+      request,
+      reply,
+      store: input.idempotency,
+      actorId: session.actorId,
+      operation: `project.archive:${projectId}`,
+      requestPayload: body,
+      execute: async () => ({
+        statusCode: 200,
+        body: toProjectResponse(
+          await input.projects.archive({
+            actorId: session.actorId,
+            correlationId: correlationId(reply),
+            projectId,
+            ...body,
+          }),
+        ),
+      }),
     });
   });
   app.post("/v1/projects/:projectId/pause", async (request, reply) => {
