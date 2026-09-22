@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { NonEmptyTextSchema, UuidSchema } from "./common.js";
+import { EvidenceReferenceResponseSchema } from "./evidence.js";
 
 export const InitiativeStatusSchema = z.enum([
   "draft",
@@ -635,6 +636,38 @@ export const ProjectResponseSchema = z.object({
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
+export const ProjectClosureResponseSchema = z.object({
+  id: UuidSchema,
+  projectId: UuidSchema,
+  organizationId: UuidSchema,
+  workspaceId: UuidSchema,
+  outcomes: z.string(),
+  lessonsLearned: z.string(),
+  objectiveAssessment: z.enum([
+    "achieved",
+    "partially_achieved",
+    "not_achieved",
+    "not_assessed",
+  ]),
+  assessmentRationale: z.string(),
+  exceptions: z.array(
+    z.object({
+      id: UuidSchema,
+      description: z.string(),
+      disposition: z.enum(["resolved", "transferred", "accepted"]),
+      responsibleActorId: z.string(),
+      rationale: z.string(),
+    }),
+  ),
+  pendingItems: z.array(z.string()),
+  closedByActorId: z.string(),
+  closedAt: z.string().datetime(),
+});
+export const ProjectClosureDossierResponseSchema = z.object({
+  project: ProjectResponseSchema,
+  closure: ProjectClosureResponseSchema,
+  evidence: z.array(EvidenceReferenceResponseSchema),
+});
 export const ProjectBaselineDifferenceResponseSchema = z.object({
   baseline: z
     .object({
@@ -740,6 +773,10 @@ export type InitiativeDecisionResponse = z.infer<
   typeof InitiativeDecisionResponseSchema
 >;
 export type ProjectResponse = z.infer<typeof ProjectResponseSchema>;
+export type ProjectClosureResponse = z.infer<typeof ProjectClosureResponseSchema>;
+export type ProjectClosureDossierResponse = z.infer<
+  typeof ProjectClosureDossierResponseSchema
+>;
 export type ProjectBaselineDifferenceResponse = z.infer<
   typeof ProjectBaselineDifferenceResponseSchema
 >;

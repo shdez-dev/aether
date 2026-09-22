@@ -476,6 +476,21 @@ describe("project conversion and execution", () => {
         },
       ],
     });
+    await expect(
+      projects.closureDossier({
+        actorId: "replacement",
+        organizationId: organization.id,
+        projectId: project.id,
+        correlationId: ids.next(),
+      }),
+    ).resolves.toMatchObject({
+      project: { objective: "Reducir el tiempo de atención." },
+      closure: {
+        id: closure.id,
+        objectiveAssessment: "achieved",
+        exceptions: [{ description: "Medir adopción" }],
+      },
+    });
     expect(projectStore.durableEvents.map((event) => event.eventType)).toEqual([
       "project.created.v1",
       "project.status_changed.v1",

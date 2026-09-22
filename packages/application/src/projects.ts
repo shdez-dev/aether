@@ -1296,6 +1296,21 @@ export class ProjectService {
       projectId: input.projectId,
     });
   }
+  async closureDossier(input: {
+    actorId: string;
+    organizationId: string;
+    projectId: string;
+    correlationId?: string;
+  }): Promise<Readonly<{ project: Project; closure: ProjectClosure }>> {
+    const project = await this.requireProject(
+      input.projectId,
+      input.organizationId,
+    );
+    await this.assertProjectRead(input.actorId, project, input.correlationId);
+    const closure = await this.dependencies.closures.findClosure(project.id);
+    if (!closure) throw new ResourceNotFoundError("PROJECT_NOT_FOUND");
+    return { project, closure };
+  }
   async list(input: {
     actorId: string;
     organizationId: string;

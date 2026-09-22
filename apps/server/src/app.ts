@@ -2415,6 +2415,44 @@ export async function buildServer(input: {
       }),
     );
   });
+  app.get("/v1/projects/:projectId/closure", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    if (!input.evidence) throw new Error("Evidence service is not configured");
+    const { projectId } = z
+      .object({ projectId: z.string().uuid() })
+      .parse(request.params);
+    const { organizationId } = z
+      .object({ organizationId: z.string().uuid() })
+      .parse(request.query);
+    const dossier = await input.projects.closureDossier({
+      actorId: session.actorId,
+      correlationId: correlationId(reply),
+      organizationId,
+      projectId,
+    });
+    const evidence = await input.evidence.list({
+      actorId: session.actorId,
+      organizationId,
+      subjectType: "project_closure",
+      subjectId: dossier.closure.id,
+    });
+    return {
+      project: toProjectResponse(dossier.project),
+      closure: {
+        ...dossier.closure,
+        closedAt: dossier.closure.closedAt.toISOString(),
+      },
+      evidence: evidence.map((reference) => ({
+        ...reference,
+        linkedAt: reference.linkedAt.toISOString(),
+      })),
+    };
+  });
   app.get(
     "/v1/projects/:projectId/baseline-difference",
     async (request, reply) => {
