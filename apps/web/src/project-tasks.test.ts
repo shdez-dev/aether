@@ -273,3 +273,67 @@ it("claims an unassigned team task before starting it with an explicit block", a
     ),
   );
 });
+
+it("moves a task within its shared column using its current version", async () => {
+  const first = {
+    id: "first",
+    description: "Primera",
+    workflowStatus: "to_do",
+    position: 1,
+    ownerActorId: "owner",
+    executorTeamId: null,
+    reviewerActorId: null,
+    blockedReason: null,
+    unblockResponsibleActorId: null,
+    dueOn: null,
+    priority: "medium",
+    version: 4,
+  };
+  const second = {
+    ...first,
+    id: "second",
+    description: "Segunda",
+    position: 2,
+  };
+  let tasks = [first, second];
+  const request = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith("/reorder") && init?.method === "POST") {
+      tasks = [
+        { ...second, position: 1, version: 5 },
+        { ...first, position: 2, version: 5 },
+      ];
+      return new Response(JSON.stringify(tasks[1]));
+    }
+    return new Response(
+      JSON.stringify(
+        url.includes("/calendar?") ? { dated: [], undated: tasks } : tasks,
+      ),
+    );
+  });
+  render(
+    createElement(ProjectTasks, {
+      projectId: "project",
+      organizationId: "organization",
+      refreshKey: 0,
+      request,
+    }),
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Bajar Primera" }));
+  await waitFor(() =>
+    expect(request).toHaveBeenCalledWith(
+      "projects/project/next-actions/first/reorder",
+      expect.objectContaining({
+        body: JSON.stringify({
+          organizationId: "organization",
+          expectedVersion: 4,
+          position: 2,
+        }),
+      }),
+    ),
+  );
+  await waitFor(() =>
+    expect(screen.getAllByRole("listitem")[0]?.textContent).toContain(
+      "Segunda",
+    ),
+  );
+});

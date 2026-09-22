@@ -276,6 +276,28 @@ textarea {
   opacity: 0.55;
   cursor: not-allowed;
 }
+.task-order {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+.task-order small {
+  margin: 0 auto 0 0;
+}
+.task-order button {
+  min-width: 2rem;
+  min-height: 2rem;
+  color: var(--brand);
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.task-order button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 .task-board {
   display: grid;
   grid-template-columns: repeat(4, minmax(190px, 1fr));

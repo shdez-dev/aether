@@ -55,11 +55,17 @@ function TaskCard({
   task,
   onEditDate,
   onManage,
+  onMove,
+  lastPosition,
+  orderBusy = false,
   readOnly,
 }: {
   task: Task;
   onEditDate: (task: Task) => void;
   onManage: (task: Task) => void;
+  onMove?: (task: Task, position: number) => void;
+  lastPosition?: number;
+  orderBusy?: boolean;
   readOnly: boolean;
 }) {
   return (
@@ -85,6 +91,27 @@ function TaskCard({
           Bloqueada: {task.blockedReason} · Desbloquea:{" "}
           {task.unblockResponsibleActorId}
         </small>
+      ) : null}
+      {onMove && !readOnly && lastPosition && lastPosition > 1 ? (
+        <div className="task-order" aria-label={`Orden de ${task.description}`}>
+          <small>Posición {task.position}</small>
+          <button
+            type="button"
+            disabled={orderBusy || task.position <= 1}
+            onClick={() => onMove(task, task.position - 1)}
+            aria-label={`Subir ${task.description}`}
+          >
+            ↑
+          </button>
+          <button
+            type="button"
+            disabled={orderBusy || task.position >= lastPosition}
+            onClick={() => onMove(task, task.position + 1)}
+            aria-label={`Bajar ${task.description}`}
+          >
+            ↓
+          </button>
+        </div>
       ) : null}
       {!readOnly &&
       task.workflowStatus !== "done" &&
@@ -150,6 +177,8 @@ export function ProjectTasks({
   } | null>(null);
   const [workflowBusy, setWorkflowBusy] = useState(false);
   const [workflowError, setWorkflowError] = useState("");
+  const [orderBusy, setOrderBusy] = useState(false);
+  const [orderError, setOrderError] = useState("");
   const [revision, setRevision] = useState(0);
 
   const selectedTask = tasks.find((task) => task.id === dateEdit?.taskId);
@@ -172,6 +201,37 @@ export function ProjectTasks({
   );
   const workflowBlockValid =
     Boolean(workflowBlockReason) === Boolean(workflowUnblockActor);
+  const statusCounts = new Map<WorkflowStatus, number>();
+  for (const task of tasks)
+    statusCounts.set(
+      task.workflowStatus,
+      (statusCounts.get(task.workflowStatus) ?? 0) + 1,
+    );
+
+  async function moveTask(task: Task, position: number) {
+    if (readOnly || orderBusy) return;
+    setOrderBusy(true);
+    setOrderError("");
+    try {
+      await request(`projects/${projectId}/next-actions/${task.id}/reorder`, {
+        method: "POST",
+        body: JSON.stringify({
+          organizationId,
+          expectedVersion: task.version,
+          position,
+        }),
+      });
+    } catch (caught) {
+      setOrderError(
+        caught instanceof Error
+          ? caught.message
+          : "No se pudo cambiar el orden.",
+      );
+    } finally {
+      setRevision((current) => current + 1);
+      setOrderBusy(false);
+    }
+  }
   function editDate(task: Task) {
     if (dateBusy || workflowBusy || readOnly) return;
     setDateEdit({ taskId: task.id, proposedDueOn: task.dueOn ?? "" });
@@ -433,6 +493,7 @@ export function ProjectTasks({
       </div>
       {loading ? <p role="status">Cargando tareas…</p> : null}
       {error ? <p role="alert">{error}</p> : null}
+      {orderError ? <p role="alert">{orderError}</p> : null}
       {!loading && !error && view === "list" ? (
         tasks.length ? (
           <ul className="task-list">
@@ -442,6 +503,9 @@ export function ProjectTasks({
                 task={task}
                 onEditDate={editDate}
                 onManage={manageTask}
+                onMove={moveTask}
+                lastPosition={statusCounts.get(task.workflowStatus) ?? 0}
+                orderBusy={orderBusy}
                 readOnly={readOnly}
               />
             ))}
@@ -475,6 +539,11 @@ export function ProjectTasks({
                           task={task}
                           onEditDate={editDate}
                           onManage={manageTask}
+                          onMove={moveTask}
+                          lastPosition={
+                            statusCounts.get(task.workflowStatus) ?? 0
+                          }
+                          orderBusy={orderBusy}
                           readOnly={readOnly}
                         />
                       ))}
