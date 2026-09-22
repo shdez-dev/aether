@@ -1211,10 +1211,14 @@ export default function AetherPage() {
       </section>
       {selectedProject && organizationId ? (
         <ProjectTasks
+          key={selectedProject.id}
           projectId={selectedProject.id}
           organizationId={organizationId}
           refreshKey={selectedProject}
           request={request}
+          readOnly={["completed", "cancelled", "archived"].includes(
+            selectedProject.status,
+          )}
         />
       ) : null}
       <section

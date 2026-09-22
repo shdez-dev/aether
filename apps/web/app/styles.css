@@ -262,6 +262,20 @@ textarea {
   color: var(--danger);
   font-weight: 700;
 }
+.task-link-button {
+  margin-top: 0.5rem;
+  padding: 0;
+  color: var(--brand);
+  background: none;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+}
+.task-link-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
 .task-board {
   display: grid;
   grid-template-columns: repeat(4, minmax(190px, 1fr));
@@ -301,6 +315,18 @@ textarea {
 }
 .task-undated {
   margin-top: 1rem;
+}
+.task-date-editor {
+  margin-top: 1.25rem;
+  border-top: 1px solid var(--border);
+  padding-top: 1.25rem;
+}
+.task-date-impact {
+  margin-top: 1rem;
+  border-left: 4px solid var(--brand);
+  padding: 0.75rem 1rem;
+  background: #eaf0ff;
+  overflow-wrap: anywhere;
 }
 .skip-link {
   position: absolute;

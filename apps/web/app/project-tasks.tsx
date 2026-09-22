@@ -16,9 +16,20 @@ type Task = {
   unblockResponsibleActorId: string | null;
   dueOn: string | null;
   priority: "low" | "medium" | "high";
+  version: number;
 };
 type Calendar = { dated: Task[]; undated: Task[] };
 type View = "list" | "board" | "calendar";
+type DateImpact = {
+  actionId: string;
+  expectedVersion: number;
+  currentDueOn: string | null;
+  proposedDueOn: string | null;
+  predecessors: { actionId: string; dueOn: string | null }[];
+  successors: { actionId: string; dueOn: string | null }[];
+  pendingMilestones: { id: string; title: string; dueOn: string | null }[];
+  impactToken: string;
+};
 
 const statuses: { value: WorkflowStatus; label: string }[] = [
   { value: "to_do", label: "Por hacer" },
@@ -33,13 +44,25 @@ function currentMonth() {
   return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
 }
 
-function TaskCard({ task }: { task: Task }) {
+function TaskCard({
+  task,
+  onEditDate,
+  readOnly,
+}: {
+  task: Task;
+  onEditDate: (task: Task) => void;
+  readOnly: boolean;
+}) {
   return (
     <li className="task-card" data-task-id={task.id}>
       <strong>{task.description}</strong>
       <small>
-        {statuses.find((status) => status.value === task.workflowStatus)?.label}{" "}
-        ·{task.ownerActorId ?? "Sin responsable"} · {task.dueOn ?? "Sin fecha"}·
+        {statuses.find((status) => status.value === task.workflowStatus)?.label}
+        {" · "}
+        {task.ownerActorId ?? "Sin responsable"}
+        {" · "}
+        {task.dueOn ?? "Sin fecha"}
+        {" · "}
         Prioridad {task.priority}
       </small>
       {task.executorTeamId ? (
@@ -54,6 +77,17 @@ function TaskCard({ task }: { task: Task }) {
           {task.unblockResponsibleActorId}
         </small>
       ) : null}
+      {!readOnly &&
+      task.workflowStatus !== "done" &&
+      task.workflowStatus !== "cancelled" ? (
+        <button
+          className="task-link-button"
+          type="button"
+          onClick={() => onEditDate(task)}
+        >
+          Cambiar fecha
+        </button>
+      ) : null}
     </li>
   );
 }
@@ -63,11 +97,13 @@ export function ProjectTasks({
   organizationId,
   refreshKey,
   request,
+  readOnly = false,
 }: {
   projectId: string;
   organizationId: string;
   refreshKey: unknown;
   request: (url: string, init?: RequestInit) => Promise<Response>;
+  readOnly?: boolean;
 }) {
   const [view, setView] = useState<View>("list");
   const [month, setMonth] = useState(currentMonth);
@@ -79,6 +115,89 @@ export function ProjectTasks({
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [dateEdit, setDateEdit] = useState<{
+    taskId: string;
+    proposedDueOn: string;
+  } | null>(null);
+  const [dateImpact, setDateImpact] = useState<DateImpact | null>(null);
+  const [dateBusy, setDateBusy] = useState(false);
+  const [dateError, setDateError] = useState("");
+  const [revision, setRevision] = useState(0);
+
+  const selectedTask = tasks.find((task) => task.id === dateEdit?.taskId);
+  function editDate(task: Task) {
+    if (dateBusy || readOnly) return;
+    setDateEdit({ taskId: task.id, proposedDueOn: task.dueOn ?? "" });
+    setDateImpact(null);
+    setDateError("");
+  }
+
+  async function previewDate() {
+    if (!selectedTask || !dateEdit || readOnly) return;
+    setDateBusy(true);
+    setDateImpact(null);
+    setDateError("");
+    try {
+      const query = new URLSearchParams({
+        organizationId,
+        expectedVersion: String(selectedTask.version),
+      });
+      if (dateEdit.proposedDueOn)
+        query.set("proposedDueOn", dateEdit.proposedDueOn);
+      const response = await request(
+        `projects/${projectId}/next-actions/${selectedTask.id}/date-impact?${query}`,
+      );
+      setDateImpact((await response.json()) as DateImpact);
+    } catch (caught) {
+      setDateError(
+        caught instanceof Error
+          ? caught.message
+          : "No se pudo revisar el impacto.",
+      );
+    } finally {
+      setDateBusy(false);
+    }
+  }
+
+  async function confirmDate() {
+    if (!selectedTask || !dateEdit || !dateImpact || dateBusy || readOnly)
+      return;
+    if (
+      dateImpact.actionId !== selectedTask.id ||
+      dateImpact.expectedVersion !== selectedTask.version ||
+      dateImpact.proposedDueOn !== (dateEdit.proposedDueOn || null)
+    )
+      return;
+    setDateBusy(true);
+    setDateError("");
+    try {
+      await request(
+        `projects/${projectId}/next-actions/${selectedTask.id}/date`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            organizationId,
+            expectedVersion: selectedTask.version,
+            proposedDueOn: dateImpact.proposedDueOn,
+            impactToken: dateImpact.impactToken,
+          }),
+        },
+      );
+      setDateEdit(null);
+      setDateImpact(null);
+      setRevision((current) => current + 1);
+    } catch (caught) {
+      setDateImpact(null);
+      setDateError(
+        caught instanceof Error
+          ? caught.message
+          : "No se pudo cambiar la fecha.",
+      );
+      setRevision((current) => current + 1);
+    } finally {
+      setDateBusy(false);
+    }
+  }
 
   useEffect(() => {
     let active = true;
@@ -123,7 +242,7 @@ export function ProjectTasks({
     return () => {
       active = false;
     };
-  }, [projectId, organizationId, refreshKey, request, month, status]);
+  }, [projectId, organizationId, refreshKey, request, month, status, revision]);
 
   const [year, monthNumber] = month.split("-").map(Number);
   const dayCount =
@@ -192,7 +311,12 @@ export function ProjectTasks({
         tasks.length ? (
           <ul className="task-list">
             {tasks.map((task) => (
-              <TaskCard key={task.id} task={task} />
+              <TaskCard
+                key={task.id}
+                task={task}
+                onEditDate={editDate}
+                readOnly={readOnly}
+              />
             ))}
           </ul>
         ) : (
@@ -219,7 +343,12 @@ export function ProjectTasks({
                   {columnTasks.length ? (
                     <ul className="task-list">
                       {columnTasks.map((task) => (
-                        <TaskCard key={task.id} task={task} />
+                        <TaskCard
+                          key={task.id}
+                          task={task}
+                          onEditDate={editDate}
+                          readOnly={readOnly}
+                        />
                       ))}
                     </ul>
                   ) : (
@@ -240,7 +369,12 @@ export function ProjectTasks({
             {tasks
               .filter((task) => task.workflowStatus === "cancelled")
               .map((task) => (
-                <TaskCard key={task.id} task={task} />
+                <TaskCard
+                  key={task.id}
+                  task={task}
+                  onEditDate={editDate}
+                  readOnly={readOnly}
+                />
               ))}
           </ul>
         </section>
@@ -273,7 +407,12 @@ export function ProjectTasks({
                   {dayTasks.length ? (
                     <ul className="task-list">
                       {dayTasks.map((task) => (
-                        <TaskCard key={task.id} task={task} />
+                        <TaskCard
+                          key={task.id}
+                          task={task}
+                          onEditDate={editDate}
+                          readOnly={readOnly}
+                        />
                       ))}
                     </ul>
                   ) : null}
@@ -286,7 +425,12 @@ export function ProjectTasks({
             {calendar.undated.length ? (
               <ul className="task-list">
                 {calendar.undated.map((task) => (
-                  <TaskCard key={task.id} task={task} />
+                  <TaskCard
+                    key={task.id}
+                    task={task}
+                    onEditDate={editDate}
+                    readOnly={readOnly}
+                  />
                 ))}
               </ul>
             ) : (
@@ -294,6 +438,114 @@ export function ProjectTasks({
             )}
           </section>
         </>
+      ) : null}
+      {!readOnly && selectedTask && dateEdit ? (
+        <section
+          className="task-date-editor"
+          aria-label="Cambiar fecha de tarea"
+        >
+          <h3>Fecha de {selectedTask.description}</h3>
+          <p className="muted">
+            Fecha actual: {selectedTask.dueOn ?? "Sin fecha"}
+          </p>
+          <form
+            className="nested-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void previewDate();
+            }}
+          >
+            <label className="ui-field task-month">
+              Nueva fecha (vacía = sin fecha)
+              <input
+                type="date"
+                value={dateEdit.proposedDueOn}
+                disabled={dateBusy}
+                onChange={(event) => {
+                  setDateEdit({
+                    ...dateEdit,
+                    proposedDueOn: event.target.value,
+                  });
+                  setDateImpact(null);
+                }}
+              />
+            </label>
+            <div className="form-actions">
+              <button className="ui-button" type="submit" disabled={dateBusy}>
+                Revisar impacto
+              </button>
+              <button
+                className="task-link-button"
+                type="button"
+                disabled={dateBusy}
+                onClick={() => {
+                  setDateEdit(null);
+                  setDateImpact(null);
+                  setDateError("");
+                }}
+              >
+                Cancelar
+              </button>
+            </div>
+          </form>
+          {dateError ? <p role="alert">{dateError}</p> : null}
+          {dateImpact ? (
+            <div className="task-date-impact">
+              <h3>Impacto antes de confirmar</h3>
+              <p>
+                {dateImpact.currentDueOn ?? "Sin fecha"} →{" "}
+                {dateImpact.proposedDueOn ?? "Sin fecha"}
+              </p>
+              <p>
+                Predecesoras:{" "}
+                {dateImpact.predecessors.length
+                  ? dateImpact.predecessors
+                      .map(
+                        (item) =>
+                          `${item.actionId} (${item.dueOn ?? "sin fecha"})`,
+                      )
+                      .join(", ")
+                  : "ninguna"}
+                .
+              </p>
+              <p>
+                Sucesoras:{" "}
+                {dateImpact.successors.length
+                  ? dateImpact.successors
+                      .map(
+                        (item) =>
+                          `${item.actionId} (${item.dueOn ?? "sin fecha"})`,
+                      )
+                      .join(", ")
+                  : "ninguna"}
+                .
+              </p>
+              <p>
+                Hitos pendientes:{" "}
+                {dateImpact.pendingMilestones.length
+                  ? dateImpact.pendingMilestones
+                      .map(
+                        (item) =>
+                          `${item.title} (${item.dueOn ?? "sin fecha"})`,
+                      )
+                      .join(", ")
+                  : "ninguno"}
+                .
+              </p>
+              <p className="muted">
+                Las fechas relacionadas no cambian automáticamente.
+              </p>
+              <button
+                className="ui-button"
+                type="button"
+                disabled={dateBusy}
+                onClick={() => void confirmDate()}
+              >
+                Confirmar cambio de fecha
+              </button>
+            </div>
+          ) : null}
+        </section>
       ) : null}
     </section>
   );
