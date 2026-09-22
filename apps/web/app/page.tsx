@@ -20,6 +20,7 @@ import {
   canRenderInitiativeAction,
   initiativeStatusLabel,
 } from "../src/initiatives";
+import { ProjectTasks } from "./project-tasks";
 
 type Draft = Pick<
   InitiativeResponse,
@@ -141,6 +142,7 @@ export default function AetherPage() {
     description: "",
     ownerActorId: "",
     dueOn: "",
+    priority: "medium" as "low" | "medium" | "high",
   });
   const [projectDraft, setProjectDraft] = useState({
     name: "",
@@ -649,17 +651,28 @@ export default function AetherPage() {
   async function addNextAction(event: FormEvent) {
     event.preventDefault();
     if (!selectedProject) return;
+    setError("");
     try {
       await request(`projects/${selectedProject.id}/next-actions`, {
         method: "POST",
         body: JSON.stringify({
           organizationId,
           description: nextAction.description,
-          ownerActorId: nextAction.ownerActorId || session?.actorId,
+          ownerActorId: nextAction.ownerActorId || session?.actorId || null,
           dueOn: nextAction.dueOn || null,
+          priority: nextAction.priority,
+          estimatedEffort: null,
+          effortUnit: null,
+          periodStartOn: null,
+          periodEndOn: null,
         }),
       });
-      setNextAction({ description: "", ownerActorId: "", dueOn: "" });
+      setNextAction({
+        description: "",
+        ownerActorId: "",
+        dueOn: "",
+        priority: "medium",
+      });
       setSelectedProject({ ...selectedProject });
       setMessage("Próxima acción añadida al proyecto.");
     } catch (caught) {
@@ -1151,6 +1164,23 @@ export default function AetherPage() {
                       })
                     }
                   />
+                  <label className="ui-field">
+                    Prioridad
+                    <select
+                      value={nextAction.priority}
+                      onChange={(event) =>
+                        setNextAction({
+                          ...nextAction,
+                          priority: event.target
+                            .value as typeof nextAction.priority,
+                        })
+                      }
+                    >
+                      <option value="low">Baja</option>
+                      <option value="medium">Media</option>
+                      <option value="high">Alta</option>
+                    </select>
+                  </label>
                   <Button type="submit">Añadir acción</Button>
                 </form>
                 <section className="audit">
@@ -1179,6 +1209,14 @@ export default function AetherPage() {
           </Card>
         </aside>
       </section>
+      {selectedProject && organizationId ? (
+        <ProjectTasks
+          projectId={selectedProject.id}
+          organizationId={organizationId}
+          refreshKey={selectedProject}
+          request={request}
+        />
+      ) : null}
       <section
         id="governance"
         className="governance-grid"
