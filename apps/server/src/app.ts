@@ -3142,6 +3142,31 @@ export async function buildServer(input: {
       });
     },
   );
+  app.get("/v1/projects/:projectId/next-actions", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    const { projectId } = z
+      .object({ projectId: z.string().uuid() })
+      .parse(request.params);
+    const query = z
+      .object({ organizationId: z.string().uuid() })
+      .parse(request.query);
+    const actions = await input.projects.listNextActions({
+      actorId: session.actorId,
+      correlationId: correlationId(reply),
+      projectId,
+      ...query,
+    });
+    return actions.map((action) => ({
+      ...action,
+      completedAt: action.completedAt?.toISOString() ?? null,
+      createdAt: action.createdAt.toISOString(),
+    }));
+  });
   app.post("/v1/projects/:projectId/next-actions", async (request, reply) => {
     const session = await requireSession(
       request,

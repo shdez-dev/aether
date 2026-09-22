@@ -200,6 +200,9 @@ describe("ProjectService", () => {
         async findNextAction() {
           return null;
         },
+        async listNextActions() {
+          return [];
+        },
         async listDependencies() {
           return [];
         },

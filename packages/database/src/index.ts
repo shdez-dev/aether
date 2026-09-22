@@ -4064,6 +4064,60 @@ export class PostgresProjectExecutionStore implements ProjectExecutionStore {
         }
       : null;
   }
+  async listNextActions(
+    projectId: string,
+  ): Promise<readonly ProjectNextAction[]> {
+    const result = await this.pool.query<{
+      id: string;
+      project_id: string;
+      description: string;
+      owner_actor_id: string;
+      executor_team_id: string | null;
+      reviewer_actor_id: string | null;
+      due_on: string | Date | null;
+      priority: ProjectNextAction["priority"];
+      estimated_effort: string | null;
+      effort_unit: ProjectNextAction["effortUnit"];
+      period_start_on: string | Date | null;
+      period_end_on: string | Date | null;
+      workflow_status: ProjectNextAction["workflowStatus"];
+      blocked_reason: string | null;
+      unblock_responsible_actor_id: string | null;
+      completed_at: Date | null;
+      version: number;
+      created_by_actor_id: string;
+      created_at: Date;
+    }>(
+      `SELECT id, project_id, description, owner_actor_id, executor_team_id, reviewer_actor_id, due_on, priority, estimated_effort, effort_unit, period_start_on, period_end_on, workflow_status, blocked_reason, unblock_responsible_actor_id, completed_at, version, created_by_actor_id, created_at FROM project_next_actions WHERE project_id = $1 ORDER BY due_on NULLS LAST, created_at ASC`,
+      [projectId],
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      projectId: row.project_id,
+      description: row.description,
+      ownerActorId: row.owner_actor_id,
+      executorTeamId: row.executor_team_id,
+      reviewerActorId: row.reviewer_actor_id,
+      dueOn: row.due_on === null ? null : toCalendarDate(row.due_on),
+      priority: row.priority,
+      estimatedEffort:
+        row.estimated_effort === null ? null : Number(row.estimated_effort),
+      effortUnit: row.effort_unit,
+      periodStartOn:
+        row.period_start_on === null
+          ? null
+          : toCalendarDate(row.period_start_on),
+      periodEndOn:
+        row.period_end_on === null ? null : toCalendarDate(row.period_end_on),
+      workflowStatus: row.workflow_status,
+      blockedReason: row.blocked_reason,
+      unblockResponsibleActorId: row.unblock_responsible_actor_id,
+      completedAt: row.completed_at,
+      version: row.version,
+      createdByActorId: row.created_by_actor_id,
+      createdAt: row.created_at,
+    }));
+  }
   async listDependencies(
     projectId: string,
   ): Promise<readonly ProjectNextActionDependency[]> {

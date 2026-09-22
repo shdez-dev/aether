@@ -256,6 +256,11 @@ export class InMemoryProjectExecutionStore implements ProjectExecutionStore {
   async findNextAction(actionId: string): Promise<ProjectNextAction | null> {
     return this.actions.find((action) => action.id === actionId) ?? null;
   }
+  async listNextActions(
+    projectId: string,
+  ): Promise<readonly ProjectNextAction[]> {
+    return this.actions.filter((action) => action.projectId === projectId);
+  }
   async listDependencies(
     projectId: string,
   ): Promise<readonly ProjectNextActionDependency[]> {

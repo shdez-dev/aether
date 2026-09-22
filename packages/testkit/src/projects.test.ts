@@ -394,6 +394,20 @@ describe("project conversion and execution", () => {
         correlationId: ids.next(),
       }),
     ).resolves.toMatchObject({ workflowStatus: "done", version: 3 });
+    await expect(
+      projects.listNextActions({
+        actorId: "replacement",
+        organizationId: organization.id,
+        projectId: project.id,
+        correlationId: ids.next(),
+      }),
+    ).resolves.toMatchObject([
+      {
+        id: nextAction.id,
+        workflowStatus: "done",
+        executorTeamId: executionTeam.id,
+      },
+    ]);
     const active = await projects.changeStatus({
       actorId: "replacement",
       organizationId: organization.id,

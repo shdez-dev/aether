@@ -133,6 +133,7 @@ export interface ProjectExecutionStore {
   findLatestBaseline(projectId: string): Promise<ProjectBaseline | null>;
   hasMinimumPlan(projectId: string): Promise<boolean>;
   findNextAction(actionId: string): Promise<ProjectNextAction | null>;
+  listNextActions(projectId: string): Promise<readonly ProjectNextAction[]>;
   listDependencies(
     projectId: string,
   ): Promise<readonly ProjectNextActionDependency[]>;
@@ -841,6 +842,19 @@ export class ProjectService {
       },
     );
     return transitioned;
+  }
+  async listNextActions(input: {
+    actorId: string;
+    organizationId: string;
+    projectId: string;
+    correlationId?: string;
+  }): Promise<readonly ProjectNextAction[]> {
+    const project = await this.requireProject(
+      input.projectId,
+      input.organizationId,
+    );
+    await this.assertProjectRead(input.actorId, project, input.correlationId);
+    return this.dependencies.execution.listNextActions(project.id);
   }
   async addRisk(input: {
     actorId: string;
