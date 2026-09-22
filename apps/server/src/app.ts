@@ -92,6 +92,7 @@ import {
   ResolveProjectRiskRequestSchema,
   RecordProjectOperationalDecisionRequestSchema,
   AddProjectExternalDependencyRequestSchema,
+  ResolveProjectExternalDependencyRequestSchema,
   RequestProjectChangeSchema,
   ReviewProjectChangeRequestSchema,
   AddProjectNextActionRequestSchema,
@@ -2896,6 +2897,80 @@ export async function buildServer(input: {
             body: {
               ...dependency,
               createdAt: dependency.createdAt.toISOString(),
+            },
+          };
+        },
+      });
+    },
+  );
+  app.get(
+    "/v1/projects/:projectId/external-dependencies",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      const { projectId } = z
+        .object({ projectId: z.string().uuid() })
+        .parse(request.params);
+      const { organizationId } = z
+        .object({ organizationId: z.string().uuid() })
+        .parse(request.query);
+      return (
+        await input.projects.listExternalDependencies({
+          actorId: session.actorId,
+          correlationId: correlationId(reply),
+          organizationId,
+          projectId,
+        })
+      ).map((dependency) => ({
+        ...dependency,
+        createdAt: dependency.createdAt.toISOString(),
+        resolvedAt: dependency.resolvedAt?.toISOString() ?? null,
+      }));
+    },
+  );
+  app.post(
+    "/v1/projects/:projectId/external-dependencies/:dependencyId/resolution",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      const { projectId, dependencyId } = z
+        .object({
+          projectId: z.string().uuid(),
+          dependencyId: z.string().uuid(),
+        })
+        .parse(request.params);
+      const body = ResolveProjectExternalDependencyRequestSchema.parse(
+        request.body,
+      );
+      return respondIdempotently({
+        request,
+        reply,
+        store: input.idempotency,
+        actorId: session.actorId,
+        operation: `project.external-dependency.resolve:${projectId}:${dependencyId}`,
+        requestPayload: body,
+        execute: async () => {
+          const dependency = await input.projects.resolveExternalDependency({
+            actorId: session.actorId,
+            correlationId: correlationId(reply),
+            projectId,
+            dependencyId,
+            ...body,
+          });
+          return {
+            statusCode: 200,
+            body: {
+              ...dependency,
+              createdAt: dependency.createdAt.toISOString(),
+              resolvedAt: dependency.resolvedAt?.toISOString() ?? null,
             },
           };
         },

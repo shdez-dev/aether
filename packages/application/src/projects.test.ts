@@ -135,6 +135,15 @@ describe("ProjectService", () => {
           );
         },
         async addExternalDependency() {},
+        async listExternalDependencies() {
+          return [];
+        },
+        async findExternalDependency() {
+          return null;
+        },
+        async resolveExternalDependency() {
+          return false;
+        },
         async addChangeRequest(request) {
           changeRequests.push(request);
         },

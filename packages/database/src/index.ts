@@ -3746,8 +3746,8 @@ export class PostgresProjectExecutionStore implements ProjectExecutionStore {
     dependency: ProjectExternalDependency,
   ): Promise<void> {
     await this.pool.query(
-      `INSERT INTO project_external_dependencies (id, project_id, description, external_party, owner_actor_id, due_on, status, created_by_actor_id, created_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      `INSERT INTO project_external_dependencies (id, project_id, description, external_party, owner_actor_id, due_on, status, created_by_actor_id, created_at, resolution_note, resolved_by_actor_id, resolved_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
       [
         dependency.id,
         dependency.projectId,
@@ -3758,8 +3758,44 @@ export class PostgresProjectExecutionStore implements ProjectExecutionStore {
         dependency.status,
         dependency.createdByActorId,
         dependency.createdAt,
+        dependency.resolutionNote,
+        dependency.resolvedByActorId,
+        dependency.resolvedAt,
       ],
     );
+  }
+  async listExternalDependencies(
+    projectId: string,
+  ): Promise<readonly ProjectExternalDependency[]> {
+    const result = await this.pool.query<ProjectExternalDependencyRow>(
+      `SELECT id, project_id, description, external_party, owner_actor_id, due_on, status, created_by_actor_id, created_at, resolution_note, resolved_by_actor_id, resolved_at FROM project_external_dependencies WHERE project_id = $1 ORDER BY created_at ASC, id ASC`,
+      [projectId],
+    );
+    return result.rows.map(toProjectExternalDependency);
+  }
+  async findExternalDependency(
+    dependencyId: string,
+  ): Promise<ProjectExternalDependency | null> {
+    const result = await this.pool.query<ProjectExternalDependencyRow>(
+      `SELECT id, project_id, description, external_party, owner_actor_id, due_on, status, created_by_actor_id, created_at, resolution_note, resolved_by_actor_id, resolved_at FROM project_external_dependencies WHERE id = $1`,
+      [dependencyId],
+    );
+    return result.rows[0] ? toProjectExternalDependency(result.rows[0]) : null;
+  }
+  async resolveExternalDependency(
+    dependency: ProjectExternalDependency,
+  ): Promise<boolean> {
+    const result = await this.pool.query(
+      `UPDATE project_external_dependencies SET status=$2, resolution_note=$3, resolved_by_actor_id=$4, resolved_at=$5 WHERE id=$1 AND status='open'`,
+      [
+        dependency.id,
+        dependency.status,
+        dependency.resolutionNote,
+        dependency.resolvedByActorId,
+        dependency.resolvedAt,
+      ],
+    );
+    return (result.rowCount ?? 0) === 1;
   }
   async addChangeRequest(request: ProjectChangeRequest): Promise<void> {
     await this.pool.query(
@@ -5835,6 +5871,38 @@ function toProjectOperationalDecision(
     supersedesDecisionId: row.supersedes_decision_id,
     decidedByActorId: row.decided_by_actor_id,
     decidedAt: row.decided_at,
+  };
+}
+type ProjectExternalDependencyRow = {
+  id: string;
+  project_id: string;
+  description: string;
+  external_party: string;
+  owner_actor_id: string;
+  due_on: string | null;
+  status: ProjectExternalDependency["status"];
+  created_by_actor_id: string;
+  created_at: Date;
+  resolution_note: string | null;
+  resolved_by_actor_id: string | null;
+  resolved_at: Date | null;
+};
+function toProjectExternalDependency(
+  row: ProjectExternalDependencyRow,
+): ProjectExternalDependency {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    description: row.description,
+    externalParty: row.external_party,
+    ownerActorId: row.owner_actor_id,
+    dueOn: row.due_on,
+    status: row.status,
+    createdByActorId: row.created_by_actor_id,
+    createdAt: row.created_at,
+    resolutionNote: row.resolution_note,
+    resolvedByActorId: row.resolved_by_actor_id,
+    resolvedAt: row.resolved_at,
   };
 }
 function toProjectAuditEvent(row: ProjectAuditRow): ProjectAuditEvent {

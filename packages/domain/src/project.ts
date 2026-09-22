@@ -124,6 +124,9 @@ export type ProjectExternalDependency = Readonly<{
   status: ProjectExternalDependencyStatus;
   createdByActorId: string;
   createdAt: Date;
+  resolutionNote: string | null;
+  resolvedByActorId: string | null;
+  resolvedAt: Date | null;
 }>;
 export type ProjectChangeRequest = Readonly<{
   id: string;
@@ -422,6 +425,7 @@ export class ProjectDomainError extends Error {
       | "PROJECT_CHANGE_REQUEST_NOT_PENDING"
       | "PROJECT_RISK_NOT_OPEN"
       | "PROJECT_OPERATIONAL_DECISION_INVALID"
+      | "PROJECT_EXTERNAL_DEPENDENCY_NOT_OPEN"
       | "INVALID_PROJECT_TRANSITION"
       | "DECISION_CONDITIONS_PENDING",
   ) {

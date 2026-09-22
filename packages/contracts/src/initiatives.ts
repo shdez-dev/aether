@@ -298,6 +298,11 @@ export const AddProjectExternalDependencyRequestSchema = z.object({
   ownerActorId: z.string().min(1).max(255),
   dueOn: z.string().date().nullable(),
 });
+export const ResolveProjectExternalDependencyRequestSchema = z.object({
+  organizationId: UuidSchema,
+  status: z.enum(["resolved", "accepted"]),
+  resolutionNote: NonEmptyTextSchema.max(10_000),
+});
 export const RequestProjectChangeSchema = z.object({
   organizationId: UuidSchema,
   title: NonEmptyTextSchema.max(2_000),

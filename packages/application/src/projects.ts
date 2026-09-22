@@ -20,6 +20,7 @@ import {
   type ProjectRiskStatus,
   type ProjectOperationalDecision,
   type ProjectExternalDependency,
+  type ProjectExternalDependencyStatus,
   type ProjectChangeRequest,
   type ProjectBaseline,
   type ProjectBaselineDifference,
@@ -95,6 +96,15 @@ export interface ProjectExecutionStore {
     decisionId: string,
   ): Promise<ProjectOperationalDecision | null>;
   addExternalDependency(dependency: ProjectExternalDependency): Promise<void>;
+  listExternalDependencies(
+    projectId: string,
+  ): Promise<readonly ProjectExternalDependency[]>;
+  findExternalDependency(
+    dependencyId: string,
+  ): Promise<ProjectExternalDependency | null>;
+  resolveExternalDependency(
+    dependency: ProjectExternalDependency,
+  ): Promise<boolean>;
   addChangeRequest(request: ProjectChangeRequest): Promise<void>;
   findChangeRequest(
     changeRequestId: string,
@@ -901,6 +911,9 @@ export class ProjectService {
       status: "open",
       createdByActorId: input.actorId,
       createdAt: this.dependencies.clock.now(),
+      resolutionNote: null,
+      resolvedByActorId: null,
+      resolvedAt: null,
     };
     await this.dependencies.execution.addExternalDependency(dependency);
     await this.record(
@@ -911,6 +924,60 @@ export class ProjectService {
       { dependencyId: dependency.id, ownerActorId: dependency.ownerActorId },
     );
     return dependency;
+  }
+  async listExternalDependencies(input: {
+    actorId: string;
+    organizationId: string;
+    projectId: string;
+    correlationId?: string;
+  }): Promise<readonly ProjectExternalDependency[]> {
+    const project = await this.requireProject(
+      input.projectId,
+      input.organizationId,
+    );
+    await this.assertProjectRead(input.actorId, project, input.correlationId);
+    return this.dependencies.execution.listExternalDependencies(project.id);
+  }
+  async resolveExternalDependency(input: {
+    actorId: string;
+    organizationId: string;
+    projectId: string;
+    dependencyId: string;
+    status: Exclude<ProjectExternalDependencyStatus, "open">;
+    resolutionNote: string;
+    correlationId: string;
+  }): Promise<ProjectExternalDependency> {
+    const project = await this.requireProject(
+      input.projectId,
+      input.organizationId,
+    );
+    const dependency = await this.dependencies.execution.findExternalDependency(
+      input.dependencyId,
+    );
+    if (!dependency || dependency.projectId !== project.id)
+      throw new ResourceNotFoundError("PROJECT_NOT_FOUND");
+    if (dependency.status !== "open")
+      throw new ProjectDomainError("PROJECT_EXTERNAL_DEPENDENCY_NOT_OPEN");
+    await this.assertRiskResolutionAccess(input.actorId, project, dependency);
+    const resolved: ProjectExternalDependency = {
+      ...dependency,
+      status: input.status,
+      resolutionNote: input.resolutionNote,
+      resolvedByActorId: input.actorId,
+      resolvedAt: this.dependencies.clock.now(),
+    };
+    if (
+      !(await this.dependencies.execution.resolveExternalDependency(resolved))
+    )
+      throw new ProjectDomainError("PROJECT_EXTERNAL_DEPENDENCY_NOT_OPEN");
+    await this.record(
+      project,
+      input.actorId,
+      input.correlationId,
+      `project.external_dependency_${input.status}.v1`,
+      { dependencyId: resolved.id, ownerActorId: resolved.ownerActorId },
+    );
+    return resolved;
   }
   async requestChange(input: {
     actorId: string;
@@ -1332,7 +1399,7 @@ export class ProjectService {
   private async assertRiskResolutionAccess(
     actorId: string,
     project: Project,
-    risk: ProjectRisk,
+    risk: Pick<ProjectRisk, "ownerActorId">,
   ): Promise<void> {
     if (actorId === risk.ownerActorId) {
       await this.assertProjectParticipant(

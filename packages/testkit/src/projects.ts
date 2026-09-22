@@ -150,6 +150,32 @@ export class InMemoryProjectExecutionStore implements ProjectExecutionStore {
   ): Promise<void> {
     this.externalDependencies.push(dependency);
   }
+  async listExternalDependencies(
+    projectId: string,
+  ): Promise<readonly ProjectExternalDependency[]> {
+    return this.externalDependencies.filter(
+      (dependency) => dependency.projectId === projectId,
+    );
+  }
+  async findExternalDependency(
+    dependencyId: string,
+  ): Promise<ProjectExternalDependency | null> {
+    return (
+      this.externalDependencies.find(
+        (dependency) => dependency.id === dependencyId,
+      ) ?? null
+    );
+  }
+  async resolveExternalDependency(
+    dependency: ProjectExternalDependency,
+  ): Promise<boolean> {
+    const index = this.externalDependencies.findIndex(
+      (current) => current.id === dependency.id && current.status === "open",
+    );
+    if (index < 0) return false;
+    this.externalDependencies[index] = dependency;
+    return true;
+  }
   async addChangeRequest(request: ProjectChangeRequest): Promise<void> {
     this.changeRequests.push(request);
   }
