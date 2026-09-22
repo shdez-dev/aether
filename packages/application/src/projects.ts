@@ -88,6 +88,12 @@ export interface ProjectStore {
   }): Promise<boolean>;
 }
 export interface ProjectExecutionStore {
+  claimNextAction(input: {
+    action: ProjectNextAction;
+    ownerActorId: string;
+    expectedVersion: number;
+    auditEvent: ProjectAuditEvent;
+  }): Promise<ProjectNextAction | null>;
   reorderNextAction(input: {
     action: ProjectNextAction;
     position: number;
@@ -705,7 +711,7 @@ export class ProjectService {
     organizationId: string;
     projectId: string;
     description: string;
-    ownerActorId: string;
+    ownerActorId: string | null;
     executorTeamId?: string | null;
     reviewerActorId?: string | null;
     dueOn: string | null;
@@ -725,11 +731,14 @@ export class ProjectService {
       project,
       input.correlationId,
     );
-    await this.assertProjectParticipant(
-      input.ownerActorId,
-      project.organizationId,
-      project.workspaceId,
-    );
+    if (input.ownerActorId)
+      await this.assertProjectParticipant(
+        input.ownerActorId,
+        project.organizationId,
+        project.workspaceId,
+      );
+    if (input.ownerActorId === null && !input.executorTeamId)
+      throw new ProjectDomainError("PROJECT_NEXT_ACTION_OWNER_REQUIRED");
     if (input.executorTeamId)
       await this.assertExecutorTeam(
         input.executorTeamId,
@@ -850,6 +859,37 @@ export class ProjectService {
       },
     );
     return (await this.dependencies.execution.findNextAction(action.id)) ?? transitioned;
+  }
+  async claimNextAction(input: {
+    actorId: string;
+    organizationId: string;
+    projectId: string;
+    actionId: string;
+    expectedVersion: number;
+    correlationId: string;
+  }): Promise<ProjectNextAction> {
+    const project = await this.requireProject(input.projectId, input.organizationId);
+    await this.assertExecutionAccess(input.actorId, project, input.correlationId);
+    const action = await this.dependencies.execution.findNextAction(input.actionId);
+    if (!action || action.projectId !== project.id)
+      throw new ResourceNotFoundError("PROJECT_NOT_FOUND");
+    if (action.version !== input.expectedVersion) throw new ProjectVersionConflictError();
+    if (
+      action.workflowStatus !== "to_do" ||
+      action.ownerActorId !== null ||
+      !action.executorTeamId
+    )
+      throw new ProjectDomainError("PROJECT_NEXT_ACTION_CLAIM_INVALID");
+    await this.assertExecutorTeamMember(input.actorId, action.executorTeamId, project);
+    const claimed = await this.dependencies.execution.claimNextAction({
+      action,
+      ownerActorId: input.actorId,
+      expectedVersion: input.expectedVersion,
+      auditEvent: this.auditEventFor(project, input.actorId, input.correlationId,
+        "project.next_action_claimed.v1", { actionId: action.id, executorTeamId: action.executorTeamId }),
+    });
+    if (!claimed) throw new ProjectVersionConflictError();
+    return claimed;
   }
   async reorderNextAction(input: {
     actorId: string;
@@ -1670,6 +1710,19 @@ export class ProjectService {
       return;
     }
     await this.assertExecutionAccess(actorId, project, "");
+  }
+  private async assertExecutorTeamMember(
+    actorId: string,
+    teamId: string,
+    project: Project,
+  ): Promise<void> {
+    await this.assertProjectParticipant(actorId, project.organizationId, project.workspaceId);
+    const team = (await this.dependencies.tenancy.listTeams({
+      organizationId: project.organizationId,
+      workspaceId: project.workspaceId,
+    })).find((item) => item.id === teamId);
+    if (!team || !team.memberActorIds.includes(actorId))
+      throw new AccessDeniedError("workspace:manage");
   }
   private async assertNextActionWorkflowAccess(
     actorId: string,

@@ -64,6 +64,15 @@ describe("project lifecycle", () => {
         at: action.createdAt,
       }),
     ).toThrow("PROJECT_NEXT_ACTION_BLOCK_INVALID");
+    expect(() =>
+      transitionNextActionWorkflow({
+        action: { ...action, ownerActorId: null },
+        status: "in_progress",
+        blockedReason: null,
+        unblockResponsibleActorId: null,
+        at: action.createdAt,
+      }),
+    ).toThrow("PROJECT_NEXT_ACTION_OWNER_REQUIRED");
   });
   it("rejects self-references and cycles between next actions", () => {
     const first = { actionId: "action-a", dependsOnActionId: "action-b" };

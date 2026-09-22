@@ -3855,7 +3855,7 @@ describe("document project authorization endpoints", () => {
     const actionId = "00000000-0000-4000-8000-000000000011";
     const organizationId = "00000000-0000-4000-8000-000000000012";
     let calls = 0;
-    const projects: Pick<ProjectService, "reorderNextAction"> = {
+    const projects: Pick<ProjectService, "reorderNextAction" | "claimNextAction"> = {
       async reorderNextAction(input) {
         calls++;
         expect(input).toMatchObject({
@@ -3887,6 +3887,17 @@ describe("document project authorization endpoints", () => {
           version: 5,
           createdByActorId: "owner",
           createdAt: new Date("2026-09-22T00:00:00.000Z"),
+        };
+      },
+      async claimNextAction(input) {
+        expect(input).toMatchObject({ actorId: "owner", projectId, actionId, organizationId, expectedVersion: 4 });
+        return {
+          id: actionId, projectId, description: "Tomada", ownerActorId: "owner",
+          executorTeamId: "00000000-0000-4000-8000-000000000013", reviewerActorId: null,
+          dueOn: null, priority: "medium", estimatedEffort: null, effortUnit: null,
+          periodStartOn: null, periodEndOn: null, workflowStatus: "to_do", position: 2,
+          blockedReason: null, unblockResponsibleActorId: null, completedAt: null,
+          version: 5, createdByActorId: "owner", createdAt: new Date("2026-09-22T00:00:00.000Z"),
         };
       },
     };
@@ -3925,6 +3936,14 @@ describe("document project authorization endpoints", () => {
     expect(replay.statusCode).toBe(200);
     expect(first.json()).toMatchObject({ position: 2, version: 5 });
     expect(calls).toBe(1);
+    const claim = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${projectId}/next-actions/${actionId}/claim`,
+      headers: { ...headers, "idempotency-key": "task-claim-key" },
+      payload: { organizationId, expectedVersion: 4 },
+    });
+    expect(claim.statusCode).toBe(200);
+    expect(claim.json()).toMatchObject({ ownerActorId: "owner", version: 5 });
     expect(
       (
         await app.inject({

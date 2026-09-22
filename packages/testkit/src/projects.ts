@@ -115,6 +115,21 @@ export class InMemoryProjectExecutionStore implements ProjectExecutionStore {
       ).length + 1;
     this.actions.push({ ...action, position });
   }
+  async claimNextAction(input: {
+    action: ProjectNextAction;
+    ownerActorId: string;
+    expectedVersion: number;
+    auditEvent: ProjectAuditEvent;
+  }): Promise<ProjectNextAction | null> {
+    const index = this.actions.findIndex(
+      (action) => action.id === input.action.id && action.version === input.expectedVersion && action.ownerActorId === null && action.workflowStatus === "to_do" && action.executorTeamId !== null,
+    );
+    if (index < 0) return null;
+    const action = this.actions[index]!;
+    const claimed = { ...action, ownerActorId: input.ownerActorId, version: action.version + 1 };
+    this.actions[index] = claimed;
+    return claimed;
+  }
   async reorderNextAction(input: {
     action: ProjectNextAction;
     position: number;

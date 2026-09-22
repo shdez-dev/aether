@@ -3685,6 +3685,35 @@ export class PostgresProjectExecutionStore implements ProjectExecutionStore {
     );
     return result.rowCount === 1;
   }
+  async claimNextAction(input: {
+    action: ProjectNextAction;
+    ownerActorId: string;
+    expectedVersion: number;
+    auditEvent: ProjectAuditEvent;
+  }): Promise<ProjectNextAction | null> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await client.query(
+        `UPDATE project_next_actions SET owner_actor_id = $2, version = version + 1
+         WHERE id = $1 AND version = $3 AND owner_actor_id IS NULL
+           AND workflow_status = 'to_do' AND executor_team_id IS NOT NULL`,
+        [input.action.id, input.ownerActorId, input.expectedVersion],
+      );
+      if (result.rowCount !== 1) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      await insertProjectAuditEvent(client, input.auditEvent);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+    return this.findNextAction(input.action.id);
+  }
   async reorderNextAction(input: {
     action: ProjectNextAction;
     position: number;
@@ -4085,7 +4114,7 @@ export class PostgresProjectExecutionStore implements ProjectExecutionStore {
       id: string;
       project_id: string;
       description: string;
-      owner_actor_id: string;
+      owner_actor_id: string | null;
       executor_team_id: string | null;
       reviewer_actor_id: string | null;
       due_on: string | Date | null;
@@ -4146,7 +4175,7 @@ export class PostgresProjectExecutionStore implements ProjectExecutionStore {
       id: string;
       project_id: string;
       description: string;
-      owner_actor_id: string;
+      owner_actor_id: string | null;
       executor_team_id: string | null;
       reviewer_actor_id: string | null;
       due_on: string | Date | null;

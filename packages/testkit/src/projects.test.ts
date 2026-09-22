@@ -391,6 +391,55 @@ describe("project conversion and execution", () => {
       dueOn: "2026-10-01",
       correlationId: ids.next(),
     });
+    const teamInboxAction = await projects.addNextAction({
+      actorId: "replacement",
+      organizationId: organization.id,
+      projectId: project.id,
+      description: "Tomar desde la bandeja del equipo",
+      ownerActorId: null,
+      executorTeamId: executionTeam.id,
+      reviewerActorId: null,
+      dueOn: null,
+      priority: "medium",
+      estimatedEffort: null,
+      effortUnit: null,
+      periodStartOn: null,
+      periodEndOn: null,
+      correlationId: ids.next(),
+    });
+    await expect(
+      projects.claimNextAction({
+        actorId: "observer",
+        organizationId: organization.id,
+        projectId: project.id,
+        actionId: teamInboxAction.id,
+        expectedVersion: teamInboxAction.version,
+        correlationId: ids.next(),
+      }),
+    ).rejects.toBeInstanceOf(AccessDeniedError);
+    await expect(
+      projects.transitionNextActionWorkflow({
+        actorId: "replacement",
+        organizationId: organization.id,
+        projectId: project.id,
+        actionId: teamInboxAction.id,
+        expectedVersion: teamInboxAction.version,
+        status: "in_progress",
+        blockedReason: null,
+        unblockResponsibleActorId: null,
+        correlationId: ids.next(),
+      }),
+    ).rejects.toMatchObject({ code: "PROJECT_NEXT_ACTION_OWNER_REQUIRED" });
+    await expect(
+      projects.claimNextAction({
+        actorId: "replacement",
+        organizationId: organization.id,
+        projectId: project.id,
+        actionId: teamInboxAction.id,
+        expectedVersion: teamInboxAction.version,
+        correlationId: ids.next(),
+      }),
+    ).resolves.toMatchObject({ ownerActorId: "replacement", version: 1 });
     const nextAction = await projects.addNextAction({
       actorId: "replacement",
       organizationId: organization.id,
@@ -462,13 +511,13 @@ describe("project conversion and execution", () => {
         projectId: project.id,
         correlationId: ids.next(),
       }),
-    ).resolves.toMatchObject([
-      {
+    ).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({
         id: nextAction.id,
         workflowStatus: "done",
         executorTeamId: executionTeam.id,
-      },
-    ]);
+      }),
+    ]));
     const active = await projects.changeStatus({
       actorId: "replacement",
       organizationId: organization.id,
@@ -588,8 +637,8 @@ describe("project conversion and execution", () => {
     });
     expect(active.status).toBe("active");
     expect(execution.milestones).toHaveLength(1);
-    expect(execution.actions).toHaveLength(1);
-    expect(execution.actions[0]).toMatchObject({
+    expect(execution.actions).toHaveLength(2);
+    expect(execution.actions.find((action) => action.id === nextAction.id)).toMatchObject({
       priority: "high",
       executorTeamId: executionTeam.id,
       workflowStatus: "done",
@@ -666,6 +715,7 @@ describe("project conversion and execution", () => {
       "project.lead_replaced.v1",
       "project.milestone_added.v1",
       "project.next_action_added.v1",
+      "project.next_action_added.v1",
       "project.next_action_workflow_changed.v1",
       "project.next_action_workflow_changed.v1",
       "project.next_action_workflow_changed.v1",
@@ -680,6 +730,7 @@ describe("project conversion and execution", () => {
       "project.lead_assigned.v1",
       "project.lead_replaced.v1",
       "project.milestone_added.v1",
+      "project.next_action_added.v1",
       "project.next_action_added.v1",
       "project.next_action_workflow_changed.v1",
       "project.next_action_workflow_changed.v1",

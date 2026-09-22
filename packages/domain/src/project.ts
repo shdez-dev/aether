@@ -66,7 +66,7 @@ export type ProjectNextAction = Readonly<{
   id: string;
   projectId: string;
   description: string;
-  ownerActorId: string;
+  ownerActorId: string | null;
   executorTeamId: string | null;
   reviewerActorId: string | null;
   dueOn: string | null;
@@ -300,6 +300,8 @@ export function transitionNextActionWorkflow(input: {
     (hasBlock && input.status !== "in_progress" && input.status !== "in_review")
   )
     throw new ProjectDomainError("PROJECT_NEXT_ACTION_BLOCK_INVALID");
+  if (input.status === "in_progress" && action.ownerActorId === null)
+    throw new ProjectDomainError("PROJECT_NEXT_ACTION_OWNER_REQUIRED");
   return {
     ...action,
     workflowStatus: input.status,
@@ -544,6 +546,8 @@ export class ProjectDomainError extends Error {
       | "PROJECT_NEXT_ACTION_TRANSITION_INVALID"
       | "PROJECT_NEXT_ACTION_BLOCK_INVALID"
       | "PROJECT_NEXT_ACTION_ORDER_INVALID"
+      | "PROJECT_NEXT_ACTION_OWNER_REQUIRED"
+      | "PROJECT_NEXT_ACTION_CLAIM_INVALID"
       | "PROJECT_MINIMUM_PLAN_REQUIRED"
       | "PROJECT_MANDATE_REQUIRED"
       | "PROJECT_CHANGE_REQUEST_NOT_PENDING"

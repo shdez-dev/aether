@@ -340,7 +340,7 @@ export const AddProjectNextActionRequestSchema = z
   .object({
     organizationId: UuidSchema,
     description: NonEmptyTextSchema.max(2_000),
-    ownerActorId: z.string().min(1).max(255),
+    ownerActorId: z.string().min(1).max(255).nullable(),
     executorTeamId: UuidSchema.nullable().default(null),
     reviewerActorId: z.string().min(1).max(255).nullable().default(null),
     dueOn: z.string().date().nullable(),
@@ -351,6 +351,8 @@ export const AddProjectNextActionRequestSchema = z
     periodEndOn: z.string().date().nullable(),
   })
   .superRefine((value, context) => {
+    if (value.ownerActorId === null && value.executorTeamId === null)
+      context.addIssue({ code: "custom", path: ["ownerActorId"], message: "Una tarea sin responsable requiere equipo ejecutor." });
     if ((value.estimatedEffort === null) !== (value.effortUnit === null))
       context.addIssue({
         code: "custom",
@@ -408,6 +410,10 @@ export const ReorderProjectNextActionRequestSchema = z.object({
   organizationId: UuidSchema,
   expectedVersion: z.number().int().nonnegative(),
   position: z.number().int().positive(),
+});
+export const ClaimProjectNextActionRequestSchema = z.object({
+  organizationId: UuidSchema,
+  expectedVersion: z.number().int().nonnegative(),
 });
 export const DeclareProjectNextActionDependencyRequestSchema = z.object({
   organizationId: UuidSchema,
