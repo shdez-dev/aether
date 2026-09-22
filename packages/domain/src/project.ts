@@ -53,18 +53,32 @@ export const ProjectNextActionEffortUnits = [
 ] as const;
 export type ProjectNextActionEffortUnit =
   (typeof ProjectNextActionEffortUnits)[number];
+export const ProjectNextActionWorkflowStatuses = [
+  "to_do",
+  "in_progress",
+  "in_review",
+  "done",
+  "cancelled",
+] as const;
+export type ProjectNextActionWorkflowStatus =
+  (typeof ProjectNextActionWorkflowStatuses)[number];
 export type ProjectNextAction = Readonly<{
   id: string;
   projectId: string;
   description: string;
   ownerActorId: string;
+  reviewerActorId: string | null;
   dueOn: string | null;
   priority: ProjectNextActionPriority;
   estimatedEffort: number | null;
   effortUnit: ProjectNextActionEffortUnit | null;
   periodStartOn: string | null;
   periodEndOn: string | null;
+  workflowStatus: ProjectNextActionWorkflowStatus;
+  blockedReason: string | null;
+  unblockResponsibleActorId: string | null;
   completedAt: Date | null;
+  version: number;
   createdByActorId: string;
   createdAt: Date;
 }>;
@@ -229,6 +243,49 @@ export function declareNextActionDependency(input: {
     throw new ProjectDomainError("PROJECT_DEPENDENCY_CYCLE");
   return input.dependency;
 }
+
+export function transitionNextActionWorkflow(input: {
+  action: ProjectNextAction;
+  status: ProjectNextActionWorkflowStatus;
+  blockedReason: string | null;
+  unblockResponsibleActorId: string | null;
+  at: Date;
+}): ProjectNextAction {
+  const { action } = input;
+  const transitions: Readonly<
+    Record<
+      ProjectNextActionWorkflowStatus,
+      readonly ProjectNextActionWorkflowStatus[]
+    >
+  > = {
+    to_do: ["in_progress", "cancelled"],
+    in_progress: ["in_review", "cancelled"],
+    in_review: ["in_progress", "done", "cancelled"],
+    done: [],
+    cancelled: [],
+  };
+  if (
+    input.status !== action.workflowStatus &&
+    !transitions[action.workflowStatus].includes(input.status)
+  )
+    throw new ProjectDomainError("PROJECT_NEXT_ACTION_TRANSITION_INVALID");
+  const hasBlock =
+    input.blockedReason !== null || input.unblockResponsibleActorId !== null;
+  if (
+    (input.blockedReason === null) !==
+      (input.unblockResponsibleActorId === null) ||
+    (hasBlock && input.status !== "in_progress" && input.status !== "in_review")
+  )
+    throw new ProjectDomainError("PROJECT_NEXT_ACTION_BLOCK_INVALID");
+  return {
+    ...action,
+    workflowStatus: input.status,
+    blockedReason: input.blockedReason,
+    unblockResponsibleActorId: input.unblockResponsibleActorId,
+    completedAt: input.status === "done" ? input.at : null,
+    version: action.version + 1,
+  };
+}
 export type ProjectClosure = Readonly<{
   id: string;
   projectId: string;
@@ -294,7 +351,12 @@ const transitions: Record<ProjectStatus, readonly ProjectStatus[]> = {
 export function archiveProject(project: Project, updatedAt: Date): Project {
   if (project.status !== "completed" && project.status !== "cancelled")
     throw new ProjectDomainError("PROJECT_ARCHIVE_INVALID");
-  return { ...project, status: "archived", version: project.version + 1, updatedAt };
+  return {
+    ...project,
+    status: "archived",
+    version: project.version + 1,
+    updatedAt,
+  };
 }
 export function createProject(
   input: Omit<
@@ -456,6 +518,8 @@ export class ProjectDomainError extends Error {
       | "PROJECT_REPLAN_REQUIRED"
       | "PROJECT_DEPENDENCY_INVALID"
       | "PROJECT_DEPENDENCY_CYCLE"
+      | "PROJECT_NEXT_ACTION_TRANSITION_INVALID"
+      | "PROJECT_NEXT_ACTION_BLOCK_INVALID"
       | "PROJECT_MINIMUM_PLAN_REQUIRED"
       | "PROJECT_MANDATE_REQUIRED"
       | "PROJECT_CHANGE_REQUEST_NOT_PENDING"

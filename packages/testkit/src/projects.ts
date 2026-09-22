@@ -107,6 +107,19 @@ export class InMemoryProjectExecutionStore implements ProjectExecutionStore {
   async addNextAction(action: ProjectNextAction): Promise<void> {
     this.actions.push(action);
   }
+  async updateNextAction(input: {
+    action: ProjectNextAction;
+    expectedVersion: number;
+  }): Promise<boolean> {
+    const index = this.actions.findIndex(
+      (action) =>
+        action.id === input.action.id &&
+        action.version === input.expectedVersion,
+    );
+    if (index < 0) return false;
+    this.actions[index] = input.action;
+    return true;
+  }
   async addRisk(risk: ProjectRisk): Promise<void> {
     this.risks.push(risk);
   }

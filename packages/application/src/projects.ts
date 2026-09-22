@@ -5,6 +5,7 @@ import {
   createProject,
   compareProjectToBaseline,
   declareNextActionDependency,
+  transitionNextActionWorkflow,
   replaceProjectLead,
   transferProjectWorkspace,
   transitionProject,
@@ -15,6 +16,7 @@ import {
   type ProjectNextActionDependency,
   type ProjectNextActionEffortUnit,
   type ProjectNextActionPriority,
+  type ProjectNextActionWorkflowStatus,
   type ProjectRisk,
   type ProjectRiskLevel,
   type ProjectRiskTreatment,
@@ -87,6 +89,10 @@ export interface ProjectStore {
 export interface ProjectExecutionStore {
   addMilestone(milestone: ProjectMilestone): Promise<void>;
   addNextAction(action: ProjectNextAction): Promise<void>;
+  updateNextAction(input: {
+    action: ProjectNextAction;
+    expectedVersion: number;
+  }): Promise<boolean>;
   addRisk(risk: ProjectRisk): Promise<void>;
   listRisks(projectId: string): Promise<readonly ProjectRisk[]>;
   findRisk(riskId: string): Promise<ProjectRisk | null>;
@@ -305,7 +311,10 @@ export class ProjectService {
       throw new ProjectDomainError("PROJECT_PAUSE_CONTEXT_REQUIRED");
     if (input.status === "cancelled")
       throw new ProjectDomainError("PROJECT_CANCELLATION_REASON_REQUIRED");
-    const project = await this.requireProject(input.projectId, input.organizationId);
+    const project = await this.requireProject(
+      input.projectId,
+      input.organizationId,
+    );
     if (input.status === "active" && project.status === "paused")
       throw new ProjectDomainError("PROJECT_REPLAN_REQUIRED");
     await this.assertExecutionAccess(
@@ -367,11 +376,22 @@ export class ProjectService {
     if (project.version !== input.expectedVersion)
       throw new ProjectVersionConflictError();
     const archived = archiveProject(project, this.dependencies.clock.now());
-    if (!(await this.dependencies.projects.save({ project: archived, expectedVersion: project.version })))
+    if (
+      !(await this.dependencies.projects.save({
+        project: archived,
+        expectedVersion: project.version,
+      }))
+    )
       throw new ProjectVersionConflictError();
-    await this.record(archived, input.actorId, input.correlationId, "project.archived.v1", {
-      fromStatus: project.status,
-    });
+    await this.record(
+      archived,
+      input.actorId,
+      input.correlationId,
+      "project.archived.v1",
+      {
+        fromStatus: project.status,
+      },
+    );
     return archived;
   }
   async resume(input: {
@@ -678,6 +698,7 @@ export class ProjectService {
     projectId: string;
     description: string;
     ownerActorId: string;
+    reviewerActorId?: string | null;
     dueOn: string | null;
     priority: ProjectNextActionPriority;
     estimatedEffort: number | null;
@@ -695,19 +716,34 @@ export class ProjectService {
       project,
       input.correlationId,
     );
-    await this.assertMember(input.ownerActorId, project.organizationId);
+    await this.assertProjectParticipant(
+      input.ownerActorId,
+      project.organizationId,
+      project.workspaceId,
+    );
+    if (input.reviewerActorId)
+      await this.assertProjectParticipant(
+        input.reviewerActorId,
+        project.organizationId,
+        project.workspaceId,
+      );
     const action: ProjectNextAction = {
       id: this.dependencies.ids.next(),
       projectId: project.id,
       description: input.description,
       ownerActorId: input.ownerActorId,
+      reviewerActorId: input.reviewerActorId ?? null,
       dueOn: input.dueOn,
       priority: input.priority,
       estimatedEffort: input.estimatedEffort,
       effortUnit: input.effortUnit,
       periodStartOn: input.periodStartOn,
       periodEndOn: input.periodEndOn,
+      workflowStatus: "to_do",
+      blockedReason: null,
+      unblockResponsibleActorId: null,
       completedAt: null,
+      version: 0,
       createdByActorId: input.actorId,
       createdAt: this.dependencies.clock.now(),
     };
@@ -720,6 +756,7 @@ export class ProjectService {
       {
         actionId: action.id,
         ownerActorId: action.ownerActorId,
+        reviewerActorId: action.reviewerActorId,
         priority: action.priority,
         estimatedEffort: action.estimatedEffort,
         effortUnit: action.effortUnit,
@@ -728,6 +765,73 @@ export class ProjectService {
       },
     );
     return action;
+  }
+  async transitionNextActionWorkflow(input: {
+    actorId: string;
+    organizationId: string;
+    projectId: string;
+    actionId: string;
+    expectedVersion: number;
+    status: ProjectNextActionWorkflowStatus;
+    blockedReason: string | null;
+    unblockResponsibleActorId: string | null;
+    correlationId: string;
+  }): Promise<ProjectNextAction> {
+    const project = await this.requireProject(
+      input.projectId,
+      input.organizationId,
+    );
+    await assertWorkspaceWritable(
+      this.dependencies.tenancy,
+      project.workspaceId,
+    );
+    this.assertProjectMutable(project);
+    const action = await this.dependencies.execution.findNextAction(
+      input.actionId,
+    );
+    if (!action || action.projectId !== project.id)
+      throw new ResourceNotFoundError("PROJECT_NOT_FOUND");
+    if (action.version !== input.expectedVersion)
+      throw new ProjectVersionConflictError();
+    await this.assertNextActionWorkflowAccess(
+      input.actorId,
+      project,
+      action,
+      input.status,
+    );
+    if (input.unblockResponsibleActorId)
+      await this.assertProjectParticipant(
+        input.unblockResponsibleActorId,
+        project.organizationId,
+        project.workspaceId,
+      );
+    const transitioned = transitionNextActionWorkflow({
+      action,
+      status: input.status,
+      blockedReason: input.blockedReason,
+      unblockResponsibleActorId: input.unblockResponsibleActorId,
+      at: this.dependencies.clock.now(),
+    });
+    if (
+      !(await this.dependencies.execution.updateNextAction({
+        action: transitioned,
+        expectedVersion: action.version,
+      }))
+    )
+      throw new ProjectVersionConflictError();
+    await this.record(
+      project,
+      input.actorId,
+      input.correlationId,
+      "project.next_action_workflow_changed.v1",
+      {
+        actionId: action.id,
+        fromStatus: action.workflowStatus,
+        toStatus: transitioned.workflowStatus,
+        blocked: transitioned.blockedReason !== null,
+      },
+    );
+    return transitioned;
   }
   async addRisk(input: {
     actorId: string;
@@ -1479,6 +1583,39 @@ export class ProjectService {
   ): Promise<void> {
     this.assertProjectMutable(project);
     if (actorId === risk.ownerActorId) {
+      await this.assertProjectParticipant(
+        actorId,
+        project.organizationId,
+        project.workspaceId,
+      );
+      return;
+    }
+    await this.assertExecutionAccess(actorId, project, "");
+  }
+  private async assertNextActionWorkflowAccess(
+    actorId: string,
+    project: Project,
+    action: ProjectNextAction,
+    targetStatus: ProjectNextActionWorkflowStatus,
+  ): Promise<void> {
+    if (actorId === action.ownerActorId) {
+      await this.assertProjectParticipant(
+        actorId,
+        project.organizationId,
+        project.workspaceId,
+      );
+      if (!(
+        action.reviewerActorId &&
+        (targetStatus === "done" || action.workflowStatus === "in_review")
+      ))
+        return;
+      throw new AccessDeniedError("workspace:manage");
+    }
+    if (
+      actorId === action.reviewerActorId &&
+      action.workflowStatus === "in_review" &&
+      (targetStatus === "done" || targetStatus === "in_progress")
+    ) {
       await this.assertProjectParticipant(
         actorId,
         project.organizationId,

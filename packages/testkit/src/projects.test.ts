@@ -322,12 +322,13 @@ describe("project conversion and execution", () => {
       dueOn: "2026-10-01",
       correlationId: ids.next(),
     });
-    await projects.addNextAction({
+    const nextAction = await projects.addNextAction({
       actorId: "replacement",
       organizationId: organization.id,
       projectId: project.id,
       description: "Preparar piloto",
       ownerActorId: "replacement",
+      reviewerActorId: "lead",
       dueOn: "2026-09-20",
       priority: "high",
       estimatedEffort: 12,
@@ -336,6 +337,54 @@ describe("project conversion and execution", () => {
       periodEndOn: "2026-09-20",
       correlationId: ids.next(),
     });
+    const blockedAction = await projects.transitionNextActionWorkflow({
+      actorId: "replacement",
+      organizationId: organization.id,
+      projectId: project.id,
+      actionId: nextAction.id,
+      expectedVersion: nextAction.version,
+      status: "in_progress",
+      blockedReason: "Esperando respuesta del proveedor.",
+      unblockResponsibleActorId: "lead",
+      correlationId: ids.next(),
+    });
+    const reviewAction = await projects.transitionNextActionWorkflow({
+      actorId: "replacement",
+      organizationId: organization.id,
+      projectId: project.id,
+      actionId: nextAction.id,
+      expectedVersion: blockedAction.version,
+      status: "in_review",
+      blockedReason: null,
+      unblockResponsibleActorId: null,
+      correlationId: ids.next(),
+    });
+    await expect(
+      projects.transitionNextActionWorkflow({
+        actorId: "replacement",
+        organizationId: organization.id,
+        projectId: project.id,
+        actionId: nextAction.id,
+        expectedVersion: reviewAction.version,
+        status: "done",
+        blockedReason: null,
+        unblockResponsibleActorId: null,
+        correlationId: ids.next(),
+      }),
+    ).rejects.toBeInstanceOf(AccessDeniedError);
+    await expect(
+      projects.transitionNextActionWorkflow({
+        actorId: "lead",
+        organizationId: organization.id,
+        projectId: project.id,
+        actionId: nextAction.id,
+        expectedVersion: reviewAction.version,
+        status: "done",
+        blockedReason: null,
+        unblockResponsibleActorId: null,
+        correlationId: ids.next(),
+      }),
+    ).resolves.toMatchObject({ workflowStatus: "done", version: 3 });
     const active = await projects.changeStatus({
       actorId: "replacement",
       organizationId: organization.id,
@@ -427,7 +476,8 @@ describe("project conversion and execution", () => {
         outcomes: "Piloto completado",
         lessonsLearned: "Validar evidencia al inicio.",
         objectiveAssessment: "achieved",
-        assessmentRationale: "La espera disminuyó conforme al objetivo acordado.",
+        assessmentRationale:
+          "La espera disminuyó conforme al objetivo acordado.",
         pendingItems: ["Medir adopción"],
         closureExceptions: [],
         correlationId: ids.next(),
@@ -457,6 +507,7 @@ describe("project conversion and execution", () => {
     expect(execution.actions).toHaveLength(1);
     expect(execution.actions[0]).toMatchObject({
       priority: "high",
+      workflowStatus: "done",
       estimatedEffort: 12,
       effortUnit: "hours",
       periodStartOn: "2026-09-15",
@@ -530,6 +581,9 @@ describe("project conversion and execution", () => {
       "project.lead_replaced.v1",
       "project.milestone_added.v1",
       "project.next_action_added.v1",
+      "project.next_action_workflow_changed.v1",
+      "project.next_action_workflow_changed.v1",
+      "project.next_action_workflow_changed.v1",
       "project.status_changed.v1",
       "project.status_changed.v1",
       "project.deliverable_accepted.v1",
@@ -542,6 +596,9 @@ describe("project conversion and execution", () => {
       "project.lead_replaced.v1",
       "project.milestone_added.v1",
       "project.next_action_added.v1",
+      "project.next_action_workflow_changed.v1",
+      "project.next_action_workflow_changed.v1",
+      "project.next_action_workflow_changed.v1",
       "project.status_changed.v1",
       "project.status_changed.v1",
       "project.deliverable_accepted.v1",

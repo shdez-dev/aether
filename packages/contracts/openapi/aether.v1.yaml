@@ -2453,7 +2453,43 @@ paths:
           application/json:
             schema: { $ref: "#/components/schemas/AddProjectNextActionRequest" }
       responses:
-        "201": { description: Acción creada }
+        "201":
+          description: Acción creada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProjectNextAction" }
+        default: { $ref: "#/components/responses/Problem" }
+  /v1/projects/{projectId}/next-actions/{actionId}/workflow:
+    post:
+      tags: [Projects]
+      operationId: transitionProjectNextActionWorkflow
+      summary: Cambiar el flujo o bloqueo de una próxima acción
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: actionId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              {
+                $ref: "#/components/schemas/TransitionProjectNextActionWorkflowRequest",
+              }
+      responses:
+        "200":
+          description: Flujo de acción actualizado.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProjectNextAction" }
         default: { $ref: "#/components/responses/Problem" }
   /v1/projects/{projectId}/audit-events:
     get:
@@ -4380,6 +4416,8 @@ components:
         organizationId: { type: string, format: uuid }
         description: { type: string, minLength: 1, maxLength: 2000 }
         ownerActorId: { type: string }
+        reviewerActorId:
+          { type: [string, "null"], minLength: 1, maxLength: 255 }
         dueOn: { type: [string, "null"], format: date }
         priority: { type: string, enum: [low, medium, high] }
         estimatedEffort:
@@ -4388,6 +4426,75 @@ components:
           { type: [string, "null"], enum: [hours, days, points, null] }
         periodStartOn: { type: [string, "null"], format: date }
         periodEndOn: { type: [string, "null"], format: date }
+    TransitionProjectNextActionWorkflowRequest:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          organizationId,
+          expectedVersion,
+          status,
+          blockedReason,
+          unblockResponsibleActorId,
+        ]
+      properties:
+        organizationId: { type: string, format: uuid }
+        expectedVersion: { type: integer, minimum: 0 }
+        status:
+          {
+            type: string,
+            enum: [to_do, in_progress, in_review, done, cancelled],
+          }
+        blockedReason: { type: [string, "null"], minLength: 1, maxLength: 2000 }
+        unblockResponsibleActorId:
+          { type: [string, "null"], minLength: 1, maxLength: 255 }
+    ProjectNextAction:
+      type: object
+      required:
+        [
+          id,
+          projectId,
+          description,
+          ownerActorId,
+          reviewerActorId,
+          dueOn,
+          priority,
+          estimatedEffort,
+          effortUnit,
+          periodStartOn,
+          periodEndOn,
+          workflowStatus,
+          blockedReason,
+          unblockResponsibleActorId,
+          completedAt,
+          version,
+          createdByActorId,
+          createdAt,
+        ]
+      properties:
+        id: { type: string, format: uuid }
+        projectId: { type: string, format: uuid }
+        description: { type: string }
+        ownerActorId: { type: string }
+        reviewerActorId: { type: [string, "null"] }
+        dueOn: { type: [string, "null"], format: date }
+        priority: { type: string, enum: [low, medium, high] }
+        estimatedEffort: { type: [number, "null"] }
+        effortUnit:
+          { type: [string, "null"], enum: [hours, days, points, null] }
+        periodStartOn: { type: [string, "null"], format: date }
+        periodEndOn: { type: [string, "null"], format: date }
+        workflowStatus:
+          {
+            type: string,
+            enum: [to_do, in_progress, in_review, done, cancelled],
+          }
+        blockedReason: { type: [string, "null"] }
+        unblockResponsibleActorId: { type: [string, "null"] }
+        completedAt: { type: [string, "null"], format: date-time }
+        version: { type: integer, minimum: 0 }
+        createdByActorId: { type: string }
+        createdAt: { type: string, format: date-time }
     DeclareCapacityAvailabilityRequest:
       type: object
       additionalProperties: false
@@ -4497,7 +4604,14 @@ components:
     CloseProjectRequest:
       type: object
       additionalProperties: false
-      required: [organizationId, outcomes, lessonsLearned, objectiveAssessment, assessmentRationale]
+      required:
+        [
+          organizationId,
+          outcomes,
+          lessonsLearned,
+          objectiveAssessment,
+          assessmentRationale,
+        ]
       properties:
         organizationId: { type: string, format: uuid }
         outcomes: { type: string, minLength: 1, maxLength: 10000 }
@@ -4520,7 +4634,8 @@ components:
             required: [description, disposition, responsibleActorId, rationale]
             properties:
               description: { type: string, minLength: 1, maxLength: 2000 }
-              disposition: { type: string, enum: [resolved, transferred, accepted] }
+              disposition:
+                { type: string, enum: [resolved, transferred, accepted] }
               responsibleActorId: { type: string, minLength: 1, maxLength: 255 }
               rationale: { type: string, minLength: 1, maxLength: 10000 }
     AttachEvidenceRequest:
@@ -4624,7 +4739,20 @@ components:
         closure:
           type: object
           required:
-            [id, projectId, organizationId, workspaceId, outcomes, lessonsLearned, objectiveAssessment, assessmentRationale, exceptions, pendingItems, closedByActorId, closedAt]
+            [
+              id,
+              projectId,
+              organizationId,
+              workspaceId,
+              outcomes,
+              lessonsLearned,
+              objectiveAssessment,
+              assessmentRationale,
+              exceptions,
+              pendingItems,
+              closedByActorId,
+              closedAt,
+            ]
           properties:
             id: { type: string, format: uuid }
             projectId: { type: string, format: uuid }
@@ -4632,17 +4760,24 @@ components:
             workspaceId: { type: string, format: uuid }
             outcomes: { type: string }
             lessonsLearned: { type: string }
-            objectiveAssessment: { type: string, enum: [achieved, partially_achieved, not_achieved, not_assessed] }
+            objectiveAssessment:
+              {
+                type: string,
+                enum:
+                  [achieved, partially_achieved, not_achieved, not_assessed],
+              }
             assessmentRationale: { type: string }
             exceptions:
               type: array
               items:
                 type: object
-                required: [id, description, disposition, responsibleActorId, rationale]
+                required:
+                  [id, description, disposition, responsibleActorId, rationale]
                 properties:
                   id: { type: string, format: uuid }
                   description: { type: string }
-                  disposition: { type: string, enum: [resolved, transferred, accepted] }
+                  disposition:
+                    { type: string, enum: [resolved, transferred, accepted] }
                   responsibleActorId: { type: string }
                   rationale: { type: string }
             pendingItems:

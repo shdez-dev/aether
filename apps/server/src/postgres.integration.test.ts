@@ -1540,13 +1540,18 @@ describe.sequential("PostgreSQL integration", () => {
         projectId: activeProjectId,
         description: "Round-trip planning fields",
         ownerActorId: "owner",
+        reviewerActorId: null,
         dueOn: "2026-01-12",
         priority: "high" as const,
         estimatedEffort: 12.5,
         effortUnit: "hours" as const,
         periodStartOn: "2026-01-05",
         periodEndOn: "2026-01-12",
+        workflowStatus: "to_do" as const,
+        blockedReason: null,
+        unblockResponsibleActorId: null,
         completedAt: null,
+        version: 0,
         createdByActorId: "owner",
         createdAt: new Date("2026-01-03T00:00:00.000Z"),
       };
@@ -1555,6 +1560,28 @@ describe.sequential("PostgreSQL integration", () => {
       await expect(
         executionStore.findNextAction(plannedAction.id),
       ).resolves.toEqual(plannedAction);
+      const blockedAction = {
+        ...plannedAction,
+        workflowStatus: "in_progress" as const,
+        blockedReason: "Awaiting vendor confirmation",
+        unblockResponsibleActorId: "owner",
+        version: 1,
+      };
+      await expect(
+        executionStore.updateNextAction({
+          action: blockedAction,
+          expectedVersion: plannedAction.version,
+        }),
+      ).resolves.toBe(true);
+      await expect(
+        executionStore.findNextAction(plannedAction.id),
+      ).resolves.toEqual(blockedAction);
+      await expect(
+        executionStore.updateNextAction({
+          action: { ...blockedAction, version: 2 },
+          expectedVersion: plannedAction.version,
+        }),
+      ).resolves.toBe(false);
       await expect(
         pool.query(
           `INSERT INTO project_next_actions (id, project_id, description, owner_actor_id, priority, estimated_effort, effort_unit, period_start_on, period_end_on, created_by_actor_id, created_at)

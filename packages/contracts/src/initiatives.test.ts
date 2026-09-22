@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   AddProjectNextActionRequestSchema,
   CloseProjectRequestSchema,
+  TransitionProjectNextActionWorkflowRequestSchema,
 } from "./initiatives.js";
 import {
   CapacityBalanceQuerySchema,
@@ -13,6 +14,7 @@ const action = {
   organizationId: "00000000-0000-4000-8000-000000000001",
   description: "Preparar el piloto operativo.",
   ownerActorId: "owner",
+  reviewerActorId: null,
   dueOn: "2026-10-02",
   priority: "high",
   estimatedEffort: 12,
@@ -36,6 +38,33 @@ describe("AddProjectNextActionRequestSchema", () => {
         periodEndOn: "2026-09-27",
       }),
     ).toThrow("El período no puede terminar antes de comenzar.");
+  });
+});
+
+describe("TransitionProjectNextActionWorkflowRequestSchema", () => {
+  it("requires a complete blocking context in an actionable status", () => {
+    const transition = {
+      organizationId: "00000000-0000-4000-8000-000000000001",
+      expectedVersion: 0,
+      status: "in_progress" as const,
+      blockedReason: "Esperando la confirmación del proveedor.",
+      unblockResponsibleActorId: "owner",
+    };
+    expect(
+      TransitionProjectNextActionWorkflowRequestSchema.parse(transition),
+    ).toEqual(transition);
+    expect(
+      TransitionProjectNextActionWorkflowRequestSchema.safeParse({
+        ...transition,
+        unblockResponsibleActorId: null,
+      }).success,
+    ).toBe(false);
+    expect(
+      TransitionProjectNextActionWorkflowRequestSchema.safeParse({
+        ...transition,
+        status: "to_do",
+      }).success,
+    ).toBe(false);
   });
 });
 
@@ -67,7 +96,8 @@ describe("CloseProjectRequestSchema", () => {
       outcomes: "Piloto entregado.",
       lessonsLearned: "Validar responsables antes del cierre.",
       objectiveAssessment: "achieved",
-      assessmentRationale: "La medición final cumplió el objetivo comprometido.",
+      assessmentRationale:
+        "La medición final cumplió el objetivo comprometido.",
       closureExceptions: [
         {
           description: "Medir adopción posterior.",

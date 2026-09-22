@@ -3636,23 +3636,52 @@ export class PostgresProjectExecutionStore implements ProjectExecutionStore {
   }
   async addNextAction(action: ProjectNextAction): Promise<void> {
     await this.pool.query(
-      `INSERT INTO project_next_actions (id, project_id, description, owner_actor_id, due_on, priority, estimated_effort, effort_unit, period_start_on, period_end_on, completed_at, created_by_actor_id, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+      `INSERT INTO project_next_actions (id, project_id, description, owner_actor_id, reviewer_actor_id, due_on, priority, estimated_effort, effort_unit, period_start_on, period_end_on, workflow_status, blocked_reason, unblock_responsible_actor_id, completed_at, version, created_by_actor_id, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
       [
         action.id,
         action.projectId,
         action.description,
         action.ownerActorId,
+        action.reviewerActorId,
         action.dueOn,
         action.priority,
         action.estimatedEffort,
         action.effortUnit,
         action.periodStartOn,
         action.periodEndOn,
+        action.workflowStatus,
+        action.blockedReason,
+        action.unblockResponsibleActorId,
         action.completedAt,
+        action.version,
         action.createdByActorId,
         action.createdAt,
       ],
     );
+  }
+  async updateNextAction(input: {
+    action: ProjectNextAction;
+    expectedVersion: number;
+  }): Promise<boolean> {
+    const result = await this.pool.query(
+      `UPDATE project_next_actions
+          SET workflow_status = $2,
+              blocked_reason = $3,
+              unblock_responsible_actor_id = $4,
+              completed_at = $5,
+              version = $6
+        WHERE id = $1 AND version = $7`,
+      [
+        input.action.id,
+        input.action.workflowStatus,
+        input.action.blockedReason,
+        input.action.unblockResponsibleActorId,
+        input.action.completedAt,
+        input.action.version,
+        input.expectedVersion,
+      ],
+    );
+    return result.rowCount === 1;
   }
   async addRisk(risk: ProjectRisk): Promise<void> {
     await this.pool.query(
@@ -3983,17 +4012,22 @@ export class PostgresProjectExecutionStore implements ProjectExecutionStore {
       project_id: string;
       description: string;
       owner_actor_id: string;
+      reviewer_actor_id: string | null;
       due_on: string | Date | null;
       priority: ProjectNextAction["priority"];
       estimated_effort: string | null;
       effort_unit: ProjectNextAction["effortUnit"];
       period_start_on: string | Date | null;
       period_end_on: string | Date | null;
+      workflow_status: ProjectNextAction["workflowStatus"];
+      blocked_reason: string | null;
+      unblock_responsible_actor_id: string | null;
       completed_at: Date | null;
+      version: number;
       created_by_actor_id: string;
       created_at: Date;
     }>(
-      `SELECT id, project_id, description, owner_actor_id, due_on, priority, estimated_effort, effort_unit, period_start_on, period_end_on, completed_at, created_by_actor_id, created_at FROM project_next_actions WHERE id = $1`,
+      `SELECT id, project_id, description, owner_actor_id, reviewer_actor_id, due_on, priority, estimated_effort, effort_unit, period_start_on, period_end_on, workflow_status, blocked_reason, unblock_responsible_actor_id, completed_at, version, created_by_actor_id, created_at FROM project_next_actions WHERE id = $1`,
       [actionId],
     );
     const row = result.rows[0];
@@ -4003,6 +4037,7 @@ export class PostgresProjectExecutionStore implements ProjectExecutionStore {
           projectId: row.project_id,
           description: row.description,
           ownerActorId: row.owner_actor_id,
+          reviewerActorId: row.reviewer_actor_id,
           dueOn: row.due_on === null ? null : toCalendarDate(row.due_on),
           priority: row.priority,
           estimatedEffort:
@@ -4016,7 +4051,11 @@ export class PostgresProjectExecutionStore implements ProjectExecutionStore {
             row.period_end_on === null
               ? null
               : toCalendarDate(row.period_end_on),
+          workflowStatus: row.workflow_status,
+          blockedReason: row.blocked_reason,
+          unblockResponsibleActorId: row.unblock_responsible_actor_id,
           completedAt: row.completed_at,
+          version: row.version,
           createdByActorId: row.created_by_actor_id,
           createdAt: row.created_at,
         }

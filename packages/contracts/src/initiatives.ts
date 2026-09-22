@@ -329,11 +329,19 @@ export const ProjectNextActionEffortUnitSchema = z.enum([
   "days",
   "points",
 ]);
+export const ProjectNextActionWorkflowStatusSchema = z.enum([
+  "to_do",
+  "in_progress",
+  "in_review",
+  "done",
+  "cancelled",
+]);
 export const AddProjectNextActionRequestSchema = z
   .object({
     organizationId: UuidSchema,
     description: NonEmptyTextSchema.max(2_000),
     ownerActorId: z.string().min(1).max(255),
+    reviewerActorId: z.string().min(1).max(255).nullable().default(null),
     dueOn: z.string().date().nullable(),
     priority: ProjectNextActionPrioritySchema,
     estimatedEffort: z.number().positive().max(1_000_000).nullable(),
@@ -363,6 +371,36 @@ export const AddProjectNextActionRequestSchema = z
         code: "custom",
         path: ["periodEndOn"],
         message: "El período no puede terminar antes de comenzar.",
+      });
+  });
+export const TransitionProjectNextActionWorkflowRequestSchema = z
+  .object({
+    organizationId: UuidSchema,
+    expectedVersion: z.number().int().nonnegative(),
+    status: ProjectNextActionWorkflowStatusSchema,
+    blockedReason: NonEmptyTextSchema.max(2_000).nullable(),
+    unblockResponsibleActorId: z.string().min(1).max(255).nullable(),
+  })
+  .superRefine((input, context) => {
+    if (
+      (input.blockedReason === null) !==
+      (input.unblockResponsibleActorId === null)
+    )
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "El bloqueo requiere motivo y responsable de desbloqueo juntos.",
+        path: ["blockedReason"],
+      });
+    if (
+      input.blockedReason !== null &&
+      input.status !== "in_progress" &&
+      input.status !== "in_review"
+    )
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Sólo una tarea en curso o en revisión puede bloquearse.",
+        path: ["status"],
       });
   });
 export const DeclareProjectNextActionDependencyRequestSchema = z.object({
@@ -778,7 +816,9 @@ export type InitiativeDecisionResponse = z.infer<
   typeof InitiativeDecisionResponseSchema
 >;
 export type ProjectResponse = z.infer<typeof ProjectResponseSchema>;
-export type ProjectClosureResponse = z.infer<typeof ProjectClosureResponseSchema>;
+export type ProjectClosureResponse = z.infer<
+  typeof ProjectClosureResponseSchema
+>;
 export type ProjectClosureDossierResponse = z.infer<
   typeof ProjectClosureDossierResponseSchema
 >;

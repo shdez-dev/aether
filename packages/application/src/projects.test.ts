@@ -102,6 +102,9 @@ describe("ProjectService", () => {
       execution: {
         async addMilestone() {},
         async addNextAction() {},
+        async updateNextAction() {
+          return false;
+        },
         async addRisk(risk) {
           risks.push(risk);
         },
