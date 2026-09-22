@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { AddProjectNextActionRequestSchema } from "./initiatives.js";
+import {
+  AddProjectNextActionRequestSchema,
+  CloseProjectRequestSchema,
+} from "./initiatives.js";
 import {
   CapacityBalanceQuerySchema,
   DeclareCapacityAvailabilityRequestSchema,
@@ -54,5 +57,36 @@ describe("capacity contracts", () => {
         periodEndsOn: "2026-10-01",
       }),
     ).toThrow("El período no puede terminar antes de comenzar.");
+  });
+});
+
+describe("CloseProjectRequestSchema", () => {
+  it("preserves structured closure exceptions and defaults compatibility items", () => {
+    const closure = CloseProjectRequestSchema.parse({
+      organizationId: "00000000-0000-4000-8000-000000000001",
+      outcomes: "Piloto entregado.",
+      lessonsLearned: "Validar responsables antes del cierre.",
+      closureExceptions: [
+        {
+          description: "Medir adopción posterior.",
+          disposition: "transferred",
+          responsibleActorId: "adoption-owner",
+          rationale: "El equipo de adopción mantiene el seguimiento.",
+        },
+      ],
+    });
+    expect(closure.pendingItems).toEqual([]);
+    expect(closure.closureExceptions).toHaveLength(1);
+    expect(
+      CloseProjectRequestSchema.safeParse({
+        ...closure,
+        closureExceptions: [
+          {
+            ...closure.closureExceptions[0],
+            disposition: "unknown",
+          },
+        ],
+      }).success,
+    ).toBe(false);
   });
 });

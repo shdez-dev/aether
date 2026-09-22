@@ -419,6 +419,18 @@ describe("project conversion and execution", () => {
       documentVersionId,
       correlationId: ids.next(),
     });
+    await expect(
+      projects.close({
+        actorId: "replacement",
+        organizationId: organization.id,
+        projectId: project.id,
+        outcomes: "Piloto completado",
+        lessonsLearned: "Validar evidencia al inicio.",
+        pendingItems: ["Medir adopción"],
+        closureExceptions: [],
+        correlationId: ids.next(),
+      }),
+    ).rejects.toMatchObject({ code: "PROJECT_CLOSURE_EXCEPTION_INVALID" });
     const closure = await projects.close({
       actorId: "replacement",
       organizationId: organization.id,
@@ -426,6 +438,14 @@ describe("project conversion and execution", () => {
       outcomes: "Piloto completado",
       lessonsLearned: "Validar evidencia al inicio.",
       pendingItems: ["Medir adopción"],
+      closureExceptions: [
+        {
+          description: "Medir adopción",
+          disposition: "transferred",
+          responsibleActorId: "replacement",
+          rationale: "El equipo de adopción continuará el seguimiento.",
+        },
+      ],
       correlationId: ids.next(),
     });
     expect(active.status).toBe("active");
@@ -441,6 +461,16 @@ describe("project conversion and execution", () => {
     expect(completed.status).toBe("completed");
     expect(deliverable.documentVersionId).toBe(documentVersionId);
     expect(closures.closures.get(project.id)).toEqual(closure);
+    expect(closure).toMatchObject({
+      pendingItems: ["Medir adopción"],
+      exceptions: [
+        {
+          description: "Medir adopción",
+          disposition: "transferred",
+          responsibleActorId: "replacement",
+        },
+      ],
+    });
     expect(projectStore.durableEvents.map((event) => event.eventType)).toEqual([
       "project.created.v1",
       "project.status_changed.v1",

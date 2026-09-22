@@ -25,6 +25,7 @@ import {
   type ProjectBaseline,
   type ProjectBaselineDifference,
   type ProjectClosure,
+  type ProjectClosureException,
   type ProjectDeliverableAcceptance,
   type ProjectParticipant,
   type ProjectStatus,
@@ -1205,6 +1206,7 @@ export class ProjectService {
     outcomes: string;
     lessonsLearned: string;
     pendingItems: readonly string[];
+    closureExceptions: readonly Omit<ProjectClosureException, "id">[];
     correlationId: string;
   }): Promise<ProjectClosure> {
     const project = await this.requireProject(
@@ -1220,6 +1222,34 @@ export class ProjectService {
       throw new ProjectDomainError("INVALID_PROJECT_TRANSITION");
     if (await this.dependencies.closures.findClosure(project.id))
       throw new ProjectAlreadyClosedError();
+    const exceptionDescriptions = input.closureExceptions.map(
+      (exception) => exception.description,
+    );
+    const pendingItems = new Set(input.pendingItems);
+    const uniqueExceptionDescriptions = new Set(exceptionDescriptions);
+    if (
+      pendingItems.size !== input.pendingItems.length ||
+      uniqueExceptionDescriptions.size !== exceptionDescriptions.length ||
+      pendingItems.size !== uniqueExceptionDescriptions.size ||
+      [...pendingItems].some(
+        (pendingItem) => !uniqueExceptionDescriptions.has(pendingItem),
+      )
+    )
+      throw new ProjectDomainError("PROJECT_CLOSURE_EXCEPTION_INVALID");
+    await Promise.all(
+      input.closureExceptions.map((exception) =>
+        this.assertProjectParticipant(
+          exception.responsibleActorId,
+          project.organizationId,
+          project.workspaceId,
+        ),
+      ),
+    );
+    const exceptions: readonly ProjectClosureException[] =
+      input.closureExceptions.map((exception) => ({
+        id: this.dependencies.ids.next(),
+        ...exception,
+      }));
     const closure: ProjectClosure = {
       id: this.dependencies.ids.next(),
       projectId: project.id,
@@ -1227,7 +1257,8 @@ export class ProjectService {
       workspaceId: project.workspaceId,
       outcomes: input.outcomes,
       lessonsLearned: input.lessonsLearned,
-      pendingItems: [...input.pendingItems],
+      exceptions,
+      pendingItems: exceptionDescriptions,
       closedByActorId: input.actorId,
       closedAt: this.dependencies.clock.now(),
     };
@@ -1239,7 +1270,7 @@ export class ProjectService {
       "project.closed.v1",
       {
         closureId: closure.id,
-        pendingItems: closure.pendingItems.length,
+        exceptions: closure.exceptions.length,
       },
     );
     return closure;

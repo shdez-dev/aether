@@ -4444,7 +4444,7 @@ components:
     CloseProjectRequest:
       type: object
       additionalProperties: false
-      required: [organizationId, outcomes, lessonsLearned, pendingItems]
+      required: [organizationId, outcomes, lessonsLearned]
       properties:
         organizationId: { type: string, format: uuid }
         outcomes: { type: string, minLength: 1, maxLength: 10000 }
@@ -4455,6 +4455,18 @@ components:
             maxItems: 100,
             items: { type: string, minLength: 1, maxLength: 2000 },
           }
+        closureExceptions:
+          type: array
+          maxItems: 100
+          items:
+            type: object
+            additionalProperties: false
+            required: [description, disposition, responsibleActorId, rationale]
+            properties:
+              description: { type: string, minLength: 1, maxLength: 2000 }
+              disposition: { type: string, enum: [resolved, transferred, accepted] }
+              responsibleActorId: { type: string, minLength: 1, maxLength: 255 }
+              rationale: { type: string, minLength: 1, maxLength: 10000 }
     AttachEvidenceRequest:
       type: object
       additionalProperties: false

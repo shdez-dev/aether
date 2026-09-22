@@ -235,9 +235,28 @@ export type ProjectClosure = Readonly<{
   workspaceId: string;
   outcomes: string;
   lessonsLearned: string;
+  exceptions: readonly ProjectClosureException[];
+  /**
+   * Compatibility projection of `exceptions`. New consumers should use the
+   * structured exception records instead of this list.
+   */
   pendingItems: readonly string[];
   closedByActorId: string;
   closedAt: Date;
+}>;
+export const ProjectClosureExceptionDispositions = [
+  "resolved",
+  "transferred",
+  "accepted",
+] as const;
+export type ProjectClosureExceptionDisposition =
+  (typeof ProjectClosureExceptionDispositions)[number];
+export type ProjectClosureException = Readonly<{
+  id: string;
+  description: string;
+  disposition: ProjectClosureExceptionDisposition;
+  responsibleActorId: string;
+  rationale: string;
 }>;
 export type ProjectDeliverableAcceptance = Readonly<{
   id: string;
@@ -426,6 +445,7 @@ export class ProjectDomainError extends Error {
       | "PROJECT_RISK_NOT_OPEN"
       | "PROJECT_OPERATIONAL_DECISION_INVALID"
       | "PROJECT_EXTERNAL_DEPENDENCY_NOT_OPEN"
+      | "PROJECT_CLOSURE_EXCEPTION_INVALID"
       | "INVALID_PROJECT_TRANSITION"
       | "DECISION_CONDITIONS_PENDING",
   ) {

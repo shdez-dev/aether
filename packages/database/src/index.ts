@@ -106,6 +106,7 @@ import type {
   EvidenceReference,
   EvidenceReferenceSubjectType,
   ProjectClosure,
+  ProjectClosureException,
   ProjectDeliverableAcceptance,
   BusinessHoursPolicy,
   CapacityAllocation,
@@ -4139,8 +4140,8 @@ export class PostgresProjectClosureStore implements ProjectClosureStore {
   constructor(private readonly pool: Pool) {}
   async createClosure(closure: ProjectClosure): Promise<void> {
     await this.pool.query(
-      `INSERT INTO project_closures (id, project_id, organization_id, workspace_id, outcomes, lessons_learned, pending_items, closed_by_actor_id, closed_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      `INSERT INTO project_closures (id, project_id, organization_id, workspace_id, outcomes, lessons_learned, closure_exceptions, pending_items, closed_by_actor_id, closed_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
       [
         closure.id,
         closure.projectId,
@@ -4148,6 +4149,7 @@ export class PostgresProjectClosureStore implements ProjectClosureStore {
         closure.workspaceId,
         closure.outcomes,
         closure.lessonsLearned,
+        asJson(closure.exceptions),
         asJson(closure.pendingItems),
         closure.closedByActorId,
         closure.closedAt,
@@ -4156,7 +4158,7 @@ export class PostgresProjectClosureStore implements ProjectClosureStore {
   }
   async findClosure(projectId: string): Promise<ProjectClosure | null> {
     const result = await this.pool.query<ProjectClosureRow>(
-      `SELECT id, project_id, organization_id, workspace_id, outcomes, lessons_learned, pending_items, closed_by_actor_id, closed_at
+      `SELECT id, project_id, organization_id, workspace_id, outcomes, lessons_learned, closure_exceptions, pending_items, closed_by_actor_id, closed_at
        FROM project_closures WHERE project_id = $1`,
       [projectId],
     );
@@ -5467,6 +5469,7 @@ type ProjectClosureRow = {
   workspace_id: string;
   outcomes: string;
   lessons_learned: string;
+  closure_exceptions: ProjectClosureException[];
   pending_items: string[];
   closed_by_actor_id: string;
   closed_at: Date;
@@ -5957,6 +5960,7 @@ function toProjectClosure(row: ProjectClosureRow): ProjectClosure {
     workspaceId: row.workspace_id,
     outcomes: row.outcomes,
     lessonsLearned: row.lessons_learned,
+    exceptions: row.closure_exceptions,
     pendingItems: row.pending_items,
     closedByActorId: row.closed_by_actor_id,
     closedAt: row.closed_at,
