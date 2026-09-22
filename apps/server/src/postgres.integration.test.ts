@@ -1276,6 +1276,17 @@ describe.sequential("PostgreSQL integration", () => {
         [workspaceId, organizationId, otherWorkspaceId, otherOrganizationId],
       );
       await pool.query(
+        `INSERT INTO organization_memberships (organization_id, actor_id, actor_email, role, status)
+         VALUES ($1,'owner','owner@example.test','owner','active'),
+                ($1,'lead','lead@example.test','member','active')`,
+        [organizationId],
+      );
+      await pool.query(
+        `INSERT INTO workspace_memberships (workspace_id, actor_id, role)
+         VALUES ($1,'lead','member')`,
+        [workspaceId],
+      );
+      await pool.query(
         `INSERT INTO initiatives (id, organization_id, workspace_id, created_by_actor_id, title, problem_statement, expected_outcome, classification, status, created_at, updated_at) VALUES
          ($1,$2,$3,'owner','One','Problem','Outcome','internal','approved','2026-01-01T00:00:00Z','2026-01-03T00:00:00Z'),
          ($4,$2,$3,'owner','Two','Problem','Outcome','internal','rejected','2026-01-02T00:00:00Z','2026-01-04T00:00:00Z'),
@@ -1362,17 +1373,6 @@ describe.sequential("PostgreSQL integration", () => {
           initiativePrevious,
           decisionPrevious,
         ],
-      );
-      await pool.query(
-        `INSERT INTO organization_memberships (organization_id, actor_id, actor_email, role, status)
-         VALUES ($1,'owner','owner@example.test','owner','active'),
-                ($1,'lead','lead@example.test','member','active')`,
-        [organizationId],
-      );
-      await pool.query(
-        `INSERT INTO workspace_memberships (workspace_id, actor_id, role)
-         VALUES ($1,'lead','member')`,
-        [workspaceId],
       );
       await pool.query(
         `INSERT INTO project_milestones (id, project_id, title, due_on, completed_at, created_by_actor_id, created_at)

@@ -500,6 +500,17 @@ describe("project conversion and execution", () => {
         correlationId: ids.next(),
       }),
     ).resolves.toMatchObject({ status: "archived" });
+    await expect(
+      projects.acceptDeliverable({
+        actorId: "replacement",
+        organizationId: organization.id,
+        projectId: project.id,
+        name: "Aceptación tardía",
+        documentId,
+        documentVersionId,
+        correlationId: ids.next(),
+      }),
+    ).rejects.toMatchObject({ code: "PROJECT_CLOSED_IMMUTABLE" });
     expect(projectStore.durableEvents.map((event) => event.eventType)).toEqual([
       "project.created.v1",
       "project.status_changed.v1",

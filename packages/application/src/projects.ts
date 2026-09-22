@@ -305,10 +305,7 @@ export class ProjectService {
       throw new ProjectDomainError("PROJECT_PAUSE_CONTEXT_REQUIRED");
     if (input.status === "cancelled")
       throw new ProjectDomainError("PROJECT_CANCELLATION_REASON_REQUIRED");
-    const project = await this.requireProject(
-      input.projectId,
-      input.organizationId,
-    );
+    const project = await this.requireProject(input.projectId, input.organizationId);
     if (input.status === "active" && project.status === "paused")
       throw new ProjectDomainError("PROJECT_REPLAN_REQUIRED");
     await this.assertExecutionAccess(
@@ -362,7 +359,10 @@ export class ProjectService {
     expectedVersion: number;
     correlationId: string;
   }): Promise<Project> {
-    const project = await this.requireProject(input.projectId, input.organizationId);
+    const project = await this.requireProject(
+      input.projectId,
+      input.organizationId,
+    );
     await this.assertChangeReviewer(input.actorId, project.organizationId);
     if (project.version !== input.expectedVersion)
       throw new ProjectVersionConflictError();
@@ -1060,8 +1060,7 @@ export class ProjectService {
       input.projectId,
       input.organizationId,
     );
-    if (project.status === "completed" || project.status === "cancelled")
-      throw new ProjectDomainError("PROJECT_CLOSED_IMMUTABLE");
+    this.assertProjectMutable(project);
     await this.assertChangeReviewer(input.actorId, project.organizationId);
     const request = await this.dependencies.execution.findChangeRequest(
       input.changeRequestId,
@@ -1448,11 +1447,7 @@ export class ProjectService {
       this.dependencies.tenancy,
       project.workspaceId,
     );
-    if (
-      !options.allowCompleted &&
-      (project.status === "completed" || project.status === "cancelled")
-    )
-      throw new ProjectDomainError("PROJECT_CLOSED_IMMUTABLE");
+    this.assertProjectMutable(project, options);
     const role = await this.dependencies.tenancy.findOrganizationRole({
       actorId,
       organizationId: project.organizationId,
@@ -1482,8 +1477,7 @@ export class ProjectService {
     project: Project,
     risk: Pick<ProjectRisk, "ownerActorId">,
   ): Promise<void> {
-    if (project.status === "completed" || project.status === "cancelled")
-      throw new ProjectDomainError("PROJECT_CLOSED_IMMUTABLE");
+    this.assertProjectMutable(project);
     if (actorId === risk.ownerActorId) {
       await this.assertProjectParticipant(
         actorId,
@@ -1493,6 +1487,17 @@ export class ProjectService {
       return;
     }
     await this.assertExecutionAccess(actorId, project, "");
+  }
+  private assertProjectMutable(
+    project: Project,
+    options: Readonly<{ allowCompleted?: boolean }> = {},
+  ): void {
+    if (
+      project.status === "archived" ||
+      project.status === "cancelled" ||
+      (!options.allowCompleted && project.status === "completed")
+    )
+      throw new ProjectDomainError("PROJECT_CLOSED_IMMUTABLE");
   }
   private async assertProjectRead(
     actorId: string,
