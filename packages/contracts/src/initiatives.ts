@@ -279,6 +279,11 @@ export const RegisterProjectRiskRequestSchema = z.object({
   treatment: z.enum(["avoid", "mitigate", "transfer", "accept"]),
   ownerActorId: z.string().min(1).max(255),
 });
+export const ResolveProjectRiskRequestSchema = z.object({
+  organizationId: UuidSchema,
+  status: z.enum(["resolved", "accepted"]),
+  resolutionNote: NonEmptyTextSchema.max(10_000),
+});
 export const RecordProjectOperationalDecisionRequestSchema = z.object({
   organizationId: UuidSchema,
   subject: NonEmptyTextSchema.max(2_000),

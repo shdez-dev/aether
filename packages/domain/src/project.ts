@@ -80,6 +80,8 @@ export const ProjectRiskTreatments = [
   "accept",
 ] as const;
 export type ProjectRiskTreatment = (typeof ProjectRiskTreatments)[number];
+export const ProjectRiskStatuses = ["open", "resolved", "accepted"] as const;
+export type ProjectRiskStatus = (typeof ProjectRiskStatuses)[number];
 export type ProjectRisk = Readonly<{
   id: string;
   projectId: string;
@@ -90,6 +92,10 @@ export type ProjectRisk = Readonly<{
   ownerActorId: string;
   createdByActorId: string;
   createdAt: Date;
+  status: ProjectRiskStatus;
+  resolutionNote: string | null;
+  resolvedByActorId: string | null;
+  resolvedAt: Date | null;
 }>;
 export type ProjectOperationalDecision = Readonly<{
   id: string;
@@ -413,6 +419,7 @@ export class ProjectDomainError extends Error {
       | "PROJECT_MINIMUM_PLAN_REQUIRED"
       | "PROJECT_MANDATE_REQUIRED"
       | "PROJECT_CHANGE_REQUEST_NOT_PENDING"
+      | "PROJECT_RISK_NOT_OPEN"
       | "INVALID_PROJECT_TRANSITION"
       | "DECISION_CONDITIONS_PENDING",
   ) {

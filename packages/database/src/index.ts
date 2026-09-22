@@ -3654,8 +3654,8 @@ export class PostgresProjectExecutionStore implements ProjectExecutionStore {
   }
   async addRisk(risk: ProjectRisk): Promise<void> {
     await this.pool.query(
-      `INSERT INTO project_risks (id, project_id, title, probability, impact, treatment, owner_actor_id, created_by_actor_id, created_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      `INSERT INTO project_risks (id, project_id, title, probability, impact, treatment, owner_actor_id, created_by_actor_id, created_at, status, resolution_note, resolved_by_actor_id, resolved_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
       [
         risk.id,
         risk.projectId,
@@ -3666,8 +3666,43 @@ export class PostgresProjectExecutionStore implements ProjectExecutionStore {
         risk.ownerActorId,
         risk.createdByActorId,
         risk.createdAt,
+        risk.status,
+        risk.resolutionNote,
+        risk.resolvedByActorId,
+        risk.resolvedAt,
       ],
     );
+  }
+  async listRisks(projectId: string): Promise<readonly ProjectRisk[]> {
+    const result = await this.pool.query<ProjectRiskRow>(
+      `SELECT id, project_id, title, probability, impact, treatment, owner_actor_id, created_by_actor_id, created_at, status, resolution_note, resolved_by_actor_id, resolved_at
+       FROM project_risks WHERE project_id = $1 ORDER BY created_at ASC, id ASC`,
+      [projectId],
+    );
+    return result.rows.map(toProjectRisk);
+  }
+  async findRisk(riskId: string): Promise<ProjectRisk | null> {
+    const result = await this.pool.query<ProjectRiskRow>(
+      `SELECT id, project_id, title, probability, impact, treatment, owner_actor_id, created_by_actor_id, created_at, status, resolution_note, resolved_by_actor_id, resolved_at
+       FROM project_risks WHERE id = $1`,
+      [riskId],
+    );
+    return result.rows[0] ? toProjectRisk(result.rows[0]) : null;
+  }
+  async resolveRisk(risk: ProjectRisk): Promise<boolean> {
+    const result = await this.pool.query(
+      `UPDATE project_risks
+       SET status = $2, resolution_note = $3, resolved_by_actor_id = $4, resolved_at = $5
+       WHERE id = $1 AND status = 'open'`,
+      [
+        risk.id,
+        risk.status,
+        risk.resolutionNote,
+        risk.resolvedByActorId,
+        risk.resolvedAt,
+      ],
+    );
+    return (result.rowCount ?? 0) === 1;
   }
   async addOperationalDecision(
     decision: ProjectOperationalDecision,
@@ -5723,6 +5758,38 @@ function toProjectSnapshot(snapshot: ProjectSnapshotRow): Project {
     participants: [...snapshot.participants],
     createdAt: new Date(snapshot.createdAt),
     updatedAt: new Date(snapshot.updatedAt),
+  };
+}
+type ProjectRiskRow = {
+  id: string;
+  project_id: string;
+  title: string;
+  probability: ProjectRisk["probability"];
+  impact: ProjectRisk["impact"];
+  treatment: ProjectRisk["treatment"];
+  owner_actor_id: string;
+  created_by_actor_id: string;
+  created_at: Date;
+  status: ProjectRisk["status"];
+  resolution_note: string | null;
+  resolved_by_actor_id: string | null;
+  resolved_at: Date | null;
+};
+function toProjectRisk(row: ProjectRiskRow): ProjectRisk {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    title: row.title,
+    probability: row.probability,
+    impact: row.impact,
+    treatment: row.treatment,
+    ownerActorId: row.owner_actor_id,
+    createdByActorId: row.created_by_actor_id,
+    createdAt: row.created_at,
+    status: row.status,
+    resolutionNote: row.resolution_note,
+    resolvedByActorId: row.resolved_by_actor_id,
+    resolvedAt: row.resolved_at,
   };
 }
 function toProjectAuditEvent(row: ProjectAuditRow): ProjectAuditEvent {

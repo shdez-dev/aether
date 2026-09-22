@@ -17,6 +17,7 @@ import {
   type ProjectRisk,
   type ProjectRiskLevel,
   type ProjectRiskTreatment,
+  type ProjectRiskStatus,
   type ProjectOperationalDecision,
   type ProjectExternalDependency,
   type ProjectChangeRequest,
@@ -83,6 +84,9 @@ export interface ProjectExecutionStore {
   addMilestone(milestone: ProjectMilestone): Promise<void>;
   addNextAction(action: ProjectNextAction): Promise<void>;
   addRisk(risk: ProjectRisk): Promise<void>;
+  listRisks(projectId: string): Promise<readonly ProjectRisk[]>;
+  findRisk(riskId: string): Promise<ProjectRisk | null>;
+  resolveRisk(risk: ProjectRisk): Promise<boolean>;
   addOperationalDecision(decision: ProjectOperationalDecision): Promise<void>;
   addExternalDependency(dependency: ProjectExternalDependency): Promise<void>;
   addChangeRequest(request: ProjectChangeRequest): Promise<void>;
@@ -722,6 +726,10 @@ export class ProjectService {
       ownerActorId: input.ownerActorId,
       createdByActorId: input.actorId,
       createdAt: this.dependencies.clock.now(),
+      status: "open",
+      resolutionNote: null,
+      resolvedByActorId: null,
+      resolvedAt: null,
     };
     await this.dependencies.execution.addRisk(risk);
     await this.record(
@@ -738,6 +746,56 @@ export class ProjectService {
       },
     );
     return risk;
+  }
+  async listRisks(input: {
+    actorId: string;
+    organizationId: string;
+    projectId: string;
+    correlationId?: string;
+  }): Promise<readonly ProjectRisk[]> {
+    const project = await this.requireProject(
+      input.projectId,
+      input.organizationId,
+    );
+    await this.assertProjectRead(input.actorId, project, input.correlationId);
+    return this.dependencies.execution.listRisks(project.id);
+  }
+  async resolveRisk(input: {
+    actorId: string;
+    organizationId: string;
+    projectId: string;
+    riskId: string;
+    status: Exclude<ProjectRiskStatus, "open">;
+    resolutionNote: string;
+    correlationId: string;
+  }): Promise<ProjectRisk> {
+    const project = await this.requireProject(
+      input.projectId,
+      input.organizationId,
+    );
+    const risk = await this.dependencies.execution.findRisk(input.riskId);
+    if (!risk || risk.projectId !== project.id)
+      throw new ResourceNotFoundError("PROJECT_NOT_FOUND");
+    if (risk.status !== "open")
+      throw new ProjectDomainError("PROJECT_RISK_NOT_OPEN");
+    await this.assertRiskResolutionAccess(input.actorId, project, risk);
+    const resolved: ProjectRisk = {
+      ...risk,
+      status: input.status,
+      resolutionNote: input.resolutionNote,
+      resolvedByActorId: input.actorId,
+      resolvedAt: this.dependencies.clock.now(),
+    };
+    if (!(await this.dependencies.execution.resolveRisk(resolved)))
+      throw new ProjectDomainError("PROJECT_RISK_NOT_OPEN");
+    await this.record(
+      project,
+      input.actorId,
+      input.correlationId,
+      `project.risk_${input.status}.v1`,
+      { riskId: resolved.id, ownerActorId: resolved.ownerActorId },
+    );
+    return resolved;
   }
   async recordOperationalDecision(input: {
     actorId: string;
@@ -1237,6 +1295,21 @@ export class ProjectService {
     )
       return;
     throw new AccessDeniedError("workspace:manage");
+  }
+  private async assertRiskResolutionAccess(
+    actorId: string,
+    project: Project,
+    risk: ProjectRisk,
+  ): Promise<void> {
+    if (actorId === risk.ownerActorId) {
+      await this.assertProjectParticipant(
+        actorId,
+        project.organizationId,
+        project.workspaceId,
+      );
+      return;
+    }
+    await this.assertExecutionAccess(actorId, project, "");
   }
   private async assertProjectRead(
     actorId: string,

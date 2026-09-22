@@ -2205,6 +2205,20 @@ paths:
         "201": { description: Hito creado }
         default: { $ref: "#/components/responses/Problem" }
   /v1/projects/{projectId}/risks:
+    get:
+      tags: [Projects]
+      operationId: listProjectRisks
+      summary: Consultar riesgos autorizados del proyecto
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/OrganizationContextId"
+      responses:
+        "200": { description: Riesgos del proyecto. }
+        default: { $ref: "#/components/responses/Problem" }
     post:
       tags: [Projects]
       operationId: registerProjectRisk
@@ -2224,6 +2238,31 @@ paths:
             schema: { $ref: "#/components/schemas/RegisterProjectRiskRequest" }
       responses:
         "201": { description: Riesgo registrado. }
+        default: { $ref: "#/components/responses/Problem" }
+  /v1/projects/{projectId}/risks/{riskId}/resolution:
+    post:
+      tags: [Projects]
+      operationId: resolveProjectRisk
+      summary: Resolver o aceptar un riesgo abierto del proyecto
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: riskId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ResolveProjectRiskRequest" }
+      responses:
+        "200": { description: Riesgo resuelto o aceptado. }
         default: { $ref: "#/components/responses/Problem" }
   /v1/projects/{projectId}/operational-decisions:
     post:
@@ -4164,6 +4203,14 @@ components:
         impact: { type: string, enum: [low, medium, high] }
         treatment: { type: string, enum: [avoid, mitigate, transfer, accept] }
         ownerActorId: { type: string, minLength: 1, maxLength: 255 }
+    ResolveProjectRiskRequest:
+      type: object
+      additionalProperties: false
+      required: [organizationId, status, resolutionNote]
+      properties:
+        organizationId: { type: string, format: uuid }
+        status: { type: string, enum: [resolved, accepted] }
+        resolutionNote: { type: string, minLength: 1, maxLength: 10000 }
     RecordProjectOperationalDecisionRequest:
       type: object
       additionalProperties: false

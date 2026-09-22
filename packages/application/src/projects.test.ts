@@ -5,6 +5,7 @@ import {
   type Project,
   type ProjectBaseline,
   type ProjectChangeRequest,
+  type ProjectRisk,
 } from "@aether/domain";
 
 import {
@@ -90,7 +91,7 @@ describe("ProjectService", () => {
         return [];
       },
     };
-    const risks: unknown[] = [];
+    const risks: ProjectRisk[] = [];
     const changeRequests: ProjectChangeRequest[] = [];
     const baselines: ProjectBaseline[] = [];
     let generatedId = 0;
@@ -101,6 +102,20 @@ describe("ProjectService", () => {
         async addNextAction() {},
         async addRisk(risk) {
           risks.push(risk);
+        },
+        async listRisks() {
+          return risks;
+        },
+        async findRisk(riskId) {
+          return risks.find((risk) => risk.id === riskId) ?? null;
+        },
+        async resolveRisk(risk) {
+          const index = risks.findIndex(
+            (current) => current.id === risk.id && current.status === "open",
+          );
+          if (index < 0) return false;
+          risks[index] = risk;
+          return true;
         },
         async addOperationalDecision() {},
         async addExternalDependency() {},
@@ -169,25 +184,50 @@ describe("ProjectService", () => {
       clock: { now: () => new Date("2026-09-18T12:01:00.000Z") },
     });
 
-    await expect(
-      service.addRisk({
-        actorId: "owner",
-        organizationId: "organization-1",
-        projectId: "project-1",
-        title: "Proveedor externo sin confirmación.",
-        probability: "high",
-        impact: "high",
-        treatment: "mitigate",
-        ownerActorId: "owner",
-        correlationId: "correlation-risk",
-      }),
-    ).resolves.toMatchObject({
+    const registeredRisk = await service.addRisk({
+      actorId: "owner",
+      organizationId: "organization-1",
+      projectId: "project-1",
+      title: "Proveedor externo sin confirmación.",
+      probability: "high",
+      impact: "high",
+      treatment: "mitigate",
+      ownerActorId: "owner",
+      correlationId: "correlation-risk",
+    });
+    expect(registeredRisk).toMatchObject({
       projectId: "project-1",
       probability: "high",
       treatment: "mitigate",
       ownerActorId: "owner",
+      status: "open",
     });
     expect(risks).toHaveLength(1);
+    await expect(
+      service.resolveRisk({
+        actorId: "owner",
+        organizationId: "organization-1",
+        projectId: "project-1",
+        riskId: registeredRisk.id,
+        status: "resolved",
+        resolutionNote: "El proveedor confirmó la fecha de entrega.",
+        correlationId: "correlation-risk-resolution",
+      }),
+    ).resolves.toMatchObject({
+      status: "resolved",
+      resolvedByActorId: "owner",
+    });
+    await expect(
+      service.resolveRisk({
+        actorId: "owner",
+        organizationId: "organization-1",
+        projectId: "project-1",
+        riskId: registeredRisk.id,
+        status: "accepted",
+        resolutionNote: "Una resolución no puede repetirse.",
+        correlationId: "correlation-risk-repeat",
+      }),
+    ).rejects.toMatchObject({ code: "PROJECT_RISK_NOT_OPEN" });
 
     const requestedChange = await service.requestChange({
       actorId: "lead",

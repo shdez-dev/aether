@@ -89,6 +89,7 @@ import {
   AuditHistoryQuerySchema,
   AddProjectMilestoneRequestSchema,
   RegisterProjectRiskRequestSchema,
+  ResolveProjectRiskRequestSchema,
   RecordProjectOperationalDecisionRequestSchema,
   AddProjectExternalDependencyRequestSchema,
   RequestProjectChangeSchema,
@@ -2730,6 +2731,72 @@ export async function buildServer(input: {
       },
     });
   });
+  app.get("/v1/projects/:projectId/risks", async (request, reply) => {
+    const session = await requireSession(
+      request,
+      reply,
+      input.auth,
+      input.config,
+    );
+    const { projectId } = z
+      .object({ projectId: z.string().uuid() })
+      .parse(request.params);
+    const { organizationId } = z
+      .object({ organizationId: z.string().uuid() })
+      .parse(request.query);
+    return (
+      await input.projects.listRisks({
+        actorId: session.actorId,
+        correlationId: correlationId(reply),
+        organizationId,
+        projectId,
+      })
+    ).map((risk) => ({
+      ...risk,
+      createdAt: risk.createdAt.toISOString(),
+      resolvedAt: risk.resolvedAt?.toISOString() ?? null,
+    }));
+  });
+  app.post(
+    "/v1/projects/:projectId/risks/:riskId/resolution",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      const { projectId, riskId } = z
+        .object({ projectId: z.string().uuid(), riskId: z.string().uuid() })
+        .parse(request.params);
+      const body = ResolveProjectRiskRequestSchema.parse(request.body);
+      return respondIdempotently({
+        request,
+        reply,
+        store: input.idempotency,
+        actorId: session.actorId,
+        operation: `project.risk.resolve:${projectId}:${riskId}`,
+        requestPayload: body,
+        execute: async () => {
+          const risk = await input.projects.resolveRisk({
+            actorId: session.actorId,
+            correlationId: correlationId(reply),
+            projectId,
+            riskId,
+            ...body,
+          });
+          return {
+            statusCode: 200,
+            body: {
+              ...risk,
+              createdAt: risk.createdAt.toISOString(),
+              resolvedAt: risk.resolvedAt?.toISOString() ?? null,
+            },
+          };
+        },
+      });
+    },
+  );
   app.post(
     "/v1/projects/:projectId/operational-decisions",
     async (request, reply) => {

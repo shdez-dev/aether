@@ -110,6 +110,20 @@ export class InMemoryProjectExecutionStore implements ProjectExecutionStore {
   async addRisk(risk: ProjectRisk): Promise<void> {
     this.risks.push(risk);
   }
+  async listRisks(projectId: string): Promise<readonly ProjectRisk[]> {
+    return this.risks.filter((risk) => risk.projectId === projectId);
+  }
+  async findRisk(riskId: string): Promise<ProjectRisk | null> {
+    return this.risks.find((risk) => risk.id === riskId) ?? null;
+  }
+  async resolveRisk(risk: ProjectRisk): Promise<boolean> {
+    const index = this.risks.findIndex(
+      (current) => current.id === risk.id && current.status === "open",
+    );
+    if (index < 0) return false;
+    this.risks[index] = risk;
+    return true;
+  }
   async addOperationalDecision(
     decision: ProjectOperationalDecision,
   ): Promise<void> {
