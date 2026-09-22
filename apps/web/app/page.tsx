@@ -21,6 +21,7 @@ import {
   initiativeStatusLabel,
 } from "../src/initiatives";
 import { MyWork } from "./my-work";
+import { NewTaskForm } from "./new-task-form";
 import { ProjectTasks } from "./project-tasks";
 
 type Draft = Pick<
@@ -140,12 +141,6 @@ export default function AetherPage() {
   const [projectStatus, setProjectStatus] =
     useState<ProjectResponse["status"]>("planned");
   const [milestone, setMilestone] = useState({ title: "", dueOn: "" });
-  const [nextAction, setNextAction] = useState({
-    description: "",
-    ownerActorId: "",
-    dueOn: "",
-    priority: "medium" as "low" | "medium" | "high",
-  });
   const [projectDraft, setProjectDraft] = useState({
     name: "",
     sponsorActorId: "",
@@ -651,43 +646,6 @@ export default function AetherPage() {
     }
   }
 
-  async function addNextAction(event: FormEvent) {
-    event.preventDefault();
-    if (!selectedProject) return;
-    setError("");
-    try {
-      await request(`projects/${selectedProject.id}/next-actions`, {
-        method: "POST",
-        body: JSON.stringify({
-          organizationId,
-          description: nextAction.description,
-          ownerActorId: nextAction.ownerActorId || session?.actorId || null,
-          dueOn: nextAction.dueOn || null,
-          priority: nextAction.priority,
-          estimatedEffort: null,
-          effortUnit: null,
-          periodStartOn: null,
-          periodEndOn: null,
-        }),
-      });
-      setNextAction({
-        description: "",
-        ownerActorId: "",
-        dueOn: "",
-        priority: "medium",
-      });
-      setSelectedProject({ ...selectedProject });
-      setWorkRevision((current) => current + 1);
-      setMessage("Próxima acción añadida al proyecto.");
-    } catch (caught) {
-      setError(
-        caught instanceof Error
-          ? caught.message
-          : "No fue posible añadir la acción.",
-      );
-    }
-  }
-
   async function createProject(event: FormEvent) {
     event.preventDefault();
     if (!selected || !decision) return;
@@ -1153,61 +1111,24 @@ export default function AetherPage() {
                   />
                   <Button type="submit">Añadir hito</Button>
                 </form>
-                <form className="nested-form" onSubmit={addNextAction}>
-                  <h3>Próxima acción</h3>
-                  <label className="ui-field">
-                    Descripción
-                    <textarea
-                      required
-                      value={nextAction.description}
-                      onChange={(event) =>
-                        setNextAction({
-                          ...nextAction,
-                          description: event.target.value,
-                        })
-                      }
-                    />
-                  </label>
-                  <Field
-                    label="Responsable (ID; vacío = tú)"
-                    value={nextAction.ownerActorId}
-                    onChange={(event) =>
-                      setNextAction({
-                        ...nextAction,
-                        ownerActorId: event.target.value,
-                      })
-                    }
+                {session ? (
+                  <NewTaskForm
+                    key={selectedProject.id}
+                    projectId={selectedProject.id}
+                    organizationId={organizationId}
+                    workspaceId={selectedProject.workspaceId}
+                    actorId={session.actorId}
+                    request={request}
+                    readOnly={["completed", "cancelled", "archived"].includes(
+                      selectedProject.status,
+                    )}
+                    onCreated={() => {
+                      setSelectedProject({ ...selectedProject });
+                      setWorkRevision((current) => current + 1);
+                      setMessage("Tarea añadida al proyecto.");
+                    }}
                   />
-                  <Field
-                    label="Fecha límite"
-                    type="date"
-                    value={nextAction.dueOn}
-                    onChange={(event) =>
-                      setNextAction({
-                        ...nextAction,
-                        dueOn: event.target.value,
-                      })
-                    }
-                  />
-                  <label className="ui-field">
-                    Prioridad
-                    <select
-                      value={nextAction.priority}
-                      onChange={(event) =>
-                        setNextAction({
-                          ...nextAction,
-                          priority: event.target
-                            .value as typeof nextAction.priority,
-                        })
-                      }
-                    >
-                      <option value="low">Baja</option>
-                      <option value="medium">Media</option>
-                      <option value="high">Alta</option>
-                    </select>
-                  </label>
-                  <Button type="submit">Añadir acción</Button>
-                </form>
+                ) : null}
                 <section className="audit">
                   <h3>Historial del proyecto</h3>
                   {projectAudit.length ? (
