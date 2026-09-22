@@ -1,6 +1,7 @@
 import {
   ProjectDomainError,
   assignProjectLead,
+  archiveProject,
   createProject,
   compareProjectToBaseline,
   declareNextActionDependency,
@@ -353,6 +354,25 @@ export class ProjectService {
       { fromStatus: project.status, toStatus: updated.status },
     );
     return updated;
+  }
+  async archive(input: {
+    actorId: string;
+    organizationId: string;
+    projectId: string;
+    expectedVersion: number;
+    correlationId: string;
+  }): Promise<Project> {
+    const project = await this.requireProject(input.projectId, input.organizationId);
+    await this.assertChangeReviewer(input.actorId, project.organizationId);
+    if (project.version !== input.expectedVersion)
+      throw new ProjectVersionConflictError();
+    const archived = archiveProject(project, this.dependencies.clock.now());
+    if (!(await this.dependencies.projects.save({ project: archived, expectedVersion: project.version })))
+      throw new ProjectVersionConflictError();
+    await this.record(archived, input.actorId, input.correlationId, "project.archived.v1", {
+      fromStatus: project.status,
+    });
+    return archived;
   }
   async resume(input: {
     actorId: string;

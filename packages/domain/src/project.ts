@@ -6,6 +6,7 @@ export const ProjectStatuses = [
   "blocked",
   "completed",
   "cancelled",
+  "archived",
 ] as const;
 export type ProjectStatus = (typeof ProjectStatuses)[number];
 export type ProjectParticipantRole =
@@ -288,7 +289,13 @@ const transitions: Record<ProjectStatus, readonly ProjectStatus[]> = {
   blocked: ["active", "paused", "cancelled"],
   completed: [],
   cancelled: [],
+  archived: [],
 };
+export function archiveProject(project: Project, updatedAt: Date): Project {
+  if (project.status !== "completed" && project.status !== "cancelled")
+    throw new ProjectDomainError("PROJECT_ARCHIVE_INVALID");
+  return { ...project, status: "archived", version: project.version + 1, updatedAt };
+}
 export function createProject(
   input: Omit<
     Project,
@@ -457,6 +464,7 @@ export class ProjectDomainError extends Error {
       | "PROJECT_EXTERNAL_DEPENDENCY_NOT_OPEN"
       | "PROJECT_CLOSURE_EXCEPTION_INVALID"
       | "PROJECT_CLOSED_IMMUTABLE"
+      | "PROJECT_ARCHIVE_INVALID"
       | "INVALID_PROJECT_TRANSITION"
       | "DECISION_CONDITIONS_PENDING",
   ) {

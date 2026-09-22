@@ -2133,6 +2133,31 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Project" }
         default: { $ref: "#/components/responses/Problem" }
+  /v1/projects/{projectId}/archive:
+    post:
+      tags: [Projects]
+      operationId: archiveProject
+      summary: Archivar un proyecto terminal sin eliminar su historia
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ArchiveProjectRequest" }
+      responses:
+        "200":
+          description: Proyecto archivado sin eliminación.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Project" }
+        default: { $ref: "#/components/responses/Problem" }
   /v1/projects/{projectId}/pause:
     post:
       tags: [Projects]
@@ -4240,6 +4265,13 @@ components:
         organizationId: { type: string, format: uuid }
         expectedVersion: { type: integer, minimum: 0 }
         reason: { type: string, minLength: 1, maxLength: 2000 }
+    ArchiveProjectRequest:
+      type: object
+      additionalProperties: false
+      required: [organizationId, expectedVersion]
+      properties:
+        organizationId: { type: string, format: uuid }
+        expectedVersion: { type: integer, minimum: 0 }
     PauseProjectRequest:
       type: object
       additionalProperties: false
