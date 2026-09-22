@@ -491,6 +491,15 @@ describe("project conversion and execution", () => {
         exceptions: [{ description: "Medir adopción" }],
       },
     });
+    await expect(
+      projects.archive({
+        actorId: "owner",
+        organizationId: organization.id,
+        projectId: project.id,
+        expectedVersion: completed.version,
+        correlationId: ids.next(),
+      }),
+    ).resolves.toMatchObject({ status: "archived" });
     expect(projectStore.durableEvents.map((event) => event.eventType)).toEqual([
       "project.created.v1",
       "project.status_changed.v1",
@@ -514,6 +523,7 @@ describe("project conversion and execution", () => {
       "project.status_changed.v1",
       "project.deliverable_accepted.v1",
       "project.closed.v1",
+      "project.archived.v1",
     ]);
     expect(audit.events.map((event) => event.eventType)).toEqual([
       "project.created_from_initiative.v1",
@@ -525,6 +535,7 @@ describe("project conversion and execution", () => {
       "project.status_changed.v1",
       "project.deliverable_accepted.v1",
       "project.closed.v1",
+      "project.archived.v1",
     ]);
   });
 });
