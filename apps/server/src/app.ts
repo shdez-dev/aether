@@ -3184,7 +3184,14 @@ export async function buildServer(input: {
       .object({ projectId: z.string().uuid() })
       .parse(request.params);
     const query = z
-      .object({ organizationId: z.string().uuid() })
+      .object({
+        organizationId: z.string().uuid(),
+        workflowStatus: z
+          .enum(["to_do", "in_progress", "in_review", "done", "cancelled"])
+          .optional(),
+        executorTeamId: z.string().uuid().optional(),
+        ownerActorId: z.string().min(1).max(255).optional(),
+      })
       .parse(request.query);
     const actions = await input.projects.listNextActions({
       actorId: session.actorId,

@@ -3861,6 +3861,7 @@ describe("document project authorization endpoints", () => {
       | "reorderNextAction"
       | "claimNextAction"
       | "listMyWork"
+      | "listNextActions"
       | "listTaskCalendar"
       | "previewTaskDateChange"
       | "changeTaskDate"
@@ -3959,6 +3960,16 @@ describe("document project authorization endpoints", () => {
             kinds: ["owned"],
           },
         ];
+      },
+      async listNextActions(input) {
+        expect(input).toMatchObject({
+          actorId: "owner",
+          organizationId,
+          projectId,
+          workflowStatus: "to_do",
+          ownerActorId: "owner",
+        });
+        return [];
       },
       async listTaskCalendar(input) {
         expect(input).toMatchObject({
@@ -4117,6 +4128,13 @@ describe("document project authorization endpoints", () => {
     expect(myWork.json()).toMatchObject([
       { action: { id: actionId }, kinds: ["owned"] },
     ]);
+    const filteredList = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${projectId}/next-actions?organizationId=${organizationId}&workflowStatus=to_do&ownerActorId=owner`,
+      headers: { cookie: headers.cookie },
+    });
+    expect(filteredList.statusCode).toBe(200);
+    expect(filteredList.json()).toEqual([]);
     const calendarUrl = `/v1/projects/${projectId}/next-actions/calendar?organizationId=${organizationId}&fromOn=2026-09-01&toOn=2026-09-30&workflowStatus=to_do`;
     expect(
       (await app.inject({ method: "GET", url: calendarUrl })).statusCode,

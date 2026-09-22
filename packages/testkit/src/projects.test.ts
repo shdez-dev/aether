@@ -468,6 +468,29 @@ describe("project conversion and execution", () => {
       correlationId: ids.next(),
     });
     await expect(
+      projects.listNextActions({
+        actorId: "replacement",
+        organizationId: organization.id,
+        projectId: project.id,
+        workflowStatus: "to_do",
+        executorTeamId: executionTeam.id,
+        ownerActorId: "replacement",
+        correlationId: ids.next(),
+      }),
+    ).resolves.toMatchObject([
+      { id: teamInboxAction.id, position: 1 },
+      { id: nextAction.id, position: 2 },
+    ]);
+    await expect(
+      projects.listNextActions({
+        actorId: "replacement",
+        organizationId: organization.id,
+        projectId: project.id,
+        ownerActorId: "lead",
+        correlationId: ids.next(),
+      }),
+    ).resolves.toEqual([]);
+    await expect(
       projects.listTaskCalendar({
         actorId: "replacement",
         organizationId: organization.id,

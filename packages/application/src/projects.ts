@@ -1089,6 +1089,9 @@ export class ProjectService {
     actorId: string;
     organizationId: string;
     projectId: string;
+    workflowStatus?: ProjectNextAction["workflowStatus"] | undefined;
+    executorTeamId?: string | undefined;
+    ownerActorId?: string | undefined;
     correlationId?: string;
   }): Promise<readonly ProjectNextAction[]> {
     const project = await this.requireProject(
@@ -1096,7 +1099,16 @@ export class ProjectService {
       input.organizationId,
     );
     await this.assertProjectRead(input.actorId, project, input.correlationId);
-    return this.dependencies.execution.listNextActions(project.id);
+    return (
+      await this.dependencies.execution.listNextActions(project.id)
+    ).filter(
+      (action) =>
+        (!input.workflowStatus ||
+          action.workflowStatus === input.workflowStatus) &&
+        (!input.executorTeamId ||
+          action.executorTeamId === input.executorTeamId) &&
+        (!input.ownerActorId || action.ownerActorId === input.ownerActorId),
+    );
   }
   async listTaskCalendar(input: {
     actorId: string;
@@ -1111,15 +1123,7 @@ export class ProjectService {
   }): Promise<ProjectTaskCalendar> {
     if (input.fromOn > input.toOn)
       throw new ProjectDomainError("PROJECT_CALENDAR_RANGE_INVALID");
-    const actions = await this.listNextActions(input);
-    const matching = actions.filter(
-      (action) =>
-        (!input.workflowStatus ||
-          action.workflowStatus === input.workflowStatus) &&
-        (!input.executorTeamId ||
-          action.executorTeamId === input.executorTeamId) &&
-        (!input.ownerActorId || action.ownerActorId === input.ownerActorId),
-    );
+    const matching = await this.listNextActions(input);
     return {
       dated: matching
         .filter(
