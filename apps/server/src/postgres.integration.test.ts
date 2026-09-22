@@ -1279,13 +1279,14 @@ describe.sequential("PostgreSQL integration", () => {
       await pool.query(
         `INSERT INTO organization_memberships (organization_id, actor_id, actor_email, role, status)
          VALUES ($1,'owner','owner@example.test','owner','active'),
-                ($1,'lead','lead@example.test','member','active')`,
-        [organizationId],
+                ($1,'lead','lead@example.test','member','active'),
+                ($2,'other','other@example.test','member','active')`,
+        [organizationId, otherOrganizationId],
       );
       await pool.query(
         `INSERT INTO workspace_memberships (workspace_id, actor_id, role)
-         VALUES ($1,'lead','member')`,
-        [workspaceId],
+         VALUES ($1,'lead','member'), ($2,'other','member')`,
+        [workspaceId, otherWorkspaceId],
       );
       await pool.query(
         `INSERT INTO initiatives (id, organization_id, workspace_id, created_by_actor_id, title, problem_statement, expected_outcome, classification, status, created_at, updated_at) VALUES
@@ -2880,6 +2881,11 @@ describe.sequential("PostgreSQL integration", () => {
         ),
       ).rejects.toThrow(
         "decision must preserve the evaluated initiative and standard version",
+      );
+      await pool.query(
+        `INSERT INTO workspace_memberships (workspace_id, actor_id, role)
+         VALUES ($1,'lead@example.test','member')`,
+        [otherWorkspace.id],
       );
       await expect(
         pool.query(
