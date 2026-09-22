@@ -66,6 +66,8 @@ describe("CloseProjectRequestSchema", () => {
       organizationId: "00000000-0000-4000-8000-000000000001",
       outcomes: "Piloto entregado.",
       lessonsLearned: "Validar responsables antes del cierre.",
+      objectiveAssessment: "achieved",
+      assessmentRationale: "La medición final cumplió el objetivo comprometido.",
       closureExceptions: [
         {
           description: "Medir adopción posterior.",
@@ -86,6 +88,12 @@ describe("CloseProjectRequestSchema", () => {
             disposition: "unknown",
           },
         ],
+      }).success,
+    ).toBe(false);
+    expect(
+      CloseProjectRequestSchema.safeParse({
+        ...closure,
+        objectiveAssessment: "not_assessed",
       }).success,
     ).toBe(false);
   });

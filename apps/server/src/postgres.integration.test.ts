@@ -1380,8 +1380,8 @@ describe.sequential("PostgreSQL integration", () => {
         [randomUUID(), activeProjectId],
       );
       await pool.query(
-        `INSERT INTO project_closures (id, project_id, organization_id, workspace_id, outcomes, lessons_learned, pending_items, closed_by_actor_id, closed_at)
-         VALUES ($1,$2,$3,$4,'Delivered','Reusable lesson','[]','owner','2026-01-20T00:00:00Z')`,
+        `INSERT INTO project_closures (id, project_id, organization_id, workspace_id, outcomes, lessons_learned, objective_assessment, assessment_rationale, pending_items, closed_by_actor_id, closed_at)
+         VALUES ($1,$2,$3,$4,'Delivered','Reusable lesson','achieved','Metric target met','[]','owner','2026-01-20T00:00:00Z')`,
         [randomUUID(), closedProjectId, organizationId, workspaceId],
       );
       const capacityStore = new PostgresCapacityStore(pool);

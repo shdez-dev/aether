@@ -426,6 +426,8 @@ describe("project conversion and execution", () => {
         projectId: project.id,
         outcomes: "Piloto completado",
         lessonsLearned: "Validar evidencia al inicio.",
+        objectiveAssessment: "achieved",
+        assessmentRationale: "La espera disminuyó conforme al objetivo acordado.",
         pendingItems: ["Medir adopción"],
         closureExceptions: [],
         correlationId: ids.next(),
@@ -437,6 +439,8 @@ describe("project conversion and execution", () => {
       projectId: project.id,
       outcomes: "Piloto completado",
       lessonsLearned: "Validar evidencia al inicio.",
+      objectiveAssessment: "achieved",
+      assessmentRationale: "La espera disminuyó conforme al objetivo acordado.",
       pendingItems: ["Medir adopción"],
       closureExceptions: [
         {
@@ -463,6 +467,7 @@ describe("project conversion and execution", () => {
     expect(closures.closures.get(project.id)).toEqual(closure);
     expect(closure).toMatchObject({
       pendingItems: ["Medir adopción"],
+      objectiveAssessment: "achieved",
       exceptions: [
         {
           description: "Medir adopción",

@@ -26,6 +26,7 @@ import {
   type ProjectBaselineDifference,
   type ProjectClosure,
   type ProjectClosureException,
+  type ProjectObjectiveAssessment,
   type ProjectDeliverableAcceptance,
   type ProjectParticipant,
   type ProjectStatus,
@@ -1205,6 +1206,8 @@ export class ProjectService {
     projectId: string;
     outcomes: string;
     lessonsLearned: string;
+    objectiveAssessment: Exclude<ProjectObjectiveAssessment, "not_assessed">;
+    assessmentRationale: string;
     pendingItems: readonly string[];
     closureExceptions: readonly Omit<ProjectClosureException, "id">[];
     correlationId: string;
@@ -1257,6 +1260,8 @@ export class ProjectService {
       workspaceId: project.workspaceId,
       outcomes: input.outcomes,
       lessonsLearned: input.lessonsLearned,
+      objectiveAssessment: input.objectiveAssessment,
+      assessmentRationale: input.assessmentRationale,
       exceptions,
       pendingItems: exceptionDescriptions,
       closedByActorId: input.actorId,

@@ -4444,11 +4444,14 @@ components:
     CloseProjectRequest:
       type: object
       additionalProperties: false
-      required: [organizationId, outcomes, lessonsLearned]
+      required: [organizationId, outcomes, lessonsLearned, objectiveAssessment, assessmentRationale]
       properties:
         organizationId: { type: string, format: uuid }
         outcomes: { type: string, minLength: 1, maxLength: 10000 }
         lessonsLearned: { type: string, minLength: 1, maxLength: 10000 }
+        objectiveAssessment:
+          { type: string, enum: [achieved, partially_achieved, not_achieved] }
+        assessmentRationale: { type: string, minLength: 1, maxLength: 10000 }
         pendingItems:
           {
             type: array,

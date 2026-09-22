@@ -375,6 +375,12 @@ export const CloseProjectRequestSchema = z.object({
   organizationId: UuidSchema,
   outcomes: NonEmptyTextSchema.max(10_000),
   lessonsLearned: NonEmptyTextSchema.max(10_000),
+  objectiveAssessment: z.enum([
+    "achieved",
+    "partially_achieved",
+    "not_achieved",
+  ]),
+  assessmentRationale: NonEmptyTextSchema.max(10_000),
   // Compatibility projection of closureExceptions. A non-empty legacy list
   // must exactly match the structured exceptions supplied alongside it.
   pendingItems: z.array(NonEmptyTextSchema.max(2_000)).max(100).default([]),

@@ -235,6 +235,8 @@ export type ProjectClosure = Readonly<{
   workspaceId: string;
   outcomes: string;
   lessonsLearned: string;
+  objectiveAssessment: ProjectObjectiveAssessment;
+  assessmentRationale: string;
   exceptions: readonly ProjectClosureException[];
   /**
    * Compatibility projection of `exceptions`. New consumers should use the
@@ -244,6 +246,14 @@ export type ProjectClosure = Readonly<{
   closedByActorId: string;
   closedAt: Date;
 }>;
+export const ProjectObjectiveAssessments = [
+  "achieved",
+  "partially_achieved",
+  "not_achieved",
+  "not_assessed",
+] as const;
+export type ProjectObjectiveAssessment =
+  (typeof ProjectObjectiveAssessments)[number];
 export const ProjectClosureExceptionDispositions = [
   "resolved",
   "transferred",
