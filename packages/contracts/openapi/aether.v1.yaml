@@ -2569,6 +2569,49 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ProjectNextAction" }
         default: { $ref: "#/components/responses/Problem" }
+  /v1/projects/{projectId}/next-actions/{actionId}/collaborators:
+    get:
+      tags: [Projects]
+      operationId: listProjectNextActionCollaborators
+      summary: Consultar los colaboradores de una tarea
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: actionId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/OrganizationContextId"
+      responses:
+        "200": { description: Colaboradores, content: { application/json: { schema: { type: array, items: { type: string } } } } }
+        default: { $ref: "#/components/responses/Problem" }
+    post:
+      tags: [Projects]
+      operationId: addProjectNextActionCollaborator
+      summary: Añadir un colaborador a una tarea
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: actionId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AddProjectNextActionCollaboratorRequest" }
+      responses:
+        "204": { description: Colaborador añadido. }
+        default: { $ref: "#/components/responses/Problem" }
   /v1/projects/{projectId}/audit-events:
     get:
       tags: [Audit]
@@ -4593,6 +4636,13 @@ components:
       properties:
         organizationId: { type: string, format: uuid }
         expectedVersion: { type: integer, minimum: 0 }
+    AddProjectNextActionCollaboratorRequest:
+      type: object
+      additionalProperties: false
+      required: [organizationId, actorId]
+      properties:
+        organizationId: { type: string, format: uuid }
+        actorId: { type: string, minLength: 1, maxLength: 255 }
     DeclareCapacityAvailabilityRequest:
       type: object
       additionalProperties: false

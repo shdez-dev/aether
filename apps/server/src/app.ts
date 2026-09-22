@@ -97,6 +97,7 @@ import {
   ReviewProjectChangeRequestSchema,
   AddProjectNextActionRequestSchema,
   ClaimProjectNextActionRequestSchema,
+  AddProjectNextActionCollaboratorRequestSchema,
   ReorderProjectNextActionRequestSchema,
   TransitionProjectNextActionWorkflowRequestSchema,
   DeclareProjectNextActionDependencyRequestSchema,
@@ -3297,6 +3298,20 @@ export async function buildServer(input: {
       });
     },
   );
+  app.post("/v1/projects/:projectId/next-actions/:actionId/collaborators", async (request, reply) => {
+    const session = await requireSession(request, reply, input.auth, input.config);
+    const params = z.object({ projectId: z.string().uuid(), actionId: z.string().uuid() }).parse(request.params);
+    const body = AddProjectNextActionCollaboratorRequestSchema.parse(request.body);
+    return respondIdempotently({ request, reply, store: input.idempotency, actorId: session.actorId, operation: `project.next_action.collaborator:${params.projectId}:${params.actionId}`, requestPayload: body,
+      execute: async () => { await input.projects.addNextActionCollaborator({ actorId: session.actorId, correlationId: correlationId(reply), projectId: params.projectId, actionId: params.actionId, collaboratorActorId: body.actorId, organizationId: body.organizationId }); return { statusCode: 204, body: null }; },
+    });
+  });
+  app.get("/v1/projects/:projectId/next-actions/:actionId/collaborators", async (request, reply) => {
+    const session = await requireSession(request, reply, input.auth, input.config);
+    const params = z.object({ projectId: z.string().uuid(), actionId: z.string().uuid() }).parse(request.params);
+    const query = z.object({ organizationId: z.string().uuid() }).parse(request.query);
+    return input.projects.listNextActionCollaborators({ actorId: session.actorId, correlationId: correlationId(reply), projectId: params.projectId, actionId: params.actionId, ...query });
+  });
   app.post(
     "/v1/projects/:projectId/next-action-dependencies",
     async (request, reply) => {

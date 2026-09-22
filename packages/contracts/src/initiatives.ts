@@ -415,6 +415,10 @@ export const ClaimProjectNextActionRequestSchema = z.object({
   organizationId: UuidSchema,
   expectedVersion: z.number().int().nonnegative(),
 });
+export const AddProjectNextActionCollaboratorRequestSchema = z.object({
+  organizationId: UuidSchema,
+  actorId: z.string().min(1).max(255),
+});
 export const DeclareProjectNextActionDependencyRequestSchema = z.object({
   organizationId: UuidSchema,
   actionId: UuidSchema,

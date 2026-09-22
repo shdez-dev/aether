@@ -94,6 +94,7 @@ export class InMemoryProjectStore implements ProjectStore {
   }
 }
 export class InMemoryProjectExecutionStore implements ProjectExecutionStore {
+  readonly collaborators: Array<{ actionId: string; actorId: string; addedByActorId: string; addedAt: Date }> = [];
   readonly milestones: ProjectMilestone[] = [];
   readonly actions: ProjectNextAction[] = [];
   readonly dependencies: ProjectNextActionDependency[] = [];
@@ -114,6 +115,12 @@ export class InMemoryProjectExecutionStore implements ProjectExecutionStore {
           item.workflowStatus === action.workflowStatus,
       ).length + 1;
     this.actions.push({ ...action, position });
+  }
+  async addNextActionCollaborator(input: { actionId: string; actorId: string; addedByActorId: string; addedAt: Date }): Promise<void> {
+    if (!this.collaborators.some((item) => item.actionId === input.actionId && item.actorId === input.actorId)) this.collaborators.push(input);
+  }
+  async listNextActionCollaborators(actionId: string): Promise<readonly string[]> {
+    return this.collaborators.filter((item) => item.actionId === actionId).map((item) => item.actorId).sort();
   }
   async claimNextAction(input: {
     action: ProjectNextAction;

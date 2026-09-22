@@ -3661,6 +3661,19 @@ export class PostgresProjectExecutionStore implements ProjectExecutionStore {
       ],
     );
   }
+  async addNextActionCollaborator(input: { actionId: string; actorId: string; addedByActorId: string; addedAt: Date }): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO project_next_action_collaborators (action_id, actor_id, added_by_actor_id, added_at)
+       VALUES ($1,$2,$3,$4) ON CONFLICT (action_id, actor_id) DO NOTHING`,
+      [input.actionId, input.actorId, input.addedByActorId, input.addedAt],
+    );
+  }
+  async listNextActionCollaborators(actionId: string): Promise<readonly string[]> {
+    const result = await this.pool.query<{ actor_id: string }>(
+      `SELECT actor_id FROM project_next_action_collaborators WHERE action_id = $1 ORDER BY actor_id`, [actionId],
+    );
+    return result.rows.map((row) => row.actor_id);
+  }
   async updateNextAction(input: {
     action: ProjectNextAction;
     expectedVersion: number;

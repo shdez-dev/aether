@@ -88,6 +88,8 @@ export interface ProjectStore {
   }): Promise<boolean>;
 }
 export interface ProjectExecutionStore {
+  listNextActionCollaborators(actionId: string): Promise<readonly string[]>;
+  addNextActionCollaborator(input: { actionId: string; actorId: string; addedByActorId: string; addedAt: Date }): Promise<void>;
   claimNextAction(input: {
     action: ProjectNextAction;
     ownerActorId: string;
@@ -890,6 +892,22 @@ export class ProjectService {
     });
     if (!claimed) throw new ProjectVersionConflictError();
     return claimed;
+  }
+  async addNextActionCollaborator(input: { actorId: string; organizationId: string; projectId: string; actionId: string; collaboratorActorId: string; correlationId: string }): Promise<void> {
+    const project = await this.requireProject(input.projectId, input.organizationId);
+    await this.assertExecutionAccess(input.actorId, project, input.correlationId);
+    const action = await this.dependencies.execution.findNextAction(input.actionId);
+    if (!action || action.projectId !== project.id) throw new ResourceNotFoundError("PROJECT_NOT_FOUND");
+    await this.assertProjectParticipant(input.collaboratorActorId, project.organizationId, project.workspaceId);
+    await this.dependencies.execution.addNextActionCollaborator({ actionId: action.id, actorId: input.collaboratorActorId, addedByActorId: input.actorId, addedAt: this.dependencies.clock.now() });
+    await this.record(project, input.actorId, input.correlationId, "project.next_action_collaborator_added.v1", { actionId: action.id, collaboratorActorId: input.collaboratorActorId });
+  }
+  async listNextActionCollaborators(input: { actorId: string; organizationId: string; projectId: string; actionId: string; correlationId?: string }): Promise<readonly string[]> {
+    const project = await this.requireProject(input.projectId, input.organizationId);
+    await this.assertProjectRead(input.actorId, project, input.correlationId);
+    const action = await this.dependencies.execution.findNextAction(input.actionId);
+    if (!action || action.projectId !== project.id) throw new ResourceNotFoundError("PROJECT_NOT_FOUND");
+    return this.dependencies.execution.listNextActionCollaborators(action.id);
   }
   async reorderNextAction(input: {
     actorId: string;
