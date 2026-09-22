@@ -1040,6 +1040,8 @@ export class ProjectService {
       input.projectId,
       input.organizationId,
     );
+    if (project.status === "completed" || project.status === "cancelled")
+      throw new ProjectDomainError("PROJECT_CLOSED_IMMUTABLE");
     await this.assertChangeReviewer(input.actorId, project.organizationId);
     const request = await this.dependencies.execution.findChangeRequest(
       input.changeRequestId,
@@ -1161,6 +1163,7 @@ export class ProjectService {
       input.actorId,
       project,
       input.correlationId,
+      { allowCompleted: true },
     );
     const document = await this.dependencies.documents.findVersion({
       documentId: input.documentId,
@@ -1220,6 +1223,7 @@ export class ProjectService {
       input.actorId,
       project,
       input.correlationId,
+      { allowCompleted: true },
     );
     if (project.status !== "completed")
       throw new ProjectDomainError("INVALID_PROJECT_TRANSITION");
@@ -1418,11 +1422,17 @@ export class ProjectService {
     actorId: string,
     project: Project,
     correlationId: string,
+    options: Readonly<{ allowCompleted?: boolean }> = {},
   ): Promise<void> {
     await assertWorkspaceWritable(
       this.dependencies.tenancy,
       project.workspaceId,
     );
+    if (
+      !options.allowCompleted &&
+      (project.status === "completed" || project.status === "cancelled")
+    )
+      throw new ProjectDomainError("PROJECT_CLOSED_IMMUTABLE");
     const role = await this.dependencies.tenancy.findOrganizationRole({
       actorId,
       organizationId: project.organizationId,
@@ -1452,6 +1462,8 @@ export class ProjectService {
     project: Project,
     risk: Pick<ProjectRisk, "ownerActorId">,
   ): Promise<void> {
+    if (project.status === "completed" || project.status === "cancelled")
+      throw new ProjectDomainError("PROJECT_CLOSED_IMMUTABLE");
     if (actorId === risk.ownerActorId) {
       await this.assertProjectParticipant(
         actorId,
