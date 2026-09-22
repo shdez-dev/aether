@@ -467,6 +467,43 @@ describe("project conversion and execution", () => {
       periodEndOn: "2026-09-20",
       correlationId: ids.next(),
     });
+    await expect(
+      projects.listTaskCalendar({
+        actorId: "replacement",
+        organizationId: organization.id,
+        projectId: project.id,
+        fromOn: "2026-09-01",
+        toOn: "2026-09-30",
+        correlationId: ids.next(),
+      }),
+    ).resolves.toMatchObject({
+      dated: [{ id: nextAction.id, dueOn: "2026-09-20" }],
+      undated: [{ id: teamInboxAction.id, dueOn: null }],
+    });
+    await expect(
+      projects.listTaskCalendar({
+        actorId: "replacement",
+        organizationId: organization.id,
+        projectId: project.id,
+        fromOn: "2026-09-21",
+        toOn: "2026-09-30",
+        ownerActorId: "replacement",
+        correlationId: ids.next(),
+      }),
+    ).resolves.toMatchObject({
+      dated: [],
+      undated: [{ id: teamInboxAction.id }],
+    });
+    await expect(
+      projects.listTaskCalendar({
+        actorId: "outsider",
+        organizationId: organization.id,
+        projectId: project.id,
+        fromOn: "2026-09-01",
+        toOn: "2026-09-30",
+        correlationId: ids.next(),
+      }),
+    ).rejects.toBeInstanceOf(AccessDeniedError);
     await projects.addNextActionCollaborator({
       actorId: "replacement",
       organizationId: organization.id,

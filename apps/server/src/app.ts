@@ -3197,6 +3197,48 @@ export async function buildServer(input: {
       createdAt: action.createdAt.toISOString(),
     }));
   });
+  app.get(
+    "/v1/projects/:projectId/next-actions/calendar",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      const { projectId } = z
+        .object({ projectId: z.string().uuid() })
+        .parse(request.params);
+      const query = z
+        .object({
+          organizationId: z.string().uuid(),
+          fromOn: z.string().date(),
+          toOn: z.string().date(),
+          workflowStatus: z
+            .enum(["to_do", "in_progress", "in_review", "done", "cancelled"])
+            .optional(),
+          executorTeamId: z.string().uuid().optional(),
+          ownerActorId: z.string().min(1).max(255).optional(),
+        })
+        .refine((value) => value.fromOn <= value.toOn)
+        .parse(request.query);
+      const calendar = await input.projects.listTaskCalendar({
+        actorId: session.actorId,
+        correlationId: correlationId(reply),
+        projectId,
+        ...query,
+      });
+      const serialize = (action: (typeof calendar.dated)[number]) => ({
+        ...action,
+        completedAt: action.completedAt?.toISOString() ?? null,
+        createdAt: action.createdAt.toISOString(),
+      });
+      return {
+        dated: calendar.dated.map(serialize),
+        undated: calendar.undated.map(serialize),
+      };
+    },
+  );
   app.post("/v1/projects/:projectId/next-actions", async (request, reply) => {
     const session = await requireSession(
       request,

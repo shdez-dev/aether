@@ -3861,6 +3861,7 @@ describe("document project authorization endpoints", () => {
       | "reorderNextAction"
       | "claimNextAction"
       | "listMyWork"
+      | "listTaskCalendar"
       | "addNextActionCollaborator"
     > = {
       async reorderNextAction(input) {
@@ -3957,6 +3958,42 @@ describe("document project authorization endpoints", () => {
           },
         ];
       },
+      async listTaskCalendar(input) {
+        expect(input).toMatchObject({
+          actorId: "owner",
+          organizationId,
+          projectId,
+          fromOn: "2026-09-01",
+          toOn: "2026-09-30",
+          workflowStatus: "to_do",
+        });
+        const action = {
+          id: actionId,
+          projectId,
+          description: "Tomada",
+          ownerActorId: "owner",
+          executorTeamId: null,
+          reviewerActorId: null,
+          dueOn: null,
+          priority: "medium" as const,
+          estimatedEffort: null,
+          effortUnit: null,
+          periodStartOn: null,
+          periodEndOn: null,
+          workflowStatus: "to_do" as const,
+          position: 1,
+          blockedReason: null,
+          unblockResponsibleActorId: null,
+          completedAt: null,
+          version: 5,
+          createdByActorId: "owner",
+          createdAt: new Date("2026-09-22T00:00:00.000Z"),
+        };
+        return {
+          dated: [{ ...action, dueOn: "2026-09-20" }],
+          undated: [action],
+        };
+      },
       async addNextActionCollaborator(input) {
         collaboratorAdds++;
         expect(input).toMatchObject({
@@ -4025,6 +4062,29 @@ describe("document project authorization endpoints", () => {
     expect(myWork.json()).toMatchObject([
       { action: { id: actionId }, kinds: ["owned"] },
     ]);
+    const calendarUrl = `/v1/projects/${projectId}/next-actions/calendar?organizationId=${organizationId}&fromOn=2026-09-01&toOn=2026-09-30&workflowStatus=to_do`;
+    expect(
+      (await app.inject({ method: "GET", url: calendarUrl })).statusCode,
+    ).toBe(401);
+    const calendar = await app.inject({
+      method: "GET",
+      url: calendarUrl,
+      headers: { cookie: headers.cookie },
+    });
+    expect(calendar.statusCode).toBe(200);
+    expect(calendar.json()).toMatchObject({
+      dated: [{ id: actionId, dueOn: "2026-09-20", version: 5 }],
+      undated: [{ id: actionId, dueOn: null, version: 5 }],
+    });
+    expect(
+      (
+        await app.inject({
+          method: "GET",
+          url: calendarUrl.replace("toOn=2026-09-30", "toOn=2026-08-30"),
+          headers: { cookie: headers.cookie },
+        })
+      ).statusCode,
+    ).toBe(400);
     const collaboratorRequest = {
       method: "POST" as const,
       url: `/v1/projects/${projectId}/next-actions/${actionId}/collaborators`,

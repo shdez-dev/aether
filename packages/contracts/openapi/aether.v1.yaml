@@ -2499,6 +2499,46 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ProjectNextAction" }
         default: { $ref: "#/components/responses/Problem" }
+  /v1/projects/{projectId}/next-actions/calendar:
+    get:
+      tags: [Projects]
+      operationId: listProjectTaskCalendar
+      summary: Consultar las mismas tareas por fecha y en bandeja sin fecha
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/OrganizationContextId"
+        - name: fromOn
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: toOn
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: workflowStatus
+          in: query
+          schema:
+            {
+              type: string,
+              enum: [to_do, in_progress, in_review, done, cancelled],
+            }
+        - name: executorTeamId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: ownerActorId
+          in: query
+          schema: { type: string, minLength: 1, maxLength: 255 }
+      responses:
+        "200":
+          description: Tareas con vencimiento en el rango inclusivo y tareas sin fecha.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProjectTaskCalendar" }
+        default: { $ref: "#/components/responses/Problem" }
   /v1/projects/{projectId}/next-actions/{actionId}/workflow:
     post:
       tags: [Projects]
@@ -4617,6 +4657,17 @@ components:
               type: string,
               enum: [owned, review, team_inbox, unblock, collaborator],
             }
+    ProjectTaskCalendar:
+      type: object
+      additionalProperties: false
+      required: [dated, undated]
+      properties:
+        dated:
+          type: array
+          items: { $ref: "#/components/schemas/ProjectNextAction" }
+        undated:
+          type: array
+          items: { $ref: "#/components/schemas/ProjectNextAction" }
     ProjectNextAction:
       type: object
       required:

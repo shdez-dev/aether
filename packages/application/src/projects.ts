@@ -64,6 +64,10 @@ export type ProjectWorkItem = Readonly<{
   action: ProjectNextAction;
   kinds: readonly ProjectWorkKind[];
 }>;
+export type ProjectTaskCalendar = Readonly<{
+  dated: readonly ProjectNextAction[];
+  undated: readonly ProjectNextAction[];
+}>;
 export interface ProjectStore {
   create(project: Project): Promise<void>;
   findById(projectId: string): Promise<Project | null>;
@@ -1069,6 +1073,54 @@ export class ProjectService {
     );
     await this.assertProjectRead(input.actorId, project, input.correlationId);
     return this.dependencies.execution.listNextActions(project.id);
+  }
+  async listTaskCalendar(input: {
+    actorId: string;
+    organizationId: string;
+    projectId: string;
+    fromOn: string;
+    toOn: string;
+    workflowStatus?: ProjectNextAction["workflowStatus"] | undefined;
+    executorTeamId?: string | undefined;
+    ownerActorId?: string | undefined;
+    correlationId?: string;
+  }): Promise<ProjectTaskCalendar> {
+    if (input.fromOn > input.toOn)
+      throw new ProjectDomainError("PROJECT_CALENDAR_RANGE_INVALID");
+    const actions = await this.listNextActions(input);
+    const matching = actions.filter(
+      (action) =>
+        (!input.workflowStatus ||
+          action.workflowStatus === input.workflowStatus) &&
+        (!input.executorTeamId ||
+          action.executorTeamId === input.executorTeamId) &&
+        (!input.ownerActorId || action.ownerActorId === input.ownerActorId),
+    );
+    return {
+      dated: matching
+        .filter(
+          (action) =>
+            action.dueOn !== null &&
+            action.dueOn >= input.fromOn &&
+            action.dueOn <= input.toOn,
+        )
+        .sort(
+          (a, b) =>
+            a.dueOn!.localeCompare(b.dueOn!) ||
+            ["to_do", "in_progress", "in_review", "done", "cancelled"].indexOf(
+              a.workflowStatus,
+            ) -
+              [
+                "to_do",
+                "in_progress",
+                "in_review",
+                "done",
+                "cancelled",
+              ].indexOf(b.workflowStatus) ||
+            a.position - b.position,
+        ),
+      undated: matching.filter((action) => action.dueOn === null),
+    };
   }
   async listMyWork(input: {
     actorId: string;
