@@ -144,12 +144,14 @@ export function ProjectTasks({
   organizationId,
   refreshKey,
   request,
+  onChanged,
   readOnly = false,
 }: {
   projectId: string;
   organizationId: string;
   refreshKey: unknown;
   request: (url: string, init?: RequestInit) => Promise<Response>;
+  onChanged?: () => void;
   readOnly?: boolean;
 }) {
   const [view, setView] = useState<View>("list");
@@ -221,6 +223,7 @@ export function ProjectTasks({
           position,
         }),
       });
+      onChanged?.();
     } catch (caught) {
       setOrderError(
         caught instanceof Error
@@ -269,6 +272,7 @@ export function ProjectTasks({
       );
       setWorkflowEdit(null);
       setRevision((current) => current + 1);
+      onChanged?.();
     } catch (caught) {
       setWorkflowError(
         caught instanceof Error ? caught.message : "No se pudo tomar la tarea.",
@@ -306,6 +310,7 @@ export function ProjectTasks({
       );
       setWorkflowEdit(null);
       setRevision((current) => current + 1);
+      onChanged?.();
     } catch (caught) {
       setWorkflowError(
         caught instanceof Error
@@ -372,6 +377,7 @@ export function ProjectTasks({
       setDateEdit(null);
       setDateImpact(null);
       setRevision((current) => current + 1);
+      onChanged?.();
     } catch (caught) {
       setDateImpact(null);
       setDateError(

@@ -20,6 +20,7 @@ import {
   canRenderInitiativeAction,
   initiativeStatusLabel,
 } from "../src/initiatives";
+import { MyWork } from "./my-work";
 import { ProjectTasks } from "./project-tasks";
 
 type Draft = Pick<
@@ -109,6 +110,7 @@ export default function AetherPage() {
   const [projectAudit, setProjectAudit] = useState<ProjectAuditEvent[]>([]);
   const [baselineDifference, setBaselineDifference] =
     useState<ProjectBaselineDifferenceResponse | null>(null);
+  const [workRevision, setWorkRevision] = useState(0);
   const [draft, setDraft] = useState<Draft>(emptyDraft);
   const [editing, setEditing] = useState(false);
   const [organizationName, setOrganizationName] = useState("");
@@ -614,6 +616,7 @@ export default function AetherPage() {
         items.map((item) => (item.id === project.id ? project : item)),
       );
       setSelectedProject(project);
+      setWorkRevision((current) => current + 1);
       setMessage("Estado de proyecto actualizado.");
     } catch (caught) {
       setError(
@@ -674,6 +677,7 @@ export default function AetherPage() {
         priority: "medium",
       });
       setSelectedProject({ ...selectedProject });
+      setWorkRevision((current) => current + 1);
       setMessage("Próxima acción añadida al proyecto.");
     } catch (caught) {
       setError(
@@ -716,6 +720,17 @@ export default function AetherPage() {
           : "No fue posible crear el proyecto.",
       );
     }
+  }
+
+  async function openWorkProject(projectId: string) {
+    const response = await request(
+      `projects/${projectId}?organizationId=${organizationId}`,
+    );
+    const project = (await response.json()) as ProjectResponse;
+    setWorkspaceId(project.workspaceId);
+    setSelectedProject(project);
+    setProjectStatus(project.status);
+    document.getElementById("projects")?.scrollIntoView({ behavior: "smooth" });
   }
 
   async function logout() {
@@ -777,6 +792,7 @@ export default function AetherPage() {
         <a href="#initiatives">Iniciativas</a>
         <a href="#detail">Detalle</a>
         <a href="#new">Nueva iniciativa</a>
+        <a href="#my-work">Mi trabajo</a>
         <a href="#projects">Proyectos</a>
         <a href="#governance">Organización</a>
       </nav>
@@ -824,6 +840,15 @@ export default function AetherPage() {
       </Card>
       {error ? <Notice tone="error">{error}</Notice> : null}
       {message ? <Notice tone="info">{message}</Notice> : null}
+      {organizationId ? (
+        <MyWork
+          key={organizationId}
+          organizationId={organizationId}
+          refreshKey={workRevision}
+          request={request}
+          onOpenProject={openWorkProject}
+        />
+      ) : null}
       <div id="content" className="workspace-layout">
         <section id="initiatives">
           <h2>Iniciativas</h2>
@@ -1216,6 +1241,7 @@ export default function AetherPage() {
           organizationId={organizationId}
           refreshKey={selectedProject}
           request={request}
+          onChanged={() => setWorkRevision((current) => current + 1)}
           readOnly={["completed", "cancelled", "archived"].includes(
             selectedProject.status,
           )}
