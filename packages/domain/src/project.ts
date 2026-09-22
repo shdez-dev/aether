@@ -76,6 +76,7 @@ export type ProjectNextAction = Readonly<{
   periodStartOn: string | null;
   periodEndOn: string | null;
   workflowStatus: ProjectNextActionWorkflowStatus;
+  position: number;
   blockedReason: string | null;
   unblockResponsibleActorId: string | null;
   completedAt: Date | null;
@@ -243,6 +244,27 @@ export function declareNextActionDependency(input: {
   if (reaches(input.dependency.dependsOnActionId, input.dependency.actionId))
     throw new ProjectDomainError("PROJECT_DEPENDENCY_CYCLE");
   return input.dependency;
+}
+
+export function reorderNextAction(input: {
+  actions: readonly ProjectNextAction[];
+  actionId: string;
+  position: number;
+}): readonly ProjectNextAction[] {
+  const action = input.actions.find((item) => item.id === input.actionId);
+  if (!action) throw new ProjectDomainError("PROJECT_NEXT_ACTION_ORDER_INVALID");
+  const column = input.actions
+    .filter((item) => item.projectId === action.projectId && item.workflowStatus === action.workflowStatus)
+    .sort((a, b) => a.position - b.position);
+  if (!Number.isSafeInteger(input.position) || input.position < 1 || input.position > column.length)
+    throw new ProjectDomainError("PROJECT_NEXT_ACTION_ORDER_INVALID");
+  const ordered = column.filter((item) => item.id !== action.id);
+  ordered.splice(input.position - 1, 0, action);
+  return ordered.map((item, index) => ({
+    ...item,
+    position: index + 1,
+    version: item.version + (item.id === action.id || item.position !== index + 1 ? 1 : 0),
+  }));
 }
 
 export function transitionNextActionWorkflow(input: {
@@ -521,6 +543,7 @@ export class ProjectDomainError extends Error {
       | "PROJECT_DEPENDENCY_CYCLE"
       | "PROJECT_NEXT_ACTION_TRANSITION_INVALID"
       | "PROJECT_NEXT_ACTION_BLOCK_INVALID"
+      | "PROJECT_NEXT_ACTION_ORDER_INVALID"
       | "PROJECT_MINIMUM_PLAN_REQUIRED"
       | "PROJECT_MANDATE_REQUIRED"
       | "PROJECT_CHANGE_REQUEST_NOT_PENDING"

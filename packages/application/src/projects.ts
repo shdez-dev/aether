@@ -5,6 +5,7 @@ import {
   createProject,
   compareProjectToBaseline,
   declareNextActionDependency,
+  reorderNextAction,
   transitionNextActionWorkflow,
   replaceProjectLead,
   transferProjectWorkspace,
@@ -87,6 +88,12 @@ export interface ProjectStore {
   }): Promise<boolean>;
 }
 export interface ProjectExecutionStore {
+  reorderNextAction(input: {
+    action: ProjectNextAction;
+    position: number;
+    expectedVersion: number;
+    auditEvent: ProjectAuditEvent;
+  }): Promise<ProjectNextAction | null>;
   addMilestone(milestone: ProjectMilestone): Promise<void>;
   addNextAction(action: ProjectNextAction): Promise<void>;
   updateNextAction(input: {
@@ -749,6 +756,7 @@ export class ProjectService {
       periodStartOn: input.periodStartOn,
       periodEndOn: input.periodEndOn,
       workflowStatus: "to_do",
+      position: 1,
       blockedReason: null,
       unblockResponsibleActorId: null,
       completedAt: null,
@@ -774,7 +782,7 @@ export class ProjectService {
         periodEndOn: action.periodEndOn,
       },
     );
-    return action;
+    return (await this.dependencies.execution.findNextAction(action.id)) ?? action;
   }
   async transitionNextActionWorkflow(input: {
     actorId: string;
@@ -841,7 +849,43 @@ export class ProjectService {
         blocked: transitioned.blockedReason !== null,
       },
     );
-    return transitioned;
+    return (await this.dependencies.execution.findNextAction(action.id)) ?? transitioned;
+  }
+  async reorderNextAction(input: {
+    actorId: string;
+    organizationId: string;
+    projectId: string;
+    actionId: string;
+    expectedVersion: number;
+    position: number;
+    correlationId: string;
+  }): Promise<ProjectNextAction> {
+    const project = await this.requireProject(input.projectId, input.organizationId);
+    await this.assertProjectRead(input.actorId, project, input.correlationId);
+    await this.assertExecutionAccess(input.actorId, project, input.correlationId);
+    const action = await this.dependencies.execution.findNextAction(input.actionId);
+    if (!action || action.projectId !== project.id)
+      throw new ResourceNotFoundError("PROJECT_NOT_FOUND");
+    if (action.version !== input.expectedVersion) throw new ProjectVersionConflictError();
+    reorderNextAction({
+      actions: await this.dependencies.execution.listNextActions(project.id),
+      actionId: action.id,
+      position: input.position,
+    });
+    const result = await this.dependencies.execution.reorderNextAction({
+      action,
+      position: input.position,
+      expectedVersion: input.expectedVersion,
+      auditEvent: this.auditEventFor(project, input.actorId, input.correlationId,
+        "project.next_action_reordered.v1", {
+          actionId: action.id,
+          workflowStatus: action.workflowStatus,
+          previousPosition: action.position,
+          position: input.position,
+        }),
+    });
+    if (!result) throw new ProjectVersionConflictError();
+    return result;
   }
   async listNextActions(input: {
     actorId: string;

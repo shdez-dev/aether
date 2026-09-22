@@ -3636,7 +3636,7 @@ export class PostgresProjectExecutionStore implements ProjectExecutionStore {
   }
   async addNextAction(action: ProjectNextAction): Promise<void> {
     await this.pool.query(
-      `INSERT INTO project_next_actions (id, project_id, description, owner_actor_id, executor_team_id, reviewer_actor_id, due_on, priority, estimated_effort, effort_unit, period_start_on, period_end_on, workflow_status, blocked_reason, unblock_responsible_actor_id, completed_at, version, created_by_actor_id, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
+      `INSERT INTO project_next_actions (id, project_id, description, owner_actor_id, executor_team_id, reviewer_actor_id, due_on, priority, estimated_effort, effort_unit, period_start_on, period_end_on, workflow_status, position, blocked_reason, unblock_responsible_actor_id, completed_at, version, created_by_actor_id, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
       [
         action.id,
         action.projectId,
@@ -3651,6 +3651,7 @@ export class PostgresProjectExecutionStore implements ProjectExecutionStore {
         action.periodStartOn,
         action.periodEndOn,
         action.workflowStatus,
+        action.position,
         action.blockedReason,
         action.unblockResponsibleActorId,
         action.completedAt,
@@ -3683,6 +3684,78 @@ export class PostgresProjectExecutionStore implements ProjectExecutionStore {
       ],
     );
     return result.rowCount === 1;
+  }
+  async reorderNextAction(input: {
+    action: ProjectNextAction;
+    position: number;
+    expectedVersion: number;
+    auditEvent: ProjectAuditEvent;
+  }): Promise<ProjectNextAction | null> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        "SELECT id FROM projects WHERE id = $1 FOR UPDATE",
+        [input.action.projectId],
+      );
+      const current = await client.query<{
+        position: number;
+        workflow_status: ProjectNextAction["workflowStatus"];
+        version: number;
+      }>(
+        `SELECT position, workflow_status, version FROM project_next_actions
+         WHERE id = $1 AND project_id = $2 FOR UPDATE`,
+        [input.action.id, input.action.projectId],
+      );
+      const action = current.rows[0];
+      if (!action || action.version !== input.expectedVersion) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const count = await client.query<{ count: string }>(
+        `SELECT count(*) FROM project_next_actions
+         WHERE project_id = $1 AND workflow_status = $2`,
+        [input.action.projectId, action.workflow_status],
+      );
+      if (input.position < 1 || input.position > Number(count.rows[0]?.count)) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      await client.query(
+        "SET CONSTRAINTS project_next_actions_column_position_unique DEFERRED",
+      );
+      if (input.position < action.position)
+        await client.query(
+          `UPDATE project_next_actions SET position = position + 1, version = version + 1
+           WHERE project_id = $1 AND workflow_status = $2
+             AND position >= $3 AND position < $4`,
+          [input.action.projectId, action.workflow_status, input.position, action.position],
+        );
+      if (input.position > action.position)
+        await client.query(
+          `UPDATE project_next_actions SET position = position - 1, version = version + 1
+           WHERE project_id = $1 AND workflow_status = $2
+             AND position > $3 AND position <= $4`,
+          [input.action.projectId, action.workflow_status, action.position, input.position],
+        );
+      const moved = await client.query(
+        `UPDATE project_next_actions SET position = $2, version = version + 1
+         WHERE id = $1 AND version = $3`,
+        [input.action.id, input.position, input.expectedVersion],
+      );
+      if (moved.rowCount !== 1) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      await insertProjectAuditEvent(client, input.auditEvent);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+    return this.findNextAction(input.action.id);
   }
   async addRisk(risk: ProjectRisk): Promise<void> {
     await this.pool.query(
@@ -4022,6 +4095,7 @@ export class PostgresProjectExecutionStore implements ProjectExecutionStore {
       period_start_on: string | Date | null;
       period_end_on: string | Date | null;
       workflow_status: ProjectNextAction["workflowStatus"];
+      position: number;
       blocked_reason: string | null;
       unblock_responsible_actor_id: string | null;
       completed_at: Date | null;
@@ -4029,7 +4103,7 @@ export class PostgresProjectExecutionStore implements ProjectExecutionStore {
       created_by_actor_id: string;
       created_at: Date;
     }>(
-      `SELECT id, project_id, description, owner_actor_id, executor_team_id, reviewer_actor_id, due_on, priority, estimated_effort, effort_unit, period_start_on, period_end_on, workflow_status, blocked_reason, unblock_responsible_actor_id, completed_at, version, created_by_actor_id, created_at FROM project_next_actions WHERE id = $1`,
+      `SELECT id, project_id, description, owner_actor_id, executor_team_id, reviewer_actor_id, due_on, priority, estimated_effort, effort_unit, period_start_on, period_end_on, workflow_status, position, blocked_reason, unblock_responsible_actor_id, completed_at, version, created_by_actor_id, created_at FROM project_next_actions WHERE id = $1`,
       [actionId],
     );
     const row = result.rows[0];
@@ -4055,6 +4129,7 @@ export class PostgresProjectExecutionStore implements ProjectExecutionStore {
               ? null
               : toCalendarDate(row.period_end_on),
           workflowStatus: row.workflow_status,
+          position: row.position,
           blockedReason: row.blocked_reason,
           unblockResponsibleActorId: row.unblock_responsible_actor_id,
           completedAt: row.completed_at,
@@ -4081,6 +4156,7 @@ export class PostgresProjectExecutionStore implements ProjectExecutionStore {
       period_start_on: string | Date | null;
       period_end_on: string | Date | null;
       workflow_status: ProjectNextAction["workflowStatus"];
+      position: number;
       blocked_reason: string | null;
       unblock_responsible_actor_id: string | null;
       completed_at: Date | null;
@@ -4088,7 +4164,7 @@ export class PostgresProjectExecutionStore implements ProjectExecutionStore {
       created_by_actor_id: string;
       created_at: Date;
     }>(
-      `SELECT id, project_id, description, owner_actor_id, executor_team_id, reviewer_actor_id, due_on, priority, estimated_effort, effort_unit, period_start_on, period_end_on, workflow_status, blocked_reason, unblock_responsible_actor_id, completed_at, version, created_by_actor_id, created_at FROM project_next_actions WHERE project_id = $1 ORDER BY due_on NULLS LAST, created_at ASC`,
+      `SELECT id, project_id, description, owner_actor_id, executor_team_id, reviewer_actor_id, due_on, priority, estimated_effort, effort_unit, period_start_on, period_end_on, workflow_status, position, blocked_reason, unblock_responsible_actor_id, completed_at, version, created_by_actor_id, created_at FROM project_next_actions WHERE project_id = $1 ORDER BY CASE workflow_status WHEN 'to_do' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'in_review' THEN 3 WHEN 'done' THEN 4 ELSE 5 END, position`,
       [projectId],
     );
     return result.rows.map((row) => ({
@@ -4110,6 +4186,7 @@ export class PostgresProjectExecutionStore implements ProjectExecutionStore {
       periodEndOn:
         row.period_end_on === null ? null : toCalendarDate(row.period_end_on),
       workflowStatus: row.workflow_status,
+      position: row.position,
       blockedReason: row.blocked_reason,
       unblockResponsibleActorId: row.unblock_responsible_actor_id,
       completedAt: row.completed_at,

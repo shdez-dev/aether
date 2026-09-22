@@ -4,6 +4,7 @@ import {
   createProject,
   archiveProject,
   declareNextActionDependency,
+  reorderNextAction,
   transitionNextActionWorkflow,
   transferProjectWorkspace,
   transitionProject,
@@ -25,6 +26,7 @@ describe("project lifecycle", () => {
       periodStartOn: null,
       periodEndOn: null,
       workflowStatus: "to_do" as const,
+      position: 1,
       blockedReason: null,
       unblockResponsibleActorId: null,
       completedAt: null,
@@ -77,6 +79,46 @@ describe("project lifecycle", () => {
     expect(() =>
       declareNextActionDependency({ dependency: first, existing: [first] }),
     ).toThrow("PROJECT_DEPENDENCY_INVALID");
+  });
+  it("reorders tasks only within their shared workflow column", () => {
+    const base = {
+      id: "first",
+      projectId: "project",
+      description: "Preparar la evidencia.",
+      ownerActorId: "owner",
+      executorTeamId: null,
+      reviewerActorId: null,
+      dueOn: null,
+      priority: "medium" as const,
+      estimatedEffort: null,
+      effortUnit: null,
+      periodStartOn: null,
+      periodEndOn: null,
+      workflowStatus: "to_do" as const,
+      position: 1,
+      blockedReason: null,
+      unblockResponsibleActorId: null,
+      completedAt: null,
+      version: 0,
+      createdByActorId: "owner",
+      createdAt: new Date("2026-09-22T12:00:00.000Z"),
+    };
+    const ordered = reorderNextAction({
+      actions: [
+        base,
+        { ...base, id: "second", position: 2 },
+        { ...base, id: "review", workflowStatus: "in_review" as const },
+      ],
+      actionId: "second",
+      position: 1,
+    });
+    expect(ordered).toEqual([
+      expect.objectContaining({ id: "second", position: 1, version: 1 }),
+      expect.objectContaining({ id: "first", position: 2, version: 1 }),
+    ]);
+    expect(() =>
+      reorderNextAction({ actions: [base], actionId: base.id, position: 2 }),
+    ).toThrow("PROJECT_NEXT_ACTION_ORDER_INVALID");
   });
   it("allows pausing and resuming an active project", () => {
     const now = new Date("2026-09-20T12:00:00.000Z");

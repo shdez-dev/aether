@@ -7,7 +7,11 @@ import {
   TenantService,
 } from "@aether/application";
 import { createInitiative, transitionInitiative } from "@aether/domain";
-import type { DocumentVersion, InstitutionalDocument } from "@aether/domain";
+import type {
+  DocumentVersion,
+  InstitutionalDocument,
+  ProjectNextAction,
+} from "@aether/domain";
 
 import {
   InMemoryAuditHistoryStore,
@@ -25,6 +29,63 @@ import { InMemoryDocumentStore } from "./documents.js";
 import { InMemoryTenantStore } from "./tenancy.js";
 
 describe("project conversion and execution", () => {
+  it("serializes shared reordering through the expected task version", async () => {
+    const execution = new InMemoryProjectExecutionStore();
+    const base: ProjectNextAction = {
+      id: "first",
+      projectId: "project",
+      description: "First",
+      ownerActorId: "owner",
+      executorTeamId: null,
+      reviewerActorId: null,
+      dueOn: null,
+      priority: "medium",
+      estimatedEffort: null,
+      effortUnit: null,
+      periodStartOn: null,
+      periodEndOn: null,
+      workflowStatus: "to_do",
+      position: 1,
+      blockedReason: null,
+      unblockResponsibleActorId: null,
+      completedAt: null,
+      version: 0,
+      createdByActorId: "owner",
+      createdAt: new Date("2026-09-22T00:00:00.000Z"),
+    };
+    await execution.addNextAction(base);
+    await execution.addNextAction({ ...base, id: "second" });
+    const auditEvent = {
+      id: "audit",
+      eventType: "project.next_action_reordered.v1",
+      organizationId: "organization",
+      workspaceId: "workspace",
+      projectId: base.projectId,
+      actorId: "owner",
+      correlationId: "correlation",
+      occurredAt: base.createdAt,
+      payload: {},
+    };
+    const [first, second] = await Promise.all([
+      execution.reorderNextAction({
+        action: { ...base, id: "second", position: 2 },
+        position: 1,
+        expectedVersion: 0,
+        auditEvent,
+      }),
+      execution.reorderNextAction({
+        action: { ...base, id: "second", position: 2 },
+        position: 1,
+        expectedVersion: 0,
+        auditEvent,
+      }),
+    ]);
+    expect([first, second].filter(Boolean)).toHaveLength(1);
+    await expect(execution.listNextActions(base.projectId)).resolves.toMatchObject([
+      { id: "second", position: 1, version: 1 },
+      { id: "first", position: 2, version: 1 },
+    ]);
+  });
   it("preserva iniciativa y decisión fuente, y sólo líder o gestión ejecutan", async () => {
     let sequence = 0;
     const ids = {

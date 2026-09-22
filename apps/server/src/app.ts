@@ -96,6 +96,7 @@ import {
   RequestProjectChangeSchema,
   ReviewProjectChangeRequestSchema,
   AddProjectNextActionRequestSchema,
+  ReorderProjectNextActionRequestSchema,
   TransitionProjectNextActionWorkflowRequestSchema,
   DeclareProjectNextActionDependencyRequestSchema,
   ChangeProjectStatusRequestSchema,
@@ -3223,6 +3224,41 @@ export async function buildServer(input: {
         requestPayload: body,
         execute: async () => {
           const action = await input.projects.transitionNextActionWorkflow({
+            actorId: session.actorId,
+            correlationId: correlationId(reply),
+            projectId: params.projectId,
+            actionId: params.actionId,
+            ...body,
+          });
+          return {
+            statusCode: 200,
+            body: {
+              ...action,
+              completedAt: action.completedAt?.toISOString() ?? null,
+              createdAt: action.createdAt.toISOString(),
+            },
+          };
+        },
+      });
+    },
+  );
+  app.post(
+    "/v1/projects/:projectId/next-actions/:actionId/reorder",
+    async (request, reply) => {
+      const session = await requireSession(request, reply, input.auth, input.config);
+      const params = z
+        .object({ projectId: z.string().uuid(), actionId: z.string().uuid() })
+        .parse(request.params);
+      const body = ReorderProjectNextActionRequestSchema.parse(request.body);
+      return respondIdempotently({
+        request,
+        reply,
+        store: input.idempotency,
+        actorId: session.actorId,
+        operation: `project.next_action.reorder:${params.projectId}:${params.actionId}`,
+        requestPayload: body,
+        execute: async () => {
+          const action = await input.projects.reorderNextAction({
             actorId: session.actorId,
             correlationId: correlationId(reply),
             projectId: params.projectId,

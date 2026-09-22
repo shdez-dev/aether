@@ -404,6 +404,11 @@ export const TransitionProjectNextActionWorkflowRequestSchema = z
         path: ["status"],
       });
   });
+export const ReorderProjectNextActionRequestSchema = z.object({
+  organizationId: UuidSchema,
+  expectedVersion: z.number().int().nonnegative(),
+  position: z.number().int().positive(),
+});
 export const DeclareProjectNextActionDependencyRequestSchema = z.object({
   organizationId: UuidSchema,
   actionId: UuidSchema,

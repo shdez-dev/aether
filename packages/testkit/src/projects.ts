@@ -20,6 +20,7 @@ import type {
   ProjectClosure,
   ProjectDeliverableAcceptance,
 } from "@aether/domain";
+import { reorderNextAction } from "@aether/domain";
 
 export class InMemoryProjectStore implements ProjectStore {
   readonly projects = new Map<string, Project>();
@@ -101,11 +102,47 @@ export class InMemoryProjectExecutionStore implements ProjectExecutionStore {
   readonly externalDependencies: ProjectExternalDependency[] = [];
   readonly changeRequests: ProjectChangeRequest[] = [];
   readonly baselines: ProjectBaseline[] = [];
+  private reorderTail: Promise<void> = Promise.resolve();
   async addMilestone(milestone: ProjectMilestone): Promise<void> {
     this.milestones.push(milestone);
   }
   async addNextAction(action: ProjectNextAction): Promise<void> {
-    this.actions.push(action);
+    const position =
+      this.actions.filter(
+        (item) =>
+          item.projectId === action.projectId &&
+          item.workflowStatus === action.workflowStatus,
+      ).length + 1;
+    this.actions.push({ ...action, position });
+  }
+  async reorderNextAction(input: {
+    action: ProjectNextAction;
+    position: number;
+    expectedVersion: number;
+    auditEvent: ProjectAuditEvent;
+  }): Promise<ProjectNextAction | null> {
+    let release: () => void = () => {};
+    const previous = this.reorderTail;
+    this.reorderTail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      const current = await this.findNextAction(input.action.id);
+      if (!current || current.version !== input.expectedVersion) return null;
+      const ordered = reorderNextAction({
+        actions: this.actions,
+        actionId: input.action.id,
+        position: input.position,
+      });
+      for (const action of ordered) {
+        const index = this.actions.findIndex((item) => item.id === action.id);
+        this.actions[index] = action;
+      }
+      return this.findNextAction(input.action.id);
+    } finally {
+      release();
+    }
   }
   async updateNextAction(input: {
     action: ProjectNextAction;
@@ -117,7 +154,16 @@ export class InMemoryProjectExecutionStore implements ProjectExecutionStore {
         action.version === input.expectedVersion,
     );
     if (index < 0) return false;
-    this.actions[index] = input.action;
+    const current = this.actions[index]!;
+    const position =
+      current.workflowStatus === input.action.workflowStatus
+        ? input.action.position
+        : this.actions.filter(
+            (item) =>
+              item.projectId === input.action.projectId &&
+              item.workflowStatus === input.action.workflowStatus,
+          ).length + 1;
+    this.actions[index] = { ...input.action, position };
     return true;
   }
   async addRisk(risk: ProjectRisk): Promise<void> {
@@ -259,7 +305,18 @@ export class InMemoryProjectExecutionStore implements ProjectExecutionStore {
   async listNextActions(
     projectId: string,
   ): Promise<readonly ProjectNextAction[]> {
-    return this.actions.filter((action) => action.projectId === projectId);
+    return this.actions
+      .filter((action) => action.projectId === projectId)
+      .sort(
+        (a, b) =>
+          ["to_do", "in_progress", "in_review", "done", "cancelled"].indexOf(
+            a.workflowStatus,
+          ) -
+            ["to_do", "in_progress", "in_review", "done", "cancelled"].indexOf(
+              b.workflowStatus,
+            ) ||
+          a.position - b.position,
+      );
   }
   async listDependencies(
     projectId: string,

@@ -3840,4 +3840,99 @@ describe("document project authorization endpoints", () => {
     });
     await app.close();
   });
+
+  it("reorders project tasks through session, CSRF and idempotency controls", async () => {
+    const authStore = new InMemoryAuthStore();
+    const auth = new AuthService({
+      store: authStore,
+      cipher: createAesGcmCipher(config.sessionEncryptionKey),
+      oidc,
+      issuer: config.oidcIssuerUrl,
+      sessionTtlSeconds: config.sessionTtlSeconds,
+      sessionRenewalWindowSeconds: config.sessionRenewalWindowSeconds,
+    });
+    const projectId = "00000000-0000-4000-8000-000000000010";
+    const actionId = "00000000-0000-4000-8000-000000000011";
+    const organizationId = "00000000-0000-4000-8000-000000000012";
+    let calls = 0;
+    const projects: Pick<ProjectService, "reorderNextAction"> = {
+      async reorderNextAction(input) {
+        calls++;
+        expect(input).toMatchObject({
+          actorId: "owner",
+          projectId,
+          actionId,
+          organizationId,
+          expectedVersion: 4,
+          position: 2,
+        });
+        return {
+          id: actionId,
+          projectId,
+          description: "Reordenada",
+          ownerActorId: "owner",
+          executorTeamId: null,
+          reviewerActorId: null,
+          dueOn: null,
+          priority: "medium",
+          estimatedEffort: null,
+          effortUnit: null,
+          periodStartOn: null,
+          periodEndOn: null,
+          workflowStatus: "to_do",
+          position: 2,
+          blockedReason: null,
+          unblockResponsibleActorId: null,
+          completedAt: null,
+          version: 5,
+          createdByActorId: "owner",
+          createdAt: new Date("2026-09-22T00:00:00.000Z"),
+        };
+      },
+    };
+    const app = await buildServer({
+      config,
+      auth,
+      tenants: {} as TenantService,
+      initiatives: {} as InitiativeService,
+      evaluations: {} as EvaluationService,
+      projects: projects as ProjectService,
+      idempotency: new InMemoryIdempotencyStore(),
+    });
+    await createAuthenticatedSession(authStore, {
+      token: "task-reorder-session",
+      actorId: "owner",
+      actorEmail: "owner@example.test",
+    });
+    const csrf = "task-reorder-csrf";
+    const headers = {
+      origin: config.webOrigin,
+      "x-csrf-token": csrf,
+      "idempotency-key": "task-reorder-key",
+      cookie: `aether_session=task-reorder-session; aether_csrf=${csrf}`,
+    };
+    const request = {
+      method: "POST" as const,
+      url: `/v1/projects/${projectId}/next-actions/${actionId}/reorder`,
+      headers,
+      payload: { organizationId, expectedVersion: 4, position: 2 },
+    };
+    const [first, replay] = await Promise.all([
+      app.inject(request),
+      app.inject(request),
+    ]);
+    expect(first.statusCode).toBe(200);
+    expect(replay.statusCode).toBe(200);
+    expect(first.json()).toMatchObject({ position: 2, version: 5 });
+    expect(calls).toBe(1);
+    expect(
+      (
+        await app.inject({
+          ...request,
+          headers: { ...headers, "x-csrf-token": "incorrect" },
+        })
+      ).statusCode,
+    ).toBe(403);
+    await app.close();
+  });
 });

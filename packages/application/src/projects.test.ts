@@ -105,6 +105,9 @@ describe("ProjectService", () => {
       execution: {
         async addMilestone() {},
         async addNextAction() {},
+        async reorderNextAction() {
+          return null;
+        },
         async updateNextAction() {
           return false;
         },

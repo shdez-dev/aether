@@ -2511,6 +2511,35 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ProjectNextAction" }
         default: { $ref: "#/components/responses/Problem" }
+  /v1/projects/{projectId}/next-actions/{actionId}/reorder:
+    post:
+      tags: [Projects]
+      operationId: reorderProjectNextAction
+      summary: Reordenar una próxima acción dentro de su estado de flujo
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: actionId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReorderProjectNextActionRequest" }
+      responses:
+        "200":
+          description: Orden compartido actualizado.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProjectNextAction" }
+        default: { $ref: "#/components/responses/Problem" }
   /v1/projects/{projectId}/audit-events:
     get:
       tags: [Audit]
@@ -4486,6 +4515,7 @@ components:
           periodStartOn,
           periodEndOn,
           workflowStatus,
+          position,
           blockedReason,
           unblockResponsibleActorId,
           completedAt,
@@ -4512,12 +4542,21 @@ components:
             type: string,
             enum: [to_do, in_progress, in_review, done, cancelled],
           }
+        position: { type: integer, minimum: 1 }
         blockedReason: { type: [string, "null"] }
         unblockResponsibleActorId: { type: [string, "null"] }
         completedAt: { type: [string, "null"], format: date-time }
         version: { type: integer, minimum: 0 }
         createdByActorId: { type: string }
         createdAt: { type: string, format: date-time }
+    ReorderProjectNextActionRequest:
+      type: object
+      additionalProperties: false
+      required: [organizationId, expectedVersion, position]
+      properties:
+        organizationId: { type: string, format: uuid }
+        expectedVersion: { type: integer, minimum: 0 }
+        position: { type: integer, minimum: 1 }
     DeclareCapacityAvailabilityRequest:
       type: object
       additionalProperties: false

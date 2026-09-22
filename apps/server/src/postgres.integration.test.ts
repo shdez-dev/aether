@@ -1259,6 +1259,7 @@ describe.sequential("PostgreSQL integration", () => {
       const otherDecision = randomUUID();
       const activeProjectId = randomUUID();
       const closedProjectId = randomUUID();
+      const foreignProjectId = randomUUID();
       const documentId = randomUUID();
       const documentVersionId = randomUUID();
       const startsAt = new Date("2026-01-01T00:00:00.000Z");
@@ -1362,7 +1363,8 @@ describe.sequential("PostgreSQL integration", () => {
       await pool.query(
         `INSERT INTO projects (id, organization_id, workspace_id, source_initiative_id, source_decision_id, name, sponsor_actor_id, lead_actor_id, participants, status, created_at, updated_at) VALUES
          ($1,$2,$3,$4,$5,'Active','sponsor','lead','[{"actorId":"lead","role":"lead"}]','active','2026-01-03T00:00:00Z','2025-12-20T00:00:00Z'),
-         ($6,$2,$3,$7,$8,'Closed','sponsor','lead','[]','completed','2025-12-03T00:00:00Z','2026-01-15T00:00:00Z')`,
+         ($6,$2,$3,$7,$8,'Closed','sponsor','lead','[]','completed','2025-12-03T00:00:00Z','2026-01-15T00:00:00Z'),
+         ($9,$10,$11,$12,$13,'Foreign','sponsor','other','[]','active','2026-01-03T00:00:00Z','2026-01-03T00:00:00Z')`,
         [
           activeProjectId,
           organizationId,
@@ -1372,6 +1374,11 @@ describe.sequential("PostgreSQL integration", () => {
           closedProjectId,
           initiativePrevious,
           decisionPrevious,
+          foreignProjectId,
+          otherOrganizationId,
+          otherWorkspaceId,
+          otherInitiative,
+          otherDecision,
         ],
       );
       await pool.query(
@@ -1456,30 +1463,37 @@ describe.sequential("PostgreSQL integration", () => {
       ).rejects.toThrow("change request requires project execution authority");
       const activeActionId = randomUUID();
       const otherActiveActionId = randomUUID();
-      const closedActionId = randomUUID();
+      const foreignActionId = randomUUID();
       await pool.query(
         `INSERT INTO project_next_actions (id, project_id, description, owner_actor_id, due_on, completed_at, created_by_actor_id, created_at)
          VALUES
            ($1,$2,'Active action','owner',NULL,NULL,'owner','2026-01-03T00:00:00Z'),
            ($3,$2,'Other active action','owner',NULL,NULL,'owner','2026-01-03T00:00:00Z'),
-           ($4,$5,'Closed action','owner',NULL,NULL,'owner','2026-01-03T00:00:00Z')`,
+           ($4,$5,'Foreign action','other',NULL,NULL,'other','2026-01-03T00:00:00Z')`,
         [
           activeActionId,
           activeProjectId,
           otherActiveActionId,
-          closedActionId,
-          closedProjectId,
+          foreignActionId,
+          foreignProjectId,
         ],
       );
       await expect(
         pool.query(
           `INSERT INTO project_next_action_dependencies (action_id, depends_on_action_id)
            VALUES ($1,$2)`,
-          [activeActionId, closedActionId],
+          [activeActionId, foreignActionId],
         ),
       ).rejects.toThrow(
         "next action dependencies must stay within one project",
       );
+      await expect(
+        pool.query(
+          `INSERT INTO project_next_actions (id, project_id, description, owner_actor_id, due_on, completed_at, created_by_actor_id, created_at)
+           VALUES ($1,$2,'Closed mutation','owner',NULL,NULL,'owner','2026-01-03T00:00:00Z')`,
+          [randomUUID(), closedProjectId],
+        ),
+      ).rejects.toThrow("terminal project tasks are immutable");
       await pool.query(
         `INSERT INTO project_next_action_dependencies (action_id, depends_on_action_id)
          VALUES ($1,$2)`,
@@ -1549,6 +1563,7 @@ describe.sequential("PostgreSQL integration", () => {
         periodStartOn: "2026-01-05",
         periodEndOn: "2026-01-12",
         workflowStatus: "to_do" as const,
+        position: 1,
         blockedReason: null,
         unblockResponsibleActorId: null,
         completedAt: null,
@@ -1558,20 +1573,67 @@ describe.sequential("PostgreSQL integration", () => {
       };
       const executionStore = new PostgresProjectExecutionStore(pool);
       await executionStore.addNextAction(plannedAction);
-      await expect(
-        executionStore.findNextAction(plannedAction.id),
-      ).resolves.toEqual(plannedAction);
-      const blockedAction = {
+      const persistedPlannedAction = await executionStore.findNextAction(
+        plannedAction.id,
+      );
+      expect(persistedPlannedAction).toMatchObject({
         ...plannedAction,
+        position: expect.any(Number),
+      });
+      const reorderAuditEvent = {
+        id: randomUUID(),
+        eventType: "project.next_action_reordered.v1",
+        organizationId,
+        workspaceId,
+        projectId: activeProjectId,
+        actorId: "owner",
+        correlationId: randomUUID(),
+        occurredAt: new Date("2026-01-03T00:00:00.000Z"),
+        payload: {
+          actionId: plannedAction.id,
+          workflowStatus: "to_do",
+          previousPosition: persistedPlannedAction!.position,
+          position: 1,
+        },
+      };
+      const concurrentReorder = () =>
+        executionStore.reorderNextAction({
+          action: persistedPlannedAction!,
+          position: 1,
+          expectedVersion: persistedPlannedAction!.version,
+          auditEvent: reorderAuditEvent,
+        });
+      const reordered = await Promise.all([
+        concurrentReorder(),
+        concurrentReorder(),
+      ]);
+      expect(reordered.filter(Boolean)).toHaveLength(1);
+      const reorderedAction = reordered.find(Boolean)!;
+      expect(reorderedAction).toMatchObject({ position: 1, version: 1 });
+      const sharedOrder = await pool.query<{ positions: number[] }>(
+        `SELECT array_agg(position ORDER BY position) AS positions
+           FROM project_next_actions
+          WHERE project_id = $1 AND workflow_status = 'to_do'`,
+        [activeProjectId],
+      );
+      expect(sharedOrder.rows[0]?.positions).toEqual(
+        Array.from(
+          { length: sharedOrder.rows[0]?.positions.length ?? 0 },
+          (_, index) => index + 1,
+        ),
+      );
+      const blockedAction = {
+        ...reorderedAction,
         workflowStatus: "in_progress" as const,
+        position: 1,
         blockedReason: "Awaiting vendor confirmation",
         unblockResponsibleActorId: "owner",
-        version: 1,
+        version: reorderedAction.version + 1,
       };
       await expect(
         executionStore.updateNextAction({
           action: blockedAction,
-          expectedVersion: plannedAction.version,
+          expectedVersion: reorderedAction.version,
         }),
       ).resolves.toBe(true);
       await expect(
@@ -1580,7 +1642,7 @@ describe.sequential("PostgreSQL integration", () => {
       await expect(
         executionStore.updateNextAction({
           action: { ...blockedAction, version: 2 },
-          expectedVersion: plannedAction.version,
+          expectedVersion: reorderedAction.version,
         }),
       ).resolves.toBe(false);
       await expect(
