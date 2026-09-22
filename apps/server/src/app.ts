@@ -2834,6 +2834,34 @@ export async function buildServer(input: {
       });
     },
   );
+  app.get(
+    "/v1/projects/:projectId/operational-decisions",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      const { projectId } = z
+        .object({ projectId: z.string().uuid() })
+        .parse(request.params);
+      const { organizationId } = z
+        .object({ organizationId: z.string().uuid() })
+        .parse(request.query);
+      return (
+        await input.projects.listOperationalDecisions({
+          actorId: session.actorId,
+          correlationId: correlationId(reply),
+          organizationId,
+          projectId,
+        })
+      ).map((decision) => ({
+        ...decision,
+        decidedAt: decision.decidedAt.toISOString(),
+      }));
+    },
+  );
   app.post(
     "/v1/projects/:projectId/external-dependencies",
     async (request, reply) => {

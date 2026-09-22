@@ -3708,18 +3708,39 @@ export class PostgresProjectExecutionStore implements ProjectExecutionStore {
     decision: ProjectOperationalDecision,
   ): Promise<void> {
     await this.pool.query(
-      `INSERT INTO project_operational_decisions (id, project_id, subject, decision, rationale, decided_by_actor_id, decided_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      `INSERT INTO project_operational_decisions (id, project_id, subject, decision, rationale, supersedes_decision_id, decided_by_actor_id, decided_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
       [
         decision.id,
         decision.projectId,
         decision.subject,
         decision.decision,
         decision.rationale,
+        decision.supersedesDecisionId,
         decision.decidedByActorId,
         decision.decidedAt,
       ],
     );
+  }
+  async listOperationalDecisions(
+    projectId: string,
+  ): Promise<readonly ProjectOperationalDecision[]> {
+    const result = await this.pool.query<ProjectOperationalDecisionRow>(
+      `SELECT id, project_id, subject, decision, rationale, supersedes_decision_id, decided_by_actor_id, decided_at
+       FROM project_operational_decisions WHERE project_id = $1 ORDER BY decided_at ASC, id ASC`,
+      [projectId],
+    );
+    return result.rows.map(toProjectOperationalDecision);
+  }
+  async findOperationalDecision(
+    decisionId: string,
+  ): Promise<ProjectOperationalDecision | null> {
+    const result = await this.pool.query<ProjectOperationalDecisionRow>(
+      `SELECT id, project_id, subject, decision, rationale, supersedes_decision_id, decided_by_actor_id, decided_at
+       FROM project_operational_decisions WHERE id = $1`,
+      [decisionId],
+    );
+    return result.rows[0] ? toProjectOperationalDecision(result.rows[0]) : null;
   }
   async addExternalDependency(
     dependency: ProjectExternalDependency,
@@ -5790,6 +5811,30 @@ function toProjectRisk(row: ProjectRiskRow): ProjectRisk {
     resolutionNote: row.resolution_note,
     resolvedByActorId: row.resolved_by_actor_id,
     resolvedAt: row.resolved_at,
+  };
+}
+type ProjectOperationalDecisionRow = {
+  id: string;
+  project_id: string;
+  subject: string;
+  decision: string;
+  rationale: string;
+  supersedes_decision_id: string | null;
+  decided_by_actor_id: string;
+  decided_at: Date;
+};
+function toProjectOperationalDecision(
+  row: ProjectOperationalDecisionRow,
+): ProjectOperationalDecision {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    subject: row.subject,
+    decision: row.decision,
+    rationale: row.rationale,
+    supersedesDecisionId: row.supersedes_decision_id,
+    decidedByActorId: row.decided_by_actor_id,
+    decidedAt: row.decided_at,
   };
 }
 function toProjectAuditEvent(row: ProjectAuditRow): ProjectAuditEvent {

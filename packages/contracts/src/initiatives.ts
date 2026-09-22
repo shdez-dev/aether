@@ -289,6 +289,7 @@ export const RecordProjectOperationalDecisionRequestSchema = z.object({
   subject: NonEmptyTextSchema.max(2_000),
   decision: NonEmptyTextSchema.max(10_000),
   rationale: NonEmptyTextSchema.max(10_000),
+  supersedesDecisionId: UuidSchema.nullable().default(null),
 });
 export const AddProjectExternalDependencyRequestSchema = z.object({
   organizationId: UuidSchema,

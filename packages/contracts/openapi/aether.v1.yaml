@@ -2265,6 +2265,20 @@ paths:
         "200": { description: Riesgo resuelto o aceptado. }
         default: { $ref: "#/components/responses/Problem" }
   /v1/projects/{projectId}/operational-decisions:
+    get:
+      tags: [Projects]
+      operationId: listProjectOperationalDecisions
+      summary: Consultar decisiones operativas autorizadas del proyecto
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/OrganizationContextId"
+      responses:
+        "200": { description: Decisiones operativas del proyecto. }
+        default: { $ref: "#/components/responses/Problem" }
     post:
       tags: [Projects]
       operationId: recordProjectOperationalDecision
@@ -3484,6 +3498,7 @@ components:
         outcome:
           { type: string, enum: [approved, rejected, returned, cancelled] }
         rationale: { type: string, minLength: 1, maxLength: 10000 }
+        supersedesDecisionId: { type: [string, "null"], format: uuid }
         evidence: { type: array, items: { type: string }, maxItems: 50 }
         nextReviewOn: { type: [string, "null"], format: date }
         conditions:

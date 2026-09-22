@@ -103,6 +103,7 @@ export type ProjectOperationalDecision = Readonly<{
   subject: string;
   decision: string;
   rationale: string;
+  supersedesDecisionId: string | null;
   decidedByActorId: string;
   decidedAt: Date;
 }>;
@@ -420,6 +421,7 @@ export class ProjectDomainError extends Error {
       | "PROJECT_MANDATE_REQUIRED"
       | "PROJECT_CHANGE_REQUEST_NOT_PENDING"
       | "PROJECT_RISK_NOT_OPEN"
+      | "PROJECT_OPERATIONAL_DECISION_INVALID"
       | "INVALID_PROJECT_TRANSITION"
       | "DECISION_CONDITIONS_PENDING",
   ) {

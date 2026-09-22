@@ -88,6 +88,12 @@ export interface ProjectExecutionStore {
   findRisk(riskId: string): Promise<ProjectRisk | null>;
   resolveRisk(risk: ProjectRisk): Promise<boolean>;
   addOperationalDecision(decision: ProjectOperationalDecision): Promise<void>;
+  listOperationalDecisions(
+    projectId: string,
+  ): Promise<readonly ProjectOperationalDecision[]>;
+  findOperationalDecision(
+    decisionId: string,
+  ): Promise<ProjectOperationalDecision | null>;
   addExternalDependency(dependency: ProjectExternalDependency): Promise<void>;
   addChangeRequest(request: ProjectChangeRequest): Promise<void>;
   findChangeRequest(
@@ -804,6 +810,7 @@ export class ProjectService {
     subject: string;
     decision: string;
     rationale: string;
+    supersedesDecisionId: string | null;
     correlationId: string;
   }): Promise<ProjectOperationalDecision> {
     const project = await this.requireProject(
@@ -815,12 +822,21 @@ export class ProjectService {
       project,
       input.correlationId,
     );
+    if (input.supersedesDecisionId) {
+      const previous =
+        await this.dependencies.execution.findOperationalDecision(
+          input.supersedesDecisionId,
+        );
+      if (!previous || previous.projectId !== project.id)
+        throw new ProjectDomainError("PROJECT_OPERATIONAL_DECISION_INVALID");
+    }
     const decision: ProjectOperationalDecision = {
       id: this.dependencies.ids.next(),
       projectId: project.id,
       subject: input.subject,
       decision: input.decision,
       rationale: input.rationale,
+      supersedesDecisionId: input.supersedesDecisionId,
       decidedByActorId: input.actorId,
       decidedAt: this.dependencies.clock.now(),
     };
@@ -830,9 +846,26 @@ export class ProjectService {
       input.actorId,
       input.correlationId,
       "project.operational_decision_recorded.v1",
-      { operationalDecisionId: decision.id, subject: decision.subject },
+      {
+        operationalDecisionId: decision.id,
+        subject: decision.subject,
+        supersedesDecisionId: decision.supersedesDecisionId,
+      },
     );
     return decision;
+  }
+  async listOperationalDecisions(input: {
+    actorId: string;
+    organizationId: string;
+    projectId: string;
+    correlationId?: string;
+  }): Promise<readonly ProjectOperationalDecision[]> {
+    const project = await this.requireProject(
+      input.projectId,
+      input.organizationId,
+    );
+    await this.assertProjectRead(input.actorId, project, input.correlationId);
+    return this.dependencies.execution.listOperationalDecisions(project.id);
   }
   async addExternalDependency(input: {
     actorId: string;

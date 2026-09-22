@@ -129,6 +129,22 @@ export class InMemoryProjectExecutionStore implements ProjectExecutionStore {
   ): Promise<void> {
     this.operationalDecisions.push(decision);
   }
+  async listOperationalDecisions(
+    projectId: string,
+  ): Promise<readonly ProjectOperationalDecision[]> {
+    return this.operationalDecisions.filter(
+      (decision) => decision.projectId === projectId,
+    );
+  }
+  async findOperationalDecision(
+    decisionId: string,
+  ): Promise<ProjectOperationalDecision | null> {
+    return (
+      this.operationalDecisions.find(
+        (decision) => decision.id === decisionId,
+      ) ?? null
+    );
+  }
   async addExternalDependency(
     dependency: ProjectExternalDependency,
   ): Promise<void> {

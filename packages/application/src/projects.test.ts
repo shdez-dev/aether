@@ -5,6 +5,7 @@ import {
   type Project,
   type ProjectBaseline,
   type ProjectChangeRequest,
+  type ProjectOperationalDecision,
   type ProjectRisk,
 } from "@aether/domain";
 
@@ -92,6 +93,7 @@ describe("ProjectService", () => {
       },
     };
     const risks: ProjectRisk[] = [];
+    const operationalDecisions: ProjectOperationalDecision[] = [];
     const changeRequests: ProjectChangeRequest[] = [];
     const baselines: ProjectBaseline[] = [];
     let generatedId = 0;
@@ -117,7 +119,21 @@ describe("ProjectService", () => {
           risks[index] = risk;
           return true;
         },
-        async addOperationalDecision() {},
+        async addOperationalDecision(decision) {
+          operationalDecisions.push(decision);
+        },
+        async listOperationalDecisions(projectId) {
+          return operationalDecisions.filter(
+            (decision) => decision.projectId === projectId,
+          );
+        },
+        async findOperationalDecision(decisionId) {
+          return (
+            operationalDecisions.find(
+              (decision) => decision.id === decisionId,
+            ) ?? null
+          );
+        },
         async addExternalDependency() {},
         async addChangeRequest(request) {
           changeRequests.push(request);
@@ -228,6 +244,52 @@ describe("ProjectService", () => {
         correlationId: "correlation-risk-repeat",
       }),
     ).rejects.toMatchObject({ code: "PROJECT_RISK_NOT_OPEN" });
+
+    const firstOperationalDecision = await service.recordOperationalDecision({
+      actorId: "owner",
+      organizationId: "organization-1",
+      projectId: "project-1",
+      subject: "Canal de coordinación",
+      decision: "Usar el canal institucional para los avisos del proyecto.",
+      rationale: "Mantiene la trazabilidad operativa.",
+      supersedesDecisionId: null,
+      correlationId: "correlation-operational-decision",
+    });
+    await expect(
+      service.recordOperationalDecision({
+        actorId: "owner",
+        organizationId: "organization-1",
+        projectId: "project-1",
+        subject: "Canal de coordinación actualizado",
+        decision: "Añadir un canal de contingencia autorizado.",
+        rationale: "La operación requiere respaldo ante indisponibilidad.",
+        supersedesDecisionId: firstOperationalDecision.id,
+        correlationId: "correlation-operational-decision-evolution",
+      }),
+    ).resolves.toMatchObject({
+      supersedesDecisionId: firstOperationalDecision.id,
+    });
+    await expect(
+      service.recordOperationalDecision({
+        actorId: "owner",
+        organizationId: "organization-1",
+        projectId: "project-1",
+        subject: "Decisión ajena",
+        decision: "No debe vincular otro proyecto.",
+        rationale: "La relación debe mantener el alcance del proyecto.",
+        supersedesDecisionId: "unknown-decision",
+        correlationId: "correlation-operational-decision-invalid",
+      }),
+    ).rejects.toMatchObject({
+      code: "PROJECT_OPERATIONAL_DECISION_INVALID",
+    });
+    await expect(
+      service.listOperationalDecisions({
+        actorId: "owner",
+        organizationId: "organization-1",
+        projectId: "project-1",
+      }),
+    ).resolves.toHaveLength(2);
 
     const requestedChange = await service.requestChange({
       actorId: "lead",
