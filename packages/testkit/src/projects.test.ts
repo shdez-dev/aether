@@ -85,6 +85,14 @@ describe("project conversion and execution", () => {
       actorId: "unscoped",
       actorEmail: "unscoped@test",
     });
+    const executionTeam = await tenants.createTeam({
+      actorId: "owner",
+      organizationId: organization.id,
+      workspaceId: workspace.id,
+      name: "Equipo de ejecución",
+      memberActorIds: ["replacement", "lead"],
+      correlationId: ids.next(),
+    });
     const initiatives = new InMemoryInitiativeStore();
     const draft = createInitiative({
       id: ids.next(),
@@ -328,6 +336,7 @@ describe("project conversion and execution", () => {
       projectId: project.id,
       description: "Preparar piloto",
       ownerActorId: "replacement",
+      executorTeamId: executionTeam.id,
       reviewerActorId: "lead",
       dueOn: "2026-09-20",
       priority: "high",
@@ -507,6 +516,7 @@ describe("project conversion and execution", () => {
     expect(execution.actions).toHaveLength(1);
     expect(execution.actions[0]).toMatchObject({
       priority: "high",
+      executorTeamId: executionTeam.id,
       workflowStatus: "done",
       estimatedEffort: 12,
       effortUnit: "hours",

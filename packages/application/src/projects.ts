@@ -698,6 +698,7 @@ export class ProjectService {
     projectId: string;
     description: string;
     ownerActorId: string;
+    executorTeamId?: string | null;
     reviewerActorId?: string | null;
     dueOn: string | null;
     priority: ProjectNextActionPriority;
@@ -721,6 +722,12 @@ export class ProjectService {
       project.organizationId,
       project.workspaceId,
     );
+    if (input.executorTeamId)
+      await this.assertExecutorTeam(
+        input.executorTeamId,
+        project.organizationId,
+        project.workspaceId,
+      );
     if (input.reviewerActorId)
       await this.assertProjectParticipant(
         input.reviewerActorId,
@@ -732,6 +739,7 @@ export class ProjectService {
       projectId: project.id,
       description: input.description,
       ownerActorId: input.ownerActorId,
+      executorTeamId: input.executorTeamId ?? null,
       reviewerActorId: input.reviewerActorId ?? null,
       dueOn: input.dueOn,
       priority: input.priority,
@@ -756,6 +764,7 @@ export class ProjectService {
       {
         actionId: action.id,
         ownerActorId: action.ownerActorId,
+        executorTeamId: action.executorTeamId,
         reviewerActorId: action.reviewerActorId,
         priority: action.priority,
         estimatedEffort: action.estimatedEffort,
@@ -1516,6 +1525,18 @@ export class ProjectService {
       }))
     )
       throw new AccessDeniedError("workspace:manage");
+  }
+  private async assertExecutorTeam(
+    teamId: string,
+    organizationId: string,
+    workspaceId: string,
+  ): Promise<void> {
+    const teams = await this.dependencies.tenancy.listTeams({
+      organizationId,
+      workspaceId,
+    });
+    if (!teams.some((team) => team.id === teamId))
+      throw new ResourceNotFoundError("PROJECT_NOT_FOUND");
   }
   private async assertProjectSponsorScoped(
     actorId: string,

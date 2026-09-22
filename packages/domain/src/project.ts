@@ -67,6 +67,7 @@ export type ProjectNextAction = Readonly<{
   projectId: string;
   description: string;
   ownerActorId: string;
+  executorTeamId: string | null;
   reviewerActorId: string | null;
   dueOn: string | null;
   priority: ProjectNextActionPriority;

@@ -14,6 +14,7 @@ const action = {
   organizationId: "00000000-0000-4000-8000-000000000001",
   description: "Preparar el piloto operativo.",
   ownerActorId: "owner",
+  executorTeamId: null,
   reviewerActorId: null,
   dueOn: "2026-10-02",
   priority: "high",

@@ -1540,6 +1540,7 @@ describe.sequential("PostgreSQL integration", () => {
         projectId: activeProjectId,
         description: "Round-trip planning fields",
         ownerActorId: "owner",
+        executorTeamId: null,
         reviewerActorId: null,
         dueOn: "2026-01-12",
         priority: "high" as const,

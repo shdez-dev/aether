@@ -4416,6 +4416,7 @@ components:
         organizationId: { type: string, format: uuid }
         description: { type: string, minLength: 1, maxLength: 2000 }
         ownerActorId: { type: string }
+        executorTeamId: { type: [string, "null"], format: uuid }
         reviewerActorId:
           { type: [string, "null"], minLength: 1, maxLength: 255 }
         dueOn: { type: [string, "null"], format: date }
@@ -4456,6 +4457,7 @@ components:
           projectId,
           description,
           ownerActorId,
+          executorTeamId,
           reviewerActorId,
           dueOn,
           priority,
@@ -4476,6 +4478,7 @@ components:
         projectId: { type: string, format: uuid }
         description: { type: string }
         ownerActorId: { type: string }
+        executorTeamId: { type: [string, "null"], format: uuid }
         reviewerActorId: { type: [string, "null"] }
         dueOn: { type: [string, "null"], format: date }
         priority: { type: string, enum: [low, medium, high] }

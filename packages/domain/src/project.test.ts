@@ -16,6 +16,7 @@ describe("project lifecycle", () => {
       projectId: "project",
       description: "Preparar la evidencia.",
       ownerActorId: "owner",
+      executorTeamId: null,
       reviewerActorId: "reviewer",
       dueOn: null,
       priority: "medium" as const,

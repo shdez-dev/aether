@@ -341,6 +341,7 @@ export const AddProjectNextActionRequestSchema = z
     organizationId: UuidSchema,
     description: NonEmptyTextSchema.max(2_000),
     ownerActorId: z.string().min(1).max(255),
+    executorTeamId: UuidSchema.nullable().default(null),
     reviewerActorId: z.string().min(1).max(255).nullable().default(null),
     dueOn: z.string().date().nullable(),
     priority: ProjectNextActionPrioritySchema,

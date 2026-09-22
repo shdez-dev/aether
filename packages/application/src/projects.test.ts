@@ -85,7 +85,10 @@ describe("ProjectService", () => {
       async findWorkspaceRole(input: { actorId: string }) {
         return activeRoles.has(input.actorId) ? ("member" as const) : null;
       },
-    } as TenantStore;
+      async listTeams() {
+        return [];
+      },
+    } as unknown as TenantStore;
     const audit: ProjectAuditStore = {
       async record() {},
       async list() {
