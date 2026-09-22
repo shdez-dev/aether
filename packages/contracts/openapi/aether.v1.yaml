@@ -2434,6 +2434,26 @@ paths:
       responses:
         "200": { description: Solicitud de cambio revisada. }
         default: { $ref: "#/components/responses/Problem" }
+  /v1/organizations/{organizationId}/my-work:
+    get:
+      tags: [Projects]
+      operationId: listMyProjectWork
+      summary: Consultar mi trabajo visible en la organización
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: organizationId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Trabajo personal, revisiones, bandeja de equipo, desbloqueos y colaboración.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ProjectWorkItem" }
+        default: { $ref: "#/components/responses/Problem" }
   /v1/projects/{projectId}/next-actions:
     get:
       tags: [Projects]
@@ -2532,7 +2552,8 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/ReorderProjectNextActionRequest" }
+            schema:
+              { $ref: "#/components/schemas/ReorderProjectNextActionRequest" }
       responses:
         "200":
           description: Orden compartido actualizado.
@@ -2561,7 +2582,8 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/ClaimProjectNextActionRequest" }
+            schema:
+              { $ref: "#/components/schemas/ClaimProjectNextActionRequest" }
       responses:
         "200":
           description: Tarea tomada.
@@ -2586,7 +2608,15 @@ paths:
           schema: { type: string, format: uuid }
         - $ref: "#/components/parameters/OrganizationContextId"
       responses:
-        "200": { description: Colaboradores, content: { application/json: { schema: { type: array, items: { type: string } } } } }
+        "200":
+          {
+            description: Colaboradores,
+            content:
+              {
+                application/json:
+                  { schema: { type: array, items: { type: string } } },
+              },
+          }
         default: { $ref: "#/components/responses/Problem" }
     post:
       tags: [Projects]
@@ -2608,7 +2638,10 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/AddProjectNextActionCollaboratorRequest" }
+            schema:
+              {
+                $ref: "#/components/schemas/AddProjectNextActionCollaboratorRequest",
+              }
       responses:
         "204": { description: Colaborador añadido. }
         default: { $ref: "#/components/responses/Problem" }
@@ -4570,6 +4603,20 @@ components:
         blockedReason: { type: [string, "null"], minLength: 1, maxLength: 2000 }
         unblockResponsibleActorId:
           { type: [string, "null"], minLength: 1, maxLength: 255 }
+    ProjectWorkItem:
+      type: object
+      additionalProperties: false
+      required: [action, kinds]
+      properties:
+        action: { $ref: "#/components/schemas/ProjectNextAction" }
+        kinds:
+          type: array
+          uniqueItems: true
+          items:
+            {
+              type: string,
+              enum: [owned, review, team_inbox, unblock, collaborator],
+            }
     ProjectNextAction:
       type: object
       required:
@@ -4639,10 +4686,11 @@ components:
     AddProjectNextActionCollaboratorRequest:
       type: object
       additionalProperties: false
-      required: [organizationId, actorId]
+      required: [organizationId, actorId, expectedVersion]
       properties:
         organizationId: { type: string, format: uuid }
         actorId: { type: string, minLength: 1, maxLength: 255 }
+        expectedVersion: { type: integer, minimum: 0 }
     DeclareCapacityAvailabilityRequest:
       type: object
       additionalProperties: false

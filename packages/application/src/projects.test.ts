@@ -103,9 +103,14 @@ describe("ProjectService", () => {
     const service = new ProjectService({
       projects,
       execution: {
+        async listMyWorkCandidates() {
+          return [];
+        },
         async addMilestone() {},
         async addNextAction() {},
-        async addNextActionCollaborator() {},
+        async addNextActionCollaborator() {
+          return false;
+        },
         async listNextActionCollaborators() {
           return [];
         },

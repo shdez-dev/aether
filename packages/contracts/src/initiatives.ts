@@ -352,7 +352,11 @@ export const AddProjectNextActionRequestSchema = z
   })
   .superRefine((value, context) => {
     if (value.ownerActorId === null && value.executorTeamId === null)
-      context.addIssue({ code: "custom", path: ["ownerActorId"], message: "Una tarea sin responsable requiere equipo ejecutor." });
+      context.addIssue({
+        code: "custom",
+        path: ["ownerActorId"],
+        message: "Una tarea sin responsable requiere equipo ejecutor.",
+      });
     if ((value.estimatedEffort === null) !== (value.effortUnit === null))
       context.addIssue({
         code: "custom",
@@ -418,6 +422,7 @@ export const ClaimProjectNextActionRequestSchema = z.object({
 export const AddProjectNextActionCollaboratorRequestSchema = z.object({
   organizationId: UuidSchema,
   actorId: z.string().min(1).max(255),
+  expectedVersion: z.number().int().nonnegative(),
 });
 export const DeclareProjectNextActionDependencyRequestSchema = z.object({
   organizationId: UuidSchema,

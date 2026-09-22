@@ -3145,6 +3145,33 @@ export async function buildServer(input: {
       });
     },
   );
+  app.get(
+    "/v1/organizations/:organizationId/my-work",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      const { organizationId } = z
+        .object({ organizationId: z.string().uuid() })
+        .parse(request.params);
+      const items = await input.projects.listMyWork({
+        actorId: session.actorId,
+        organizationId,
+        correlationId: correlationId(reply),
+      });
+      return items.map(({ action, kinds }) => ({
+        action: {
+          ...action,
+          completedAt: action.completedAt?.toISOString() ?? null,
+          createdAt: action.createdAt.toISOString(),
+        },
+        kinds,
+      }));
+    },
+  );
   app.get("/v1/projects/:projectId/next-actions", async (request, reply) => {
     const session = await requireSession(
       request,
@@ -3247,7 +3274,12 @@ export async function buildServer(input: {
   app.post(
     "/v1/projects/:projectId/next-actions/:actionId/reorder",
     async (request, reply) => {
-      const session = await requireSession(request, reply, input.auth, input.config);
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
       const params = z
         .object({ projectId: z.string().uuid(), actionId: z.string().uuid() })
         .parse(request.params);
@@ -3282,36 +3314,104 @@ export async function buildServer(input: {
   app.post(
     "/v1/projects/:projectId/next-actions/:actionId/claim",
     async (request, reply) => {
-      const session = await requireSession(request, reply, input.auth, input.config);
-      const params = z.object({ projectId: z.string().uuid(), actionId: z.string().uuid() }).parse(request.params);
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      const params = z
+        .object({ projectId: z.string().uuid(), actionId: z.string().uuid() })
+        .parse(request.params);
       const body = ClaimProjectNextActionRequestSchema.parse(request.body);
       return respondIdempotently({
-        request, reply, store: input.idempotency, actorId: session.actorId,
+        request,
+        reply,
+        store: input.idempotency,
+        actorId: session.actorId,
         operation: `project.next_action.claim:${params.projectId}:${params.actionId}`,
         requestPayload: body,
         execute: async () => {
           const action = await input.projects.claimNextAction({
-            actorId: session.actorId, correlationId: correlationId(reply), projectId: params.projectId, actionId: params.actionId, ...body,
+            actorId: session.actorId,
+            correlationId: correlationId(reply),
+            projectId: params.projectId,
+            actionId: params.actionId,
+            ...body,
           });
-          return { statusCode: 200, body: { ...action, completedAt: action.completedAt?.toISOString() ?? null, createdAt: action.createdAt.toISOString() } };
+          return {
+            statusCode: 200,
+            body: {
+              ...action,
+              completedAt: action.completedAt?.toISOString() ?? null,
+              createdAt: action.createdAt.toISOString(),
+            },
+          };
         },
       });
     },
   );
-  app.post("/v1/projects/:projectId/next-actions/:actionId/collaborators", async (request, reply) => {
-    const session = await requireSession(request, reply, input.auth, input.config);
-    const params = z.object({ projectId: z.string().uuid(), actionId: z.string().uuid() }).parse(request.params);
-    const body = AddProjectNextActionCollaboratorRequestSchema.parse(request.body);
-    return respondIdempotently({ request, reply, store: input.idempotency, actorId: session.actorId, operation: `project.next_action.collaborator:${params.projectId}:${params.actionId}`, requestPayload: body,
-      execute: async () => { await input.projects.addNextActionCollaborator({ actorId: session.actorId, correlationId: correlationId(reply), projectId: params.projectId, actionId: params.actionId, collaboratorActorId: body.actorId, organizationId: body.organizationId }); return { statusCode: 204, body: null }; },
-    });
-  });
-  app.get("/v1/projects/:projectId/next-actions/:actionId/collaborators", async (request, reply) => {
-    const session = await requireSession(request, reply, input.auth, input.config);
-    const params = z.object({ projectId: z.string().uuid(), actionId: z.string().uuid() }).parse(request.params);
-    const query = z.object({ organizationId: z.string().uuid() }).parse(request.query);
-    return input.projects.listNextActionCollaborators({ actorId: session.actorId, correlationId: correlationId(reply), projectId: params.projectId, actionId: params.actionId, ...query });
-  });
+  app.post(
+    "/v1/projects/:projectId/next-actions/:actionId/collaborators",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      const params = z
+        .object({ projectId: z.string().uuid(), actionId: z.string().uuid() })
+        .parse(request.params);
+      const body = AddProjectNextActionCollaboratorRequestSchema.parse(
+        request.body,
+      );
+      return respondIdempotently({
+        request,
+        reply,
+        store: input.idempotency,
+        actorId: session.actorId,
+        operation: `project.next_action.collaborator:${params.projectId}:${params.actionId}`,
+        requestPayload: body,
+        execute: async () => {
+          await input.projects.addNextActionCollaborator({
+            actorId: session.actorId,
+            correlationId: correlationId(reply),
+            projectId: params.projectId,
+            actionId: params.actionId,
+            collaboratorActorId: body.actorId,
+            organizationId: body.organizationId,
+            expectedVersion: body.expectedVersion,
+          });
+          return { statusCode: 204, body: null };
+        },
+      });
+    },
+  );
+  app.get(
+    "/v1/projects/:projectId/next-actions/:actionId/collaborators",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      const params = z
+        .object({ projectId: z.string().uuid(), actionId: z.string().uuid() })
+        .parse(request.params);
+      const query = z
+        .object({ organizationId: z.string().uuid() })
+        .parse(request.query);
+      return input.projects.listNextActionCollaborators({
+        actorId: session.actorId,
+        correlationId: correlationId(reply),
+        projectId: params.projectId,
+        actionId: params.actionId,
+        ...query,
+      });
+    },
+  );
   app.post(
     "/v1/projects/:projectId/next-action-dependencies",
     async (request, reply) => {

@@ -3855,7 +3855,14 @@ describe("document project authorization endpoints", () => {
     const actionId = "00000000-0000-4000-8000-000000000011";
     const organizationId = "00000000-0000-4000-8000-000000000012";
     let calls = 0;
-    const projects: Pick<ProjectService, "reorderNextAction" | "claimNextAction"> = {
+    let collaboratorAdds = 0;
+    const projects: Pick<
+      ProjectService,
+      | "reorderNextAction"
+      | "claimNextAction"
+      | "listMyWork"
+      | "addNextActionCollaborator"
+    > = {
       async reorderNextAction(input) {
         calls++;
         expect(input).toMatchObject({
@@ -3890,15 +3897,76 @@ describe("document project authorization endpoints", () => {
         };
       },
       async claimNextAction(input) {
-        expect(input).toMatchObject({ actorId: "owner", projectId, actionId, organizationId, expectedVersion: 4 });
+        expect(input).toMatchObject({
+          actorId: "owner",
+          projectId,
+          actionId,
+          organizationId,
+          expectedVersion: 4,
+        });
         return {
-          id: actionId, projectId, description: "Tomada", ownerActorId: "owner",
-          executorTeamId: "00000000-0000-4000-8000-000000000013", reviewerActorId: null,
-          dueOn: null, priority: "medium", estimatedEffort: null, effortUnit: null,
-          periodStartOn: null, periodEndOn: null, workflowStatus: "to_do", position: 2,
-          blockedReason: null, unblockResponsibleActorId: null, completedAt: null,
-          version: 5, createdByActorId: "owner", createdAt: new Date("2026-09-22T00:00:00.000Z"),
+          id: actionId,
+          projectId,
+          description: "Tomada",
+          ownerActorId: "owner",
+          executorTeamId: "00000000-0000-4000-8000-000000000013",
+          reviewerActorId: null,
+          dueOn: null,
+          priority: "medium",
+          estimatedEffort: null,
+          effortUnit: null,
+          periodStartOn: null,
+          periodEndOn: null,
+          workflowStatus: "to_do",
+          position: 2,
+          blockedReason: null,
+          unblockResponsibleActorId: null,
+          completedAt: null,
+          version: 5,
+          createdByActorId: "owner",
+          createdAt: new Date("2026-09-22T00:00:00.000Z"),
         };
+      },
+      async listMyWork(input) {
+        expect(input).toMatchObject({ actorId: "owner", organizationId });
+        return [
+          {
+            action: {
+              id: actionId,
+              projectId,
+              description: "Tomada",
+              ownerActorId: "owner",
+              executorTeamId: null,
+              reviewerActorId: null,
+              dueOn: null,
+              priority: "medium",
+              estimatedEffort: null,
+              effortUnit: null,
+              periodStartOn: null,
+              periodEndOn: null,
+              workflowStatus: "to_do",
+              position: 1,
+              blockedReason: null,
+              unblockResponsibleActorId: null,
+              completedAt: null,
+              version: 5,
+              createdByActorId: "owner",
+              createdAt: new Date("2026-09-22T00:00:00.000Z"),
+            },
+            kinds: ["owned"],
+          },
+        ];
+      },
+      async addNextActionCollaborator(input) {
+        collaboratorAdds++;
+        expect(input).toMatchObject({
+          actorId: "owner",
+          organizationId,
+          projectId,
+          actionId,
+          collaboratorActorId: "colleague",
+          expectedVersion: 5,
+        });
       },
     };
     const app = await buildServer({
@@ -3944,6 +4012,40 @@ describe("document project authorization endpoints", () => {
     });
     expect(claim.statusCode).toBe(200);
     expect(claim.json()).toMatchObject({ ownerActorId: "owner", version: 5 });
+    const myWorkUrl = `/v1/organizations/${organizationId}/my-work`;
+    expect(
+      (await app.inject({ method: "GET", url: myWorkUrl })).statusCode,
+    ).toBe(401);
+    const myWork = await app.inject({
+      method: "GET",
+      url: myWorkUrl,
+      headers: { cookie: headers.cookie },
+    });
+    expect(myWork.statusCode).toBe(200);
+    expect(myWork.json()).toMatchObject([
+      { action: { id: actionId }, kinds: ["owned"] },
+    ]);
+    const collaboratorRequest = {
+      method: "POST" as const,
+      url: `/v1/projects/${projectId}/next-actions/${actionId}/collaborators`,
+      headers: { ...headers, "idempotency-key": "task-collaborator-key" },
+      payload: { organizationId, actorId: "colleague", expectedVersion: 5 },
+    };
+    const collaboratorResponse = await app.inject(collaboratorRequest);
+    expect(collaboratorResponse.statusCode).toBe(204);
+    expect((await app.inject(collaboratorRequest)).statusCode).toBe(204);
+    expect(collaboratorAdds).toBe(1);
+    expect(
+      (
+        await app.inject({
+          ...collaboratorRequest,
+          headers: {
+            ...collaboratorRequest.headers,
+            "x-csrf-token": "invalid",
+          },
+        })
+      ).statusCode,
+    ).toBe(403);
     expect(
       (
         await app.inject({

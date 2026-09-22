@@ -81,7 +81,9 @@ describe("project conversion and execution", () => {
       }),
     ]);
     expect([first, second].filter(Boolean)).toHaveLength(1);
-    await expect(execution.listNextActions(base.projectId)).resolves.toMatchObject([
+    await expect(
+      execution.listNextActions(base.projectId),
+    ).resolves.toMatchObject([
       { id: "second", position: 1, version: 1 },
       { id: "first", position: 2, version: 1 },
     ]);
@@ -218,10 +220,10 @@ describe("project conversion and execution", () => {
       ],
     });
     const projectStore = new InMemoryProjectStore();
-    const execution = new InMemoryProjectExecutionStore();
+    const audit = new InMemoryProjectAuditStore();
+    const execution = new InMemoryProjectExecutionStore(audit);
     const closures = new InMemoryProjectClosureStore();
     const documentStore = new InMemoryDocumentStore();
-    const audit = new InMemoryProjectAuditStore();
     const projects = new ProjectService({
       projects: projectStore,
       execution,
@@ -408,6 +410,15 @@ describe("project conversion and execution", () => {
       correlationId: ids.next(),
     });
     await expect(
+      projects.listMyWork({
+        actorId: "lead",
+        organizationId: organization.id,
+        correlationId: ids.next(),
+      }),
+    ).resolves.toMatchObject([
+      { action: { id: teamInboxAction.id }, kinds: ["team_inbox"] },
+    ]);
+    await expect(
       projects.claimNextAction({
         actorId: "observer",
         organizationId: organization.id,
@@ -456,17 +467,55 @@ describe("project conversion and execution", () => {
       periodEndOn: "2026-09-20",
       correlationId: ids.next(),
     });
+    await projects.addNextActionCollaborator({
+      actorId: "replacement",
+      organizationId: organization.id,
+      projectId: project.id,
+      actionId: nextAction.id,
+      collaboratorActorId: "observer",
+      expectedVersion: nextAction.version,
+      correlationId: ids.next(),
+    });
+    const collaboratedAction = await execution.findNextAction(nextAction.id);
+    await expect(
+      projects.listMyWork({
+        actorId: "observer",
+        organizationId: organization.id,
+        correlationId: ids.next(),
+      }),
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: expect.objectContaining({ id: nextAction.id }),
+          kinds: ["collaborator"],
+        }),
+      ]),
+    );
     const blockedAction = await projects.transitionNextActionWorkflow({
       actorId: "replacement",
       organizationId: organization.id,
       projectId: project.id,
       actionId: nextAction.id,
-      expectedVersion: nextAction.version,
+      expectedVersion: collaboratedAction!.version,
       status: "in_progress",
       blockedReason: "Esperando respuesta del proveedor.",
       unblockResponsibleActorId: "lead",
       correlationId: ids.next(),
     });
+    await expect(
+      projects.listMyWork({
+        actorId: "lead",
+        organizationId: organization.id,
+        correlationId: ids.next(),
+      }),
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: expect.objectContaining({ id: nextAction.id }),
+          kinds: ["unblock"],
+        }),
+      ]),
+    );
     const reviewAction = await projects.transitionNextActionWorkflow({
       actorId: "replacement",
       organizationId: organization.id,
@@ -478,6 +527,20 @@ describe("project conversion and execution", () => {
       unblockResponsibleActorId: null,
       correlationId: ids.next(),
     });
+    await expect(
+      projects.listMyWork({
+        actorId: "lead",
+        organizationId: organization.id,
+        correlationId: ids.next(),
+      }),
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: expect.objectContaining({ id: nextAction.id }),
+          kinds: ["review"],
+        }),
+      ]),
+    );
     await expect(
       projects.transitionNextActionWorkflow({
         actorId: "replacement",
@@ -503,7 +566,7 @@ describe("project conversion and execution", () => {
         unblockResponsibleActorId: null,
         correlationId: ids.next(),
       }),
-    ).resolves.toMatchObject({ workflowStatus: "done", version: 3 });
+    ).resolves.toMatchObject({ workflowStatus: "done", version: 4 });
     await expect(
       projects.listNextActions({
         actorId: "replacement",
@@ -511,13 +574,15 @@ describe("project conversion and execution", () => {
         projectId: project.id,
         correlationId: ids.next(),
       }),
-    ).resolves.toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        id: nextAction.id,
-        workflowStatus: "done",
-        executorTeamId: executionTeam.id,
-      }),
-    ]));
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: nextAction.id,
+          workflowStatus: "done",
+          executorTeamId: executionTeam.id,
+        }),
+      ]),
+    );
     const active = await projects.changeStatus({
       actorId: "replacement",
       organizationId: organization.id,
@@ -638,7 +703,9 @@ describe("project conversion and execution", () => {
     expect(active.status).toBe("active");
     expect(execution.milestones).toHaveLength(1);
     expect(execution.actions).toHaveLength(2);
-    expect(execution.actions.find((action) => action.id === nextAction.id)).toMatchObject({
+    expect(
+      execution.actions.find((action) => action.id === nextAction.id),
+    ).toMatchObject({
       priority: "high",
       executorTeamId: executionTeam.id,
       workflowStatus: "done",
@@ -716,6 +783,7 @@ describe("project conversion and execution", () => {
       "project.milestone_added.v1",
       "project.next_action_added.v1",
       "project.next_action_added.v1",
+      "project.next_action_collaborator_added.v1",
       "project.next_action_workflow_changed.v1",
       "project.next_action_workflow_changed.v1",
       "project.next_action_workflow_changed.v1",
@@ -732,6 +800,7 @@ describe("project conversion and execution", () => {
       "project.milestone_added.v1",
       "project.next_action_added.v1",
       "project.next_action_added.v1",
+      "project.next_action_collaborator_added.v1",
       "project.next_action_workflow_changed.v1",
       "project.next_action_workflow_changed.v1",
       "project.next_action_workflow_changed.v1",
@@ -741,5 +810,17 @@ describe("project conversion and execution", () => {
       "project.closed.v1",
       "project.archived.v1",
     ]);
+    execution.actions.push({
+      ...teamInboxAction,
+      id: ids.next(),
+      ownerActorId: "unscoped",
+    });
+    await expect(
+      projects.listMyWork({
+        actorId: "unscoped",
+        organizationId: organization.id,
+        correlationId: ids.next(),
+      }),
+    ).resolves.toEqual([]);
   });
 });

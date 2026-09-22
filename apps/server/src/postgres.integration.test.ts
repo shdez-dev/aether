@@ -1573,6 +1573,60 @@ describe.sequential("PostgreSQL integration", () => {
       };
       const executionStore = new PostgresProjectExecutionStore(pool);
       await executionStore.addNextAction(plannedAction);
+      await expect(
+        pool.query(
+          `INSERT INTO project_next_action_collaborators (action_id, actor_id, added_by_actor_id, added_at)
+         VALUES ($1,'other','owner','2026-01-03T00:00:00Z')`,
+          [plannedAction.id],
+        ),
+      ).rejects.toThrow(
+        "next action collaborator must be active in its project workspace",
+      );
+      const collaboratorAuditEvent = {
+        id: randomUUID(),
+        eventType: "project.next_action_collaborator_added.v1",
+        organizationId,
+        workspaceId,
+        projectId: activeProjectId,
+        actorId: "owner",
+        correlationId: randomUUID(),
+        occurredAt: plannedAction.createdAt,
+        payload: { actionId: plannedAction.id, collaboratorActorId: "lead" },
+      };
+      const addedCollaborator = () =>
+        executionStore.addNextActionCollaborator({
+          actionId: plannedAction.id,
+          actorId: "lead",
+          addedByActorId: "owner",
+          addedAt: plannedAction.createdAt,
+          expectedVersion: 0,
+          auditEvent: collaboratorAuditEvent,
+        });
+      expect(
+        (await Promise.all([addedCollaborator(), addedCollaborator()])).sort(),
+      ).toEqual([false, true]);
+      await expect(
+        executionStore.listMyWorkCandidates({
+          organizationId,
+          actorId: "lead",
+          teamIds: [],
+        }),
+      ).resolves.toEqual(
+        expect.arrayContaining([
+          {
+            projectId: activeProjectId,
+            actionId: plannedAction.id,
+            collaborator: true,
+          },
+        ]),
+      );
+      await expect(
+        executionStore.listMyWorkCandidates({
+          organizationId: otherOrganizationId,
+          actorId: "lead",
+          teamIds: [],
+        }),
+      ).resolves.toEqual([]);
       const persistedPlannedAction = await executionStore.findNextAction(
         plannedAction.id,
       );
@@ -1609,7 +1663,7 @@ describe.sequential("PostgreSQL integration", () => {
       ]);
       expect(reordered.filter(Boolean)).toHaveLength(1);
       const reorderedAction = reordered.find(Boolean)!;
-      expect(reorderedAction).toMatchObject({ position: 1, version: 1 });
+      expect(reorderedAction).toMatchObject({ position: 1, version: 2 });
       const sharedOrder = await pool.query<{ positions: number[] }>(
         `SELECT array_agg(position ORDER BY position) AS positions
            FROM project_next_actions

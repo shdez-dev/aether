@@ -94,7 +94,51 @@ export class InMemoryProjectStore implements ProjectStore {
   }
 }
 export class InMemoryProjectExecutionStore implements ProjectExecutionStore {
-  readonly collaborators: Array<{ actionId: string; actorId: string; addedByActorId: string; addedAt: Date }> = [];
+  constructor(private readonly audit?: ProjectAuditStore) {}
+  readonly collaborators: Array<{
+    actionId: string;
+    actorId: string;
+    addedByActorId: string;
+    addedAt: Date;
+  }> = [];
+  async listMyWorkCandidates(input: {
+    organizationId: string;
+    actorId: string;
+    teamIds: readonly string[];
+  }): Promise<
+    readonly { projectId: string; actionId: string; collaborator: boolean }[]
+  > {
+    return this.actions
+      .filter(
+        (action) =>
+          action.workflowStatus !== "done" &&
+          action.workflowStatus !== "cancelled",
+      )
+      .filter(
+        (action) =>
+          action.ownerActorId === input.actorId ||
+          (action.workflowStatus === "in_review" &&
+            action.reviewerActorId === input.actorId) ||
+          (action.workflowStatus === "to_do" &&
+            action.ownerActorId === null &&
+            action.executorTeamId !== null &&
+            input.teamIds.includes(action.executorTeamId)) ||
+          (action.blockedReason !== null &&
+            action.unblockResponsibleActorId === input.actorId) ||
+          this.collaborators.some(
+            (item) =>
+              item.actionId === action.id && item.actorId === input.actorId,
+          ),
+      )
+      .map((action) => ({
+        projectId: action.projectId,
+        actionId: action.id,
+        collaborator: this.collaborators.some(
+          (item) =>
+            item.actionId === action.id && item.actorId === input.actorId,
+        ),
+      }));
+  }
   readonly milestones: ProjectMilestone[] = [];
   readonly actions: ProjectNextAction[] = [];
   readonly dependencies: ProjectNextActionDependency[] = [];
@@ -116,11 +160,47 @@ export class InMemoryProjectExecutionStore implements ProjectExecutionStore {
       ).length + 1;
     this.actions.push({ ...action, position });
   }
-  async addNextActionCollaborator(input: { actionId: string; actorId: string; addedByActorId: string; addedAt: Date }): Promise<void> {
-    if (!this.collaborators.some((item) => item.actionId === input.actionId && item.actorId === input.actorId)) this.collaborators.push(input);
+  async addNextActionCollaborator(input: {
+    actionId: string;
+    actorId: string;
+    addedByActorId: string;
+    addedAt: Date;
+    expectedVersion: number;
+    auditEvent: ProjectAuditEvent;
+  }): Promise<boolean> {
+    const index = this.actions.findIndex(
+      (action) =>
+        action.id === input.actionId &&
+        action.version === input.expectedVersion,
+    );
+    if (
+      index < 0 ||
+      this.collaborators.some(
+        (item) =>
+          item.actionId === input.actionId && item.actorId === input.actorId,
+      )
+    )
+      return false;
+    this.actions[index] = {
+      ...this.actions[index]!,
+      version: input.expectedVersion + 1,
+    };
+    this.collaborators.push({
+      actionId: input.actionId,
+      actorId: input.actorId,
+      addedByActorId: input.addedByActorId,
+      addedAt: input.addedAt,
+    });
+    await this.audit?.record(input.auditEvent);
+    return true;
   }
-  async listNextActionCollaborators(actionId: string): Promise<readonly string[]> {
-    return this.collaborators.filter((item) => item.actionId === actionId).map((item) => item.actorId).sort();
+  async listNextActionCollaborators(
+    actionId: string,
+  ): Promise<readonly string[]> {
+    return this.collaborators
+      .filter((item) => item.actionId === actionId)
+      .map((item) => item.actorId)
+      .sort();
   }
   async claimNextAction(input: {
     action: ProjectNextAction;
@@ -129,11 +209,20 @@ export class InMemoryProjectExecutionStore implements ProjectExecutionStore {
     auditEvent: ProjectAuditEvent;
   }): Promise<ProjectNextAction | null> {
     const index = this.actions.findIndex(
-      (action) => action.id === input.action.id && action.version === input.expectedVersion && action.ownerActorId === null && action.workflowStatus === "to_do" && action.executorTeamId !== null,
+      (action) =>
+        action.id === input.action.id &&
+        action.version === input.expectedVersion &&
+        action.ownerActorId === null &&
+        action.workflowStatus === "to_do" &&
+        action.executorTeamId !== null,
     );
     if (index < 0) return null;
     const action = this.actions[index]!;
-    const claimed = { ...action, ownerActorId: input.ownerActorId, version: action.version + 1 };
+    const claimed = {
+      ...action,
+      ownerActorId: input.ownerActorId,
+      version: action.version + 1,
+    };
     this.actions[index] = claimed;
     return claimed;
   }
@@ -336,8 +425,7 @@ export class InMemoryProjectExecutionStore implements ProjectExecutionStore {
           ) -
             ["to_do", "in_progress", "in_review", "done", "cancelled"].indexOf(
               b.workflowStatus,
-            ) ||
-          a.position - b.position,
+            ) || a.position - b.position,
       );
   }
   async listDependencies(

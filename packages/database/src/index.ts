@@ -3620,6 +3620,43 @@ export class PostgresProjectStore implements ProjectStore {
 }
 export class PostgresProjectExecutionStore implements ProjectExecutionStore {
   constructor(private readonly pool: Pool) {}
+  async listMyWorkCandidates(input: {
+    organizationId: string;
+    actorId: string;
+    teamIds: readonly string[];
+  }): Promise<
+    readonly { projectId: string; actionId: string; collaborator: boolean }[]
+  > {
+    const result = await this.pool.query<{
+      project_id: string;
+      action_id: string;
+      collaborator: boolean;
+    }>(
+      `SELECT action.project_id, action.id AS action_id,
+              EXISTS (SELECT 1 FROM project_next_action_collaborators collaborator
+                       WHERE collaborator.action_id = action.id AND collaborator.actor_id = $2) AS collaborator
+         FROM project_next_actions action
+         JOIN projects project ON project.id = action.project_id
+        WHERE project.organization_id = $1
+          AND project.status NOT IN ('completed', 'cancelled', 'archived')
+          AND action.workflow_status NOT IN ('done', 'cancelled')
+          AND (
+            action.owner_actor_id = $2
+            OR (action.workflow_status = 'in_review' AND action.reviewer_actor_id = $2)
+            OR (action.workflow_status = 'to_do' AND action.owner_actor_id IS NULL AND action.executor_team_id = ANY($3::uuid[]))
+            OR (action.blocked_reason IS NOT NULL AND action.unblock_responsible_actor_id = $2)
+            OR EXISTS (SELECT 1 FROM project_next_action_collaborators collaborator
+                       WHERE collaborator.action_id = action.id AND collaborator.actor_id = $2)
+          )
+        ORDER BY action.project_id, action.workflow_status, action.position`,
+      [input.organizationId, input.actorId, input.teamIds],
+    );
+    return result.rows.map((row) => ({
+      projectId: row.project_id,
+      actionId: row.action_id,
+      collaborator: row.collaborator,
+    }));
+  }
   async addMilestone(milestone: ProjectMilestone): Promise<void> {
     await this.pool.query(
       `INSERT INTO project_milestones (id, project_id, title, due_on, completed_at, created_by_actor_id, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
@@ -3661,16 +3698,52 @@ export class PostgresProjectExecutionStore implements ProjectExecutionStore {
       ],
     );
   }
-  async addNextActionCollaborator(input: { actionId: string; actorId: string; addedByActorId: string; addedAt: Date }): Promise<void> {
-    await this.pool.query(
-      `INSERT INTO project_next_action_collaborators (action_id, actor_id, added_by_actor_id, added_at)
-       VALUES ($1,$2,$3,$4) ON CONFLICT (action_id, actor_id) DO NOTHING`,
-      [input.actionId, input.actorId, input.addedByActorId, input.addedAt],
-    );
+  async addNextActionCollaborator(input: {
+    actionId: string;
+    actorId: string;
+    addedByActorId: string;
+    addedAt: Date;
+    expectedVersion: number;
+    auditEvent: ProjectAuditEvent;
+  }): Promise<boolean> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const updated = await client.query(
+        `UPDATE project_next_actions SET version = version + 1
+         WHERE id = $1 AND version = $2`,
+        [input.actionId, input.expectedVersion],
+      );
+      if (updated.rowCount !== 1) {
+        await client.query("ROLLBACK");
+        return false;
+      }
+      const inserted = await client.query(
+        `INSERT INTO project_next_action_collaborators
+         (action_id, actor_id, added_by_actor_id, added_at)
+         VALUES ($1,$2,$3,$4) ON CONFLICT (action_id, actor_id) DO NOTHING`,
+        [input.actionId, input.actorId, input.addedByActorId, input.addedAt],
+      );
+      if (inserted.rowCount !== 1) {
+        await client.query("ROLLBACK");
+        return false;
+      }
+      await insertProjectAuditEvent(client, input.auditEvent);
+      await client.query("COMMIT");
+      return true;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
-  async listNextActionCollaborators(actionId: string): Promise<readonly string[]> {
+  async listNextActionCollaborators(
+    actionId: string,
+  ): Promise<readonly string[]> {
     const result = await this.pool.query<{ actor_id: string }>(
-      `SELECT actor_id FROM project_next_action_collaborators WHERE action_id = $1 ORDER BY actor_id`, [actionId],
+      `SELECT actor_id FROM project_next_action_collaborators WHERE action_id = $1 ORDER BY actor_id`,
+      [actionId],
     );
     return result.rows.map((row) => row.actor_id);
   }
@@ -3736,10 +3809,9 @@ export class PostgresProjectExecutionStore implements ProjectExecutionStore {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
-      await client.query(
-        "SELECT id FROM projects WHERE id = $1 FOR UPDATE",
-        [input.action.projectId],
-      );
+      await client.query("SELECT id FROM projects WHERE id = $1 FOR UPDATE", [
+        input.action.projectId,
+      ]);
       const current = await client.query<{
         position: number;
         workflow_status: ProjectNextAction["workflowStatus"];
@@ -3771,14 +3843,24 @@ export class PostgresProjectExecutionStore implements ProjectExecutionStore {
           `UPDATE project_next_actions SET position = position + 1, version = version + 1
            WHERE project_id = $1 AND workflow_status = $2
              AND position >= $3 AND position < $4`,
-          [input.action.projectId, action.workflow_status, input.position, action.position],
+          [
+            input.action.projectId,
+            action.workflow_status,
+            input.position,
+            action.position,
+          ],
         );
       if (input.position > action.position)
         await client.query(
           `UPDATE project_next_actions SET position = position - 1, version = version + 1
            WHERE project_id = $1 AND workflow_status = $2
              AND position > $3 AND position <= $4`,
-          [input.action.projectId, action.workflow_status, action.position, input.position],
+          [
+            input.action.projectId,
+            action.workflow_status,
+            action.position,
+            input.position,
+          ],
         );
       const moved = await client.query(
         `UPDATE project_next_actions SET position = $2, version = version + 1

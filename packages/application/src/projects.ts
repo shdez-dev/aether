@@ -58,6 +58,12 @@ export type ProjectAuditEvent = Readonly<{
   occurredAt: Date;
   payload: Readonly<Record<string, unknown>>;
 }>;
+export type ProjectWorkKind =
+  "owned" | "review" | "team_inbox" | "unblock" | "collaborator";
+export type ProjectWorkItem = Readonly<{
+  action: ProjectNextAction;
+  kinds: readonly ProjectWorkKind[];
+}>;
 export interface ProjectStore {
   create(project: Project): Promise<void>;
   findById(projectId: string): Promise<Project | null>;
@@ -88,8 +94,26 @@ export interface ProjectStore {
   }): Promise<boolean>;
 }
 export interface ProjectExecutionStore {
+  listMyWorkCandidates(input: {
+    organizationId: string;
+    actorId: string;
+    teamIds: readonly string[];
+  }): Promise<
+    readonly {
+      projectId: string;
+      actionId: string;
+      collaborator: boolean;
+    }[]
+  >;
   listNextActionCollaborators(actionId: string): Promise<readonly string[]>;
-  addNextActionCollaborator(input: { actionId: string; actorId: string; addedByActorId: string; addedAt: Date }): Promise<void>;
+  addNextActionCollaborator(input: {
+    actionId: string;
+    actorId: string;
+    addedByActorId: string;
+    addedAt: Date;
+    expectedVersion: number;
+    auditEvent: ProjectAuditEvent;
+  }): Promise<boolean>;
   claimNextAction(input: {
     action: ProjectNextAction;
     ownerActorId: string;
@@ -793,7 +817,9 @@ export class ProjectService {
         periodEndOn: action.periodEndOn,
       },
     );
-    return (await this.dependencies.execution.findNextAction(action.id)) ?? action;
+    return (
+      (await this.dependencies.execution.findNextAction(action.id)) ?? action
+    );
   }
   async transitionNextActionWorkflow(input: {
     actorId: string;
@@ -860,7 +886,10 @@ export class ProjectService {
         blocked: transitioned.blockedReason !== null,
       },
     );
-    return (await this.dependencies.execution.findNextAction(action.id)) ?? transitioned;
+    return (
+      (await this.dependencies.execution.findNextAction(action.id)) ??
+      transitioned
+    );
   }
   async claimNextAction(input: {
     actorId: string;
@@ -870,43 +899,111 @@ export class ProjectService {
     expectedVersion: number;
     correlationId: string;
   }): Promise<ProjectNextAction> {
-    const project = await this.requireProject(input.projectId, input.organizationId);
-    await this.assertExecutionAccess(input.actorId, project, input.correlationId);
-    const action = await this.dependencies.execution.findNextAction(input.actionId);
+    const project = await this.requireProject(
+      input.projectId,
+      input.organizationId,
+    );
+    await this.assertExecutionAccess(
+      input.actorId,
+      project,
+      input.correlationId,
+    );
+    const action = await this.dependencies.execution.findNextAction(
+      input.actionId,
+    );
     if (!action || action.projectId !== project.id)
       throw new ResourceNotFoundError("PROJECT_NOT_FOUND");
-    if (action.version !== input.expectedVersion) throw new ProjectVersionConflictError();
+    if (action.version !== input.expectedVersion)
+      throw new ProjectVersionConflictError();
     if (
       action.workflowStatus !== "to_do" ||
       action.ownerActorId !== null ||
       !action.executorTeamId
     )
       throw new ProjectDomainError("PROJECT_NEXT_ACTION_CLAIM_INVALID");
-    await this.assertExecutorTeamMember(input.actorId, action.executorTeamId, project);
+    await this.assertExecutorTeamMember(
+      input.actorId,
+      action.executorTeamId,
+      project,
+    );
     const claimed = await this.dependencies.execution.claimNextAction({
       action,
       ownerActorId: input.actorId,
       expectedVersion: input.expectedVersion,
-      auditEvent: this.auditEventFor(project, input.actorId, input.correlationId,
-        "project.next_action_claimed.v1", { actionId: action.id, executorTeamId: action.executorTeamId }),
+      auditEvent: this.auditEventFor(
+        project,
+        input.actorId,
+        input.correlationId,
+        "project.next_action_claimed.v1",
+        { actionId: action.id, executorTeamId: action.executorTeamId },
+      ),
     });
     if (!claimed) throw new ProjectVersionConflictError();
     return claimed;
   }
-  async addNextActionCollaborator(input: { actorId: string; organizationId: string; projectId: string; actionId: string; collaboratorActorId: string; correlationId: string }): Promise<void> {
-    const project = await this.requireProject(input.projectId, input.organizationId);
-    await this.assertExecutionAccess(input.actorId, project, input.correlationId);
-    const action = await this.dependencies.execution.findNextAction(input.actionId);
-    if (!action || action.projectId !== project.id) throw new ResourceNotFoundError("PROJECT_NOT_FOUND");
-    await this.assertProjectParticipant(input.collaboratorActorId, project.organizationId, project.workspaceId);
-    await this.dependencies.execution.addNextActionCollaborator({ actionId: action.id, actorId: input.collaboratorActorId, addedByActorId: input.actorId, addedAt: this.dependencies.clock.now() });
-    await this.record(project, input.actorId, input.correlationId, "project.next_action_collaborator_added.v1", { actionId: action.id, collaboratorActorId: input.collaboratorActorId });
+  async addNextActionCollaborator(input: {
+    actorId: string;
+    organizationId: string;
+    projectId: string;
+    actionId: string;
+    collaboratorActorId: string;
+    expectedVersion: number;
+    correlationId: string;
+  }): Promise<void> {
+    const project = await this.requireProject(
+      input.projectId,
+      input.organizationId,
+    );
+    await this.assertExecutionAccess(
+      input.actorId,
+      project,
+      input.correlationId,
+    );
+    const action = await this.dependencies.execution.findNextAction(
+      input.actionId,
+    );
+    if (!action || action.projectId !== project.id)
+      throw new ResourceNotFoundError("PROJECT_NOT_FOUND");
+    if (action.version !== input.expectedVersion)
+      throw new ProjectVersionConflictError();
+    await this.assertProjectParticipant(
+      input.collaboratorActorId,
+      project.organizationId,
+      project.workspaceId,
+    );
+    const saved = await this.dependencies.execution.addNextActionCollaborator({
+      actionId: action.id,
+      actorId: input.collaboratorActorId,
+      addedByActorId: input.actorId,
+      addedAt: this.dependencies.clock.now(),
+      expectedVersion: input.expectedVersion,
+      auditEvent: this.auditEventFor(
+        project,
+        input.actorId,
+        input.correlationId,
+        "project.next_action_collaborator_added.v1",
+        { actionId: action.id, collaboratorActorId: input.collaboratorActorId },
+      ),
+    });
+    if (!saved) throw new ProjectVersionConflictError();
   }
-  async listNextActionCollaborators(input: { actorId: string; organizationId: string; projectId: string; actionId: string; correlationId?: string }): Promise<readonly string[]> {
-    const project = await this.requireProject(input.projectId, input.organizationId);
+  async listNextActionCollaborators(input: {
+    actorId: string;
+    organizationId: string;
+    projectId: string;
+    actionId: string;
+    correlationId?: string;
+  }): Promise<readonly string[]> {
+    const project = await this.requireProject(
+      input.projectId,
+      input.organizationId,
+    );
     await this.assertProjectRead(input.actorId, project, input.correlationId);
-    const action = await this.dependencies.execution.findNextAction(input.actionId);
-    if (!action || action.projectId !== project.id) throw new ResourceNotFoundError("PROJECT_NOT_FOUND");
+    const action = await this.dependencies.execution.findNextAction(
+      input.actionId,
+    );
+    if (!action || action.projectId !== project.id)
+      throw new ResourceNotFoundError("PROJECT_NOT_FOUND");
     return this.dependencies.execution.listNextActionCollaborators(action.id);
   }
   async reorderNextAction(input: {
@@ -918,13 +1015,23 @@ export class ProjectService {
     position: number;
     correlationId: string;
   }): Promise<ProjectNextAction> {
-    const project = await this.requireProject(input.projectId, input.organizationId);
+    const project = await this.requireProject(
+      input.projectId,
+      input.organizationId,
+    );
     await this.assertProjectRead(input.actorId, project, input.correlationId);
-    await this.assertExecutionAccess(input.actorId, project, input.correlationId);
-    const action = await this.dependencies.execution.findNextAction(input.actionId);
+    await this.assertExecutionAccess(
+      input.actorId,
+      project,
+      input.correlationId,
+    );
+    const action = await this.dependencies.execution.findNextAction(
+      input.actionId,
+    );
     if (!action || action.projectId !== project.id)
       throw new ResourceNotFoundError("PROJECT_NOT_FOUND");
-    if (action.version !== input.expectedVersion) throw new ProjectVersionConflictError();
+    if (action.version !== input.expectedVersion)
+      throw new ProjectVersionConflictError();
     reorderNextAction({
       actions: await this.dependencies.execution.listNextActions(project.id),
       actionId: action.id,
@@ -934,13 +1041,18 @@ export class ProjectService {
       action,
       position: input.position,
       expectedVersion: input.expectedVersion,
-      auditEvent: this.auditEventFor(project, input.actorId, input.correlationId,
-        "project.next_action_reordered.v1", {
+      auditEvent: this.auditEventFor(
+        project,
+        input.actorId,
+        input.correlationId,
+        "project.next_action_reordered.v1",
+        {
           actionId: action.id,
           workflowStatus: action.workflowStatus,
           previousPosition: action.position,
           position: input.position,
-        }),
+        },
+      ),
     });
     if (!result) throw new ProjectVersionConflictError();
     return result;
@@ -957,6 +1069,121 @@ export class ProjectService {
     );
     await this.assertProjectRead(input.actorId, project, input.correlationId);
     return this.dependencies.execution.listNextActions(project.id);
+  }
+  async listMyWork(input: {
+    actorId: string;
+    organizationId: string;
+    correlationId: string;
+  }): Promise<readonly ProjectWorkItem[]> {
+    await this.assertMember(input.actorId, input.organizationId);
+    const workspaces = await this.dependencies.tenancy.listWorkspaces({
+      actorId: input.actorId,
+      organizationId: input.organizationId,
+    });
+    const teamIds = (
+      await Promise.all(
+        workspaces.map((workspace) =>
+          this.dependencies.tenancy.listTeams({
+            organizationId: input.organizationId,
+            workspaceId: workspace.id,
+          }),
+        ),
+      )
+    )
+      .flat()
+      .filter((team) => team.memberActorIds.includes(input.actorId))
+      .map((team) => team.id);
+    const candidates = await this.dependencies.execution.listMyWorkCandidates({
+      organizationId: input.organizationId,
+      actorId: input.actorId,
+      teamIds,
+    });
+    const visible: ProjectWorkItem[] = [];
+    const projectCache = new Map<string, Project | null>();
+    for (const candidate of candidates) {
+      let project = projectCache.get(candidate.projectId);
+      if (project === undefined) {
+        project = await this.dependencies.projects.findById(
+          candidate.projectId,
+        );
+        projectCache.set(candidate.projectId, project);
+      }
+      if (
+        !project ||
+        project.organizationId !== input.organizationId ||
+        project.status === "completed" ||
+        project.status === "cancelled" ||
+        project.status === "archived"
+      )
+        continue;
+      if (
+        !(await this.dependencies.tenancy.findWorkspaceRole({
+          actorId: input.actorId,
+          workspaceId: project.workspaceId,
+        }))
+      )
+        continue;
+      try {
+        await this.assertProjectRead(
+          input.actorId,
+          project,
+          input.correlationId,
+        );
+      } catch (error) {
+        if (error instanceof AccessDeniedError) continue;
+        throw error;
+      }
+      const action = await this.dependencies.execution.findNextAction(
+        candidate.actionId,
+      );
+      if (
+        !action ||
+        action.projectId !== project.id ||
+        action.workflowStatus === "done" ||
+        action.workflowStatus === "cancelled"
+      )
+        continue;
+      const kinds: ProjectWorkKind[] = [];
+      if (action.ownerActorId === input.actorId) kinds.push("owned");
+      if (
+        action.workflowStatus === "in_review" &&
+        action.reviewerActorId === input.actorId
+      )
+        kinds.push("review");
+      if (
+        action.workflowStatus === "to_do" &&
+        action.ownerActorId === null &&
+        action.executorTeamId &&
+        teamIds.includes(action.executorTeamId)
+      )
+        kinds.push("team_inbox");
+      if (
+        action.blockedReason !== null &&
+        action.unblockResponsibleActorId === input.actorId
+      )
+        kinds.push("unblock");
+      if (
+        candidate.collaborator &&
+        (
+          await this.dependencies.execution.listNextActionCollaborators(
+            action.id,
+          )
+        ).includes(input.actorId)
+      )
+        kinds.push("collaborator");
+      if (kinds.length > 0) visible.push({ action, kinds });
+    }
+    return visible.sort(
+      (a, b) =>
+        a.action.projectId.localeCompare(b.action.projectId) ||
+        ["to_do", "in_progress", "in_review", "done", "cancelled"].indexOf(
+          a.action.workflowStatus,
+        ) -
+          ["to_do", "in_progress", "in_review", "done", "cancelled"].indexOf(
+            b.action.workflowStatus,
+          ) ||
+        a.action.position - b.action.position,
+    );
   }
   async addRisk(input: {
     actorId: string;
@@ -1734,11 +1961,17 @@ export class ProjectService {
     teamId: string,
     project: Project,
   ): Promise<void> {
-    await this.assertProjectParticipant(actorId, project.organizationId, project.workspaceId);
-    const team = (await this.dependencies.tenancy.listTeams({
-      organizationId: project.organizationId,
-      workspaceId: project.workspaceId,
-    })).find((item) => item.id === teamId);
+    await this.assertProjectParticipant(
+      actorId,
+      project.organizationId,
+      project.workspaceId,
+    );
+    const team = (
+      await this.dependencies.tenancy.listTeams({
+        organizationId: project.organizationId,
+        workspaceId: project.workspaceId,
+      })
+    ).find((item) => item.id === teamId);
     if (!team || !team.memberActorIds.includes(actorId))
       throw new AccessDeniedError("workspace:manage");
   }
