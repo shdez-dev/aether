@@ -87,6 +87,8 @@ import {
   AbstainFromEvaluationReviewRequestSchema,
   ReassignEvaluationReviewRequestSchema,
   EscalateEvaluationReviewAbstentionRequestSchema,
+  DeclareEvaluationConflictRequestSchema,
+  ResolveEvaluationConflictRequestSchema,
   AuditHistoryQuerySchema,
   AddProjectMilestoneRequestSchema,
   RegisterProjectRiskRequestSchema,
@@ -2114,6 +2116,74 @@ export async function buildServer(input: {
           statusCode: 200,
           body: toEvaluationReviewerAssignmentResponse(
             await input.evaluations.escalateReviewAbstention({
+              actorId: session.actorId,
+              correlationId: correlationId(reply),
+              ...params,
+              ...body,
+            }),
+          ),
+        }),
+      });
+    },
+  );
+  app.post(
+    "/v1/evaluation-review-assignments/:assignmentId/conflicts",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      const params = z
+        .object({ assignmentId: z.string().uuid() })
+        .parse(request.params);
+      const body = DeclareEvaluationConflictRequestSchema.parse(request.body);
+      return respondIdempotently({
+        request,
+        reply,
+        store: input.idempotency,
+        actorId: session.actorId,
+        operation: `evaluation-review-assignment.conflict:${params.assignmentId}`,
+        requestPayload: { params, body },
+        execute: async () => ({
+          statusCode: 201,
+          body: toEvaluationConflictResponse(
+            await input.evaluations.declareConflict({
+              actorId: session.actorId,
+              correlationId: correlationId(reply),
+              ...params,
+              ...body,
+            }),
+          ),
+        }),
+      });
+    },
+  );
+  app.post(
+    "/v1/evaluation-conflicts/:conflictId/resolutions",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      const params = z
+        .object({ conflictId: z.string().uuid() })
+        .parse(request.params);
+      const body = ResolveEvaluationConflictRequestSchema.parse(request.body);
+      return respondIdempotently({
+        request,
+        reply,
+        store: input.idempotency,
+        actorId: session.actorId,
+        operation: `evaluation-conflict.resolve:${params.conflictId}`,
+        requestPayload: { params, body },
+        execute: async () => ({
+          statusCode: 200,
+          body: toEvaluationConflictResponse(
+            await input.evaluations.resolveConflict({
               actorId: session.actorId,
               correlationId: correlationId(reply),
               ...params,
@@ -4828,6 +4898,18 @@ function toEvaluationDraftResponse(
   draft: { updatedAt: Date } & Record<string, unknown>,
 ) {
   return { ...draft, updatedAt: draft.updatedAt.toISOString() };
+}
+function toEvaluationConflictResponse(
+  conflict: { declaredAt: Date; resolvedAt: Date | null } & Record<
+    string,
+    unknown
+  >,
+) {
+  return {
+    ...conflict,
+    declaredAt: conflict.declaredAt.toISOString(),
+    resolvedAt: conflict.resolvedAt?.toISOString() ?? null,
+  };
 }
 function toTriageResponse(
   triage: { assessedAt: Date } & Record<string, unknown>,

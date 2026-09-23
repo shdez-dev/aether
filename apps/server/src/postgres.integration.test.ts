@@ -2642,7 +2642,7 @@ describe.sequential("PostgreSQL integration", () => {
       expect(
         concurrentPublications.filter((result) => result.status === "rejected"),
       ).toHaveLength(1);
-      await evaluationService.assignReviewer({
+      const reviewerAssignment = await evaluationService.assignReviewer({
         actorId: owner,
         organizationId: organization.id,
         initiativeId: draft.id,
@@ -2722,6 +2722,43 @@ describe.sequential("PostgreSQL integration", () => {
           )
         ).rowCount,
       ).toBe(0);
+      const conflict = await evaluationService.declareConflict({
+        actorId: "reviewer@example.test",
+        organizationId: organization.id,
+        assignmentId: reviewerAssignment.id,
+        reason: "Participé en el diseño de la alternativa evaluada.",
+        correlationId: randomUUID(),
+      });
+      await expect(
+        evaluationService.review({
+          actorId: "reviewer@example.test",
+          organizationId: organization.id,
+          initiativeId: draft.id,
+          standardId: standard.id,
+          expectedVersion: presented.version,
+          correlationId: randomUUID(),
+          results: [
+            {
+              criterionId: standard.criteria[0]!.id,
+              assessment: "met",
+              evidence: ["Indicador confirmado."],
+            },
+          ],
+        }),
+      ).rejects.toMatchObject({ code: "EVALUATION_CONFLICT_UNRESOLVED" });
+      await expect(
+        pool.query(
+          `UPDATE initiative_evaluation_conflicts SET reason = 'No permitido' WHERE id = $1`,
+          [conflict.id],
+        ),
+      ).rejects.toThrow("evaluation conflict declaration is immutable");
+      await evaluationService.resolveConflict({
+        actorId: owner,
+        organizationId: organization.id,
+        conflictId: conflict.id,
+        resolution: "El owner revisó el antecedente y autorizó continuar.",
+        correlationId: randomUUID(),
+      });
       const evaluation = await evaluationService.review({
         actorId: "reviewer@example.test",
         organizationId: organization.id,

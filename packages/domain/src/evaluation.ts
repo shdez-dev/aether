@@ -71,6 +71,19 @@ export type EvaluationReviewerAssignment = Readonly<{
   statusChangedByActorId: string;
   reason: string | null;
 }>;
+export type EvaluationConflict = Readonly<{
+  id: string;
+  organizationId: string;
+  workspaceId: string;
+  initiativeId: string;
+  assignmentId: string;
+  declaredByActorId: string;
+  reason: string;
+  declaredAt: Date;
+  resolvedByActorId: string | null;
+  resolution: string | null;
+  resolvedAt: Date | null;
+}>;
 export type InitiativeEvaluation = Readonly<{
   id: string;
   organizationId: string;
@@ -333,6 +346,9 @@ export class EvaluationDomainError extends Error {
       | "EVALUATION_DRAFT_STANDARD_CHANGED"
       | "EVALUATION_DRAFT_MIGRATION_INVALID"
       | "EVALUATION_DRAFT_EXISTS"
+      | "EVALUATION_CONFLICT_ALREADY_DECLARED"
+      | "EVALUATION_CONFLICT_NOT_FOUND"
+      | "EVALUATION_CONFLICT_UNRESOLVED"
       | "EVALUATION_ASSIGNMENT_NOT_ABSTAINED"
       | "RETURNED_DECISION_REQUIRES_NEXT_REVIEW"
       | "NEXT_REVIEW_ONLY_FOR_RETURNED_DECISION"

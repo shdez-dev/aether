@@ -103,6 +103,14 @@ export const EscalateEvaluationReviewAbstentionRequestSchema = z.object({
   organizationId: UuidSchema,
   reason: NonEmptyTextSchema.max(2_000),
 });
+export const DeclareEvaluationConflictRequestSchema = z.object({
+  organizationId: UuidSchema,
+  reason: NonEmptyTextSchema.max(2_000),
+});
+export const ResolveEvaluationConflictRequestSchema = z.object({
+  organizationId: UuidSchema,
+  resolution: NonEmptyTextSchema.max(2_000),
+});
 
 export const DecisionConditionInputSchema = z.object({
   description: NonEmptyTextSchema.max(2_000),
@@ -677,6 +685,19 @@ export const EvaluationReviewerAssignmentResponseSchema = z.object({
   statusChangedAt: z.string().datetime(),
   statusChangedByActorId: z.string(),
   reason: z.string().nullable(),
+});
+export const EvaluationConflictResponseSchema = z.object({
+  id: UuidSchema,
+  organizationId: UuidSchema,
+  workspaceId: UuidSchema,
+  initiativeId: UuidSchema,
+  assignmentId: UuidSchema,
+  declaredByActorId: z.string(),
+  reason: z.string(),
+  declaredAt: z.string().datetime(),
+  resolvedByActorId: z.string().nullable(),
+  resolution: z.string().nullable(),
+  resolvedAt: z.string().datetime().nullable(),
 });
 export const InitiativeDecisionResponseSchema = z.object({
   id: UuidSchema,

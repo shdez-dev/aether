@@ -12,6 +12,7 @@ import {
   type InitiativeEvaluation,
   type EvaluationStandard,
   type EvaluationReviewerAssignment,
+  type EvaluationConflict,
   type InitiativeEvaluationDraft,
   type EvaluationResultInput,
 } from "@aether/domain";
@@ -47,6 +48,13 @@ export interface EvaluationStandardStore {
   }): Promise<void>;
 }
 export interface EvaluationStore {
+  createConflict(conflict: EvaluationConflict): Promise<void>;
+  findConflict(conflictId: string): Promise<EvaluationConflict | null>;
+  findOpenConflict(input: {
+    initiativeId: string;
+    actorId: string;
+  }): Promise<EvaluationConflict | null>;
+  resolveConflict(input: { conflict: EvaluationConflict }): Promise<boolean>;
   findActiveDraft(
     initiativeId: string,
   ): Promise<InitiativeEvaluationDraft | null>;
@@ -537,6 +545,109 @@ export class EvaluationService {
     );
     return updated;
   }
+  async declareConflict(input: {
+    actorId: string;
+    organizationId: string;
+    assignmentId: string;
+    reason: string;
+    correlationId: string;
+  }): Promise<EvaluationConflict> {
+    const assignment = await this.requireReviewerAssignment(
+      input.assignmentId,
+      input.organizationId,
+    );
+    if (
+      assignment.status !== "assigned" ||
+      assignment.assignedActorId !== input.actorId
+    )
+      throw new EvaluationDomainError("EVALUATION_REVIEWER_NOT_ASSIGNED");
+    await this.assertOrganizationManager(input.actorId, input.organizationId);
+    const initiative = await this.requireInitiative(
+      assignment.initiativeId,
+      input.organizationId,
+    );
+    await assertWorkspaceWritable(
+      this.dependencies.tenancy,
+      initiative.workspaceId,
+    );
+    if (
+      await this.dependencies.evaluations.findOpenConflict({
+        initiativeId: initiative.id,
+        actorId: input.actorId,
+      })
+    )
+      throw new EvaluationDomainError("EVALUATION_CONFLICT_ALREADY_DECLARED");
+    const conflict: EvaluationConflict = {
+      id: this.dependencies.ids.next(),
+      organizationId: initiative.organizationId,
+      workspaceId: initiative.workspaceId,
+      initiativeId: initiative.id,
+      assignmentId: assignment.id,
+      declaredByActorId: input.actorId,
+      reason: input.reason,
+      declaredAt: this.dependencies.clock.now(),
+      resolvedByActorId: null,
+      resolution: null,
+      resolvedAt: null,
+    };
+    await this.dependencies.evaluations.createConflict(conflict);
+    await this.record(
+      initiative,
+      input.actorId,
+      input.correlationId,
+      "initiative.evaluation_conflict_declared.v1",
+      initiative.status,
+      initiative.status,
+      { conflictId: conflict.id, assignmentId: assignment.id },
+    );
+    return conflict;
+  }
+  async resolveConflict(input: {
+    actorId: string;
+    organizationId: string;
+    conflictId: string;
+    resolution: string;
+    correlationId: string;
+  }): Promise<EvaluationConflict> {
+    await this.assertOwner(input.actorId, input.organizationId);
+    const conflict = await this.dependencies.evaluations.findConflict(
+      input.conflictId,
+    );
+    if (!conflict || conflict.organizationId !== input.organizationId)
+      throw new EvaluationDomainError("EVALUATION_CONFLICT_NOT_FOUND");
+    if (conflict.resolvedAt)
+      throw new EvaluationDomainError("EVALUATION_CONFLICT_NOT_FOUND");
+    const initiative = await this.requireInitiative(
+      conflict.initiativeId,
+      input.organizationId,
+    );
+    await assertWorkspaceWritable(
+      this.dependencies.tenancy,
+      initiative.workspaceId,
+    );
+    const resolved: EvaluationConflict = {
+      ...conflict,
+      resolvedByActorId: input.actorId,
+      resolution: input.resolution,
+      resolvedAt: this.dependencies.clock.now(),
+    };
+    if (
+      !(await this.dependencies.evaluations.resolveConflict({
+        conflict: resolved,
+      }))
+    )
+      throw new EvaluationDomainError("EVALUATION_CONFLICT_NOT_FOUND");
+    await this.record(
+      initiative,
+      input.actorId,
+      input.correlationId,
+      "initiative.evaluation_conflict_resolved.v1",
+      initiative.status,
+      initiative.status,
+      { conflictId: conflict.id },
+    );
+    return resolved;
+  }
   async reassignReview(input: {
     actorId: string;
     organizationId: string;
@@ -742,6 +853,13 @@ export class EvaluationService {
       );
     if (!assignment || assignment.assignedActorId !== input.actorId)
       throw new EvaluationDomainError("EVALUATION_REVIEWER_NOT_ASSIGNED");
+    if (
+      await this.dependencies.evaluations.findOpenConflict({
+        initiativeId: initiative.id,
+        actorId: input.actorId,
+      })
+    )
+      throw new EvaluationDomainError("EVALUATION_CONFLICT_UNRESOLVED");
     const activeDraft = await this.dependencies.evaluations.findActiveDraft(
       initiative.id,
     );

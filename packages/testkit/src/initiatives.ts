@@ -188,6 +188,43 @@ export class InMemoryEvaluationStandardStore implements EvaluationStandardStore 
 }
 
 export class InMemoryEvaluationStore implements EvaluationStore {
+  readonly conflicts = new Map<
+    string,
+    import("@aether/domain").EvaluationConflict
+  >();
+  async createConflict(
+    conflict: import("@aether/domain").EvaluationConflict,
+  ): Promise<void> {
+    if (
+      await this.findOpenConflict({
+        initiativeId: conflict.initiativeId,
+        actorId: conflict.declaredByActorId,
+      })
+    )
+      throw new Error("Open evaluation conflict already exists");
+    this.conflicts.set(conflict.id, conflict);
+  }
+  async findConflict(conflictId: string) {
+    return this.conflicts.get(conflictId) ?? null;
+  }
+  async findOpenConflict(input: { initiativeId: string; actorId: string }) {
+    return (
+      [...this.conflicts.values()].find(
+        (conflict) =>
+          conflict.initiativeId === input.initiativeId &&
+          conflict.declaredByActorId === input.actorId &&
+          conflict.resolvedAt === null,
+      ) ?? null
+    );
+  }
+  async resolveConflict(input: {
+    conflict: import("@aether/domain").EvaluationConflict;
+  }) {
+    const conflict = this.conflicts.get(input.conflict.id);
+    if (!conflict || conflict.resolvedAt) return false;
+    this.conflicts.set(input.conflict.id, input.conflict);
+    return true;
+  }
   readonly drafts = new Map<
     string,
     import("@aether/domain").InitiativeEvaluationDraft

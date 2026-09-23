@@ -1430,6 +1430,60 @@ paths:
               schema:
                 { $ref: "#/components/schemas/EvaluationReviewerAssignment" }
         default: { $ref: "#/components/responses/Problem" }
+  /v1/evaluation-review-assignments/{assignmentId}/conflicts:
+    post:
+      tags: [Initiatives]
+      operationId: declareEvaluationConflict
+      summary: Declarar un conflicto de interés del revisor asignado
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: assignmentId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              { $ref: "#/components/schemas/DeclareEvaluationConflictRequest" }
+      responses:
+        "201":
+          description: Conflicto declarado y pendiente de resolución.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EvaluationConflict" }
+        default: { $ref: "#/components/responses/Problem" }
+  /v1/evaluation-conflicts/{conflictId}/resolutions:
+    post:
+      tags: [Initiatives]
+      operationId: resolveEvaluationConflict
+      summary: Resolver un conflicto de interés de evaluación
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: conflictId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              { $ref: "#/components/schemas/ResolveEvaluationConflictRequest" }
+      responses:
+        "200":
+          description: Conflicto resuelto con fundamento.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EvaluationConflict" }
+        default: { $ref: "#/components/responses/Problem" }
   /v1/evaluations/{evaluationId}:
     get:
       tags: [Initiatives]
@@ -4018,6 +4072,18 @@ components:
       properties:
         organizationId: { type: string, format: uuid }
         reason: { type: string, minLength: 1, maxLength: 2000 }
+    DeclareEvaluationConflictRequest:
+      type: object
+      required: [organizationId, reason]
+      properties:
+        organizationId: { type: string, format: uuid }
+        reason: { type: string, minLength: 1, maxLength: 2000 }
+    ResolveEvaluationConflictRequest:
+      type: object
+      required: [organizationId, resolution]
+      properties:
+        organizationId: { type: string, format: uuid }
+        resolution: { type: string, minLength: 1, maxLength: 2000 }
     DecideInitiativeRequest:
       type: object
       additionalProperties: false
@@ -4561,6 +4627,34 @@ components:
         statusChangedAt: { type: string, format: date-time }
         statusChangedByActorId: { type: string }
         reason: { type: [string, "null"] }
+    EvaluationConflict:
+      type: object
+      required:
+        [
+          id,
+          organizationId,
+          workspaceId,
+          initiativeId,
+          assignmentId,
+          declaredByActorId,
+          reason,
+          declaredAt,
+          resolvedByActorId,
+          resolution,
+          resolvedAt,
+        ]
+      properties:
+        id: { type: string, format: uuid }
+        organizationId: { type: string, format: uuid }
+        workspaceId: { type: string, format: uuid }
+        initiativeId: { type: string, format: uuid }
+        assignmentId: { type: string, format: uuid }
+        declaredByActorId: { type: string }
+        reason: { type: string }
+        declaredAt: { type: string, format: date-time }
+        resolvedByActorId: { type: [string, "null"] }
+        resolution: { type: [string, "null"] }
+        resolvedAt: { type: [string, "null"], format: date-time }
     InitiativeDecision:
       type: object
       required:

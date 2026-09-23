@@ -87,6 +87,7 @@ import type {
   InitiativeTriage,
   InitiativeEvaluation,
   InitiativeEvaluationDraft,
+  EvaluationConflict,
   EvaluationReviewerAssignment,
   InitiativeDecision,
   DecisionCondition,
@@ -3228,6 +3229,63 @@ export class PostgresTriageStore implements TriageStore {
 
 export class PostgresEvaluationStore implements EvaluationStore {
   constructor(private readonly pool: Pool) {}
+  async createConflict(conflict: EvaluationConflict): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO initiative_evaluation_conflicts
+       (id, organization_id, workspace_id, initiative_id, assignment_id,
+        declared_by_actor_id, reason, declared_at, resolved_by_actor_id,
+        resolution, resolved_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [
+        conflict.id,
+        conflict.organizationId,
+        conflict.workspaceId,
+        conflict.initiativeId,
+        conflict.assignmentId,
+        conflict.declaredByActorId,
+        conflict.reason,
+        conflict.declaredAt,
+        conflict.resolvedByActorId,
+        conflict.resolution,
+        conflict.resolvedAt,
+      ],
+    );
+  }
+  async findConflict(conflictId: string): Promise<EvaluationConflict | null> {
+    const result = await this.pool.query<EvaluationConflictRow>(
+      "SELECT * FROM initiative_evaluation_conflicts WHERE id = $1",
+      [conflictId],
+    );
+    return result.rows[0] ? toEvaluationConflict(result.rows[0]) : null;
+  }
+  async findOpenConflict(input: {
+    initiativeId: string;
+    actorId: string;
+  }): Promise<EvaluationConflict | null> {
+    const result = await this.pool.query<EvaluationConflictRow>(
+      `SELECT * FROM initiative_evaluation_conflicts
+        WHERE initiative_id = $1 AND declared_by_actor_id = $2
+          AND resolved_at IS NULL`,
+      [input.initiativeId, input.actorId],
+    );
+    return result.rows[0] ? toEvaluationConflict(result.rows[0]) : null;
+  }
+  async resolveConflict(input: {
+    conflict: EvaluationConflict;
+  }): Promise<boolean> {
+    const result = await this.pool.query(
+      `UPDATE initiative_evaluation_conflicts
+          SET resolved_by_actor_id = $2, resolution = $3, resolved_at = $4
+        WHERE id = $1 AND resolved_at IS NULL`,
+      [
+        input.conflict.id,
+        input.conflict.resolvedByActorId,
+        input.conflict.resolution,
+        input.conflict.resolvedAt,
+      ],
+    );
+    return result.rowCount === 1;
+  }
   async findActiveDraft(
     initiativeId: string,
   ): Promise<InitiativeEvaluationDraft | null> {
@@ -5976,6 +6034,19 @@ type EvaluationReviewerAssignmentRow = {
   status_changed_by_actor_id: string;
   reason: string | null;
 };
+type EvaluationConflictRow = {
+  id: string;
+  organization_id: string;
+  workspace_id: string;
+  initiative_id: string;
+  assignment_id: string;
+  declared_by_actor_id: string;
+  reason: string;
+  declared_at: Date;
+  resolved_by_actor_id: string | null;
+  resolution: string | null;
+  resolved_at: Date | null;
+};
 type InitiativeDecisionRow = {
   id: string;
   organization_id: string;
@@ -6379,6 +6450,21 @@ function toEvaluationReviewerAssignment(
     statusChangedAt: row.status_changed_at,
     statusChangedByActorId: row.status_changed_by_actor_id,
     reason: row.reason,
+  };
+}
+function toEvaluationConflict(row: EvaluationConflictRow): EvaluationConflict {
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    workspaceId: row.workspace_id,
+    initiativeId: row.initiative_id,
+    assignmentId: row.assignment_id,
+    declaredByActorId: row.declared_by_actor_id,
+    reason: row.reason,
+    declaredAt: row.declared_at,
+    resolvedByActorId: row.resolved_by_actor_id,
+    resolution: row.resolution,
+    resolvedAt: row.resolved_at,
   };
 }
 function toInitiativeDecision(row: InitiativeDecisionRow): InitiativeDecision {

@@ -78,6 +78,12 @@ historial al reasignarla a otro revisor o al escalar la abstención. PostgreSQL
 mantiene una sola asignación activa por iniciativa y comprueba que conserva el
 alcance de la iniciativa.
 
+El revisor asignado puede declarar un conflicto de interés con fundamento. La
+declaración conserva la asignación, actor, alcance y fecha y no puede editarse.
+Mientras permanezca abierta, bloquea tanto la publicación directa como la de
+un borrador. Sólo un `owner` puede resolverla, siempre con un fundamento
+separado que queda auditado; la resolución no borra la declaración original.
+
 El revisor asignado registra cada resultado como valoración (`met`, `not_met` o
 `not_applicable`) y evidencia. Declarar `not_applicable` exige una evidencia no
 vacía que justifique la exclusión del denominador. La revisión crea una
