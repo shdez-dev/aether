@@ -160,6 +160,8 @@ export const EvaluationCriterionInputSchema = z.object({
   name: NonEmptyTextSchema.max(255),
   description: NonEmptyTextSchema.max(2_000),
   weight: z.number().positive().max(1_000),
+  dimension: NonEmptyTextSchema.max(255).default("general"),
+  isExclusionary: z.boolean().default(false),
 });
 export const PublishEvaluationStandardRequestSchema = z.object({
   organizationId: UuidSchema,

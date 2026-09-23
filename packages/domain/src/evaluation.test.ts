@@ -65,6 +65,59 @@ describe("Evaluation and decision", () => {
     ).toThrow(EvaluationDomainError);
   });
 
+  it("normaliza dimensiones y bloquea aprobar si un criterio excluyente no se cumple", () => {
+    const exclusionaryStandard = publishEvaluationStandard({
+      ...standard,
+      criteria: [
+        {
+          ...standard.criteria[0]!,
+          dimension: " seguridad ",
+          isExclusionary: true,
+        },
+      ],
+    });
+    expect(exclusionaryStandard.criteria[0]).toMatchObject({
+      dimension: "seguridad",
+      isExclusionary: true,
+    });
+
+    const evaluation = evaluateInitiative({
+      id: "00000000-0000-4000-8000-000000000034",
+      organizationId: standard.organizationId,
+      workspaceId: "00000000-0000-4000-8000-000000000031",
+      initiativeId: "00000000-0000-4000-8000-000000000032",
+      initiativeVersion: 1,
+      standard: exclusionaryStandard,
+      results: [
+        {
+          criterionId: exclusionaryStandard.criteria[0]!.id,
+          assessment: "not_met",
+          evidence: ["El control requerido no está implementado."],
+        },
+      ],
+      evaluatedByActorId: "reviewer",
+      evaluatedAt: now,
+    });
+
+    expect(evaluation.coverage.percentage).toBe(100);
+    expect(() =>
+      decideInitiative({
+        id: "00000000-0000-4000-8000-000000000035",
+        organizationId: standard.organizationId,
+        workspaceId: evaluation.workspaceId,
+        initiativeId: evaluation.initiativeId,
+        evaluationId: evaluation.id,
+        outcome: "approved",
+        rationale: "Cumple cobertura, pero no el control excluyente.",
+        evidence: ["Informe de revisión."],
+        decidedByActorId: "owner",
+        decidedAt: now,
+        nextReviewOn: null,
+        evaluation,
+      }),
+    ).toThrow(new EvaluationDomainError("EXCLUSIONARY_CRITERION_NOT_MET"));
+  });
+
   it("nunca informa 100 % cuando un estándar sin criterios llega desde datos heredados", () => {
     const evaluation = evaluateInitiative({
       id: "00000000-0000-4000-8000-000000000017",

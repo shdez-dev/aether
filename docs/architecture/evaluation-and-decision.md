@@ -26,7 +26,11 @@ transacción. Los comandos HTTP de publicación, adopción y triage aceptan
 
 ## Estándar y cobertura
 
-Un estándar publicado contiene criterios con código, descripción y peso. El
+Un estándar publicado contiene criterios con código, descripción, peso y una
+dimensión configurable. Cada criterio puede ser excluyente. Los clientes que
+no declaran esas propiedades conservan compatibilidad con `dimension: general`
+e `isExclusionary: false`; el snapshot de una versión publicada fija ambos
+valores. El
 `owner` puede activar uno como referencia organizacional, pero la evaluación
 recibe siempre `standardId` de forma explícita. Al revisar, Aether guarda el
 identificador, versión y snapshot de cada criterio junto a la cobertura:
@@ -46,8 +50,10 @@ La calidad ponderada es independiente: suma el peso de criterios `met` y lo
 divide por el peso de criterios aplicables ya evaluados (`met` o `not_met`).
 Se conserva junto a la evaluación y la decisión, pero no sustituye cobertura
 ni determina el resultado (`approved`, `rejected`, `returned` o `cancelled`).
-La madurez requiere una escala y un modelo propios; Aether no la infiere de la
-calidad para evitar presentar una conclusión inexistente.
+Una decisión `approved` exige además que todo criterio excluyente tenga
+resultado `met`, incluso con cobertura completa. La madurez requiere una escala
+y un modelo propios; Aether no la infiere de la calidad para evitar presentar
+una conclusión inexistente.
 
 Una publicación concurrente de la misma organización, nombre y versión queda
 protegida por unicidad en PostgreSQL: sólo una versión puede persistir. Adoptar

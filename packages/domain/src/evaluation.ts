@@ -4,6 +4,8 @@ export type EvaluationCriterion = Readonly<{
   name: string;
   description: string;
   weight: number;
+  dimension?: string;
+  isExclusionary?: boolean;
 }>;
 
 export type EvaluationStandard = Readonly<{
@@ -144,7 +146,15 @@ export function publishEvaluationStandard(
     throw new EvaluationDomainError("DUPLICATE_CRITERION_CODE");
   if (input.criteria.some((criterion) => criterion.weight <= 0))
     throw new EvaluationDomainError("INVALID_CRITERION_WEIGHT");
-  return { ...input, criteria: [...input.criteria], isActive: false };
+  return {
+    ...input,
+    criteria: input.criteria.map((criterion) => ({
+      ...criterion,
+      dimension: criterion.dimension?.trim() || "general",
+      isExclusionary: criterion.isExclusionary ?? false,
+    })),
+    isActive: false,
+  };
 }
 
 export function evaluateInitiative(input: {
@@ -265,6 +275,14 @@ export function decideInitiative(
     throw new EvaluationDomainError("EVALUATION_DOES_NOT_MATCH_INITIATIVE");
   if (input.evaluation.coverage.percentage !== 100)
     throw new EvaluationDomainError("EVALUATION_INCOMPLETE");
+  if (
+    input.outcome === "approved" &&
+    input.evaluation.criteria.some(
+      (result) =>
+        result.criterion.isExclusionary && result.assessment !== "met",
+    )
+  )
+    throw new EvaluationDomainError("EXCLUSIONARY_CRITERION_NOT_MET");
   return {
     ...input,
     standardId: input.evaluation.standardId,
@@ -354,6 +372,7 @@ export class EvaluationDomainError extends Error {
       | "NEXT_REVIEW_ONLY_FOR_RETURNED_DECISION"
       | "EVALUATION_DOES_NOT_MATCH_INITIATIVE"
       | "EVALUATION_INCOMPLETE"
+      | "EXCLUSIONARY_CRITERION_NOT_MET"
       | "DECISION_RATIONALE_REQUIRED"
       | "DECISION_CONDITION_NOT_PENDING"
       | "DECISION_CONDITIONS_REQUIRE_APPROVAL",

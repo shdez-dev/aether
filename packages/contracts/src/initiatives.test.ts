@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   AddProjectNextActionRequestSchema,
   CloseProjectRequestSchema,
+  PublishEvaluationStandardRequestSchema,
   TransitionProjectNextActionWorkflowRequestSchema,
 } from "./initiatives.js";
 import {
@@ -127,5 +128,28 @@ describe("CloseProjectRequestSchema", () => {
         objectiveAssessment: "not_assessed",
       }).success,
     ).toBe(false);
+  });
+});
+
+describe("PublishEvaluationStandardRequestSchema", () => {
+  it("defaults compatibility metadata for an evaluation criterion", () => {
+    const request = PublishEvaluationStandardRequestSchema.parse({
+      organizationId: "00000000-0000-4000-8000-000000000001",
+      name: "Estándar operativo",
+      version: 1,
+      criteria: [
+        {
+          id: "00000000-0000-4000-8000-000000000002",
+          code: "IMPACT",
+          name: "Impacto",
+          description: "Mide el impacto esperado.",
+          weight: 1,
+        },
+      ],
+    });
+    expect(request.criteria[0]).toMatchObject({
+      dimension: "general",
+      isExclusionary: false,
+    });
   });
 });
