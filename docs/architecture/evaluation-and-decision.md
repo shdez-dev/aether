@@ -52,8 +52,12 @@ Se conserva junto a la evaluación y la decisión, pero no sustituye cobertura
 ni determina el resultado (`approved`, `rejected`, `returned` o `cancelled`).
 Una decisión `approved` exige además que todo criterio excluyente tenga
 resultado `met`, incluso con cobertura completa. La madurez requiere una escala
-y un modelo propios; Aether no la infiere de la calidad para evitar presentar
-una conclusión inexistente.
+y un modelo propios: cada estándar puede publicar niveles con código, nombre y
+porcentaje mínimo de calidad. La evaluación sólo asigna el nivel más alto cuyo
+umbral alcance cuando su cobertura es 100 %; sin escala o con evaluación
+incompleta devuelve `null`. La evaluación y la decisión conservan ese snapshot
+por separado de cobertura, calidad y outcome, sin inferir una conclusión
+inexistente.
 
 Una publicación concurrente de la misma organización, nombre y versión queda
 protegida por unicidad en PostgreSQL: sólo una versión puede persistir. Adoptar

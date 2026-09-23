@@ -203,6 +203,7 @@ describe("project conversion and execution", () => {
         percentage: 100,
       },
       quality: null,
+      maturity: null,
       decidedByActorId: "owner",
       decidedAt: new Date(),
       nextReviewOn: null,

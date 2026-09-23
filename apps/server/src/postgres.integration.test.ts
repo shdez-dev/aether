@@ -2588,6 +2588,13 @@ describe.sequential("PostgreSQL integration", () => {
         organizationId: organization.id,
         name: "Estándar inicial",
         version: 1,
+        maturityLevels: [
+          {
+            code: "validated",
+            name: "Validada",
+            minimumQualityPercentage: 75,
+          },
+        ],
         criteria: [
           {
             id: randomUUID(),
@@ -2820,6 +2827,11 @@ describe.sequential("PostgreSQL integration", () => {
       expect(persistedEvaluation).toMatchObject({
         standardId: standard.id,
         standardVersion: 1,
+        maturity: {
+          levelCode: "validated",
+          levelName: "Validada",
+          minimumQualityPercentage: 75,
+        },
         criteria: [
           expect.objectContaining({ criterion: standard.criteria[0] }),
         ],
@@ -2920,6 +2932,23 @@ describe.sequential("PostgreSQL integration", () => {
                 name: "Criterio alterado",
                 description: "No debe reescribir la evaluación existente.",
                 weight: 1,
+              },
+            ]),
+            standard.id,
+          ],
+        ),
+      ).rejects.toThrow(
+        "an evaluation standard cannot change after it is applied",
+      );
+      await expect(
+        pool.query(
+          "UPDATE evaluation_standards SET maturity_levels = $1::jsonb WHERE id = $2",
+          [
+            JSON.stringify([
+              {
+                code: "altered",
+                name: "No debe reescribir la escala aplicada.",
+                minimumQualityPercentage: 100,
               },
             ]),
             standard.id,
@@ -3040,20 +3069,26 @@ describe.sequential("PostgreSQL integration", () => {
           [owner, evaluation.id],
         ),
       ).rejects.toThrow("an evaluation with a decision cannot be annulled");
-      const persistedQuality = await pool.query<{
+      const persistedMetrics = await pool.query<{
         evaluation_quality: typeof evaluation.quality;
         decision_quality: typeof decision.quality;
+        evaluation_maturity: typeof evaluation.maturity;
+        decision_maturity: typeof decision.maturity;
       }>(
         `SELECT evaluation.quality AS evaluation_quality,
-                decision.quality AS decision_quality
+                decision.quality AS decision_quality,
+                evaluation.maturity AS evaluation_maturity,
+                decision.maturity AS decision_maturity
            FROM initiative_evaluations evaluation
            JOIN initiative_decisions decision ON decision.evaluation_id = evaluation.id
           WHERE decision.id = $1`,
         [decision.id],
       );
-      expect(persistedQuality.rows[0]).toEqual({
+      expect(persistedMetrics.rows[0]).toEqual({
         evaluation_quality: evaluation.quality,
         decision_quality: decision.quality,
+        evaluation_maturity: evaluation.maturity,
+        decision_maturity: decision.maturity,
       });
       await expect(
         pool.query(

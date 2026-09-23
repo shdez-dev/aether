@@ -3261,6 +3261,7 @@ describe("Evaluation annulment endpoint", () => {
               percentage: 0,
             },
             quality: null,
+            maturity: null,
             evaluatedByActorId: "reviewer",
             evaluatedAt: new Date("2026-09-19T11:00:00.000Z"),
             annulledByActorId: input.actorId,

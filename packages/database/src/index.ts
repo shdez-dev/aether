@@ -3031,14 +3031,15 @@ export class PostgresEvaluationStandardStore implements EvaluationStandardStore 
   constructor(private readonly pool: Pool) {}
   async create(standard: EvaluationStandard): Promise<void> {
     await this.pool.query(
-      `INSERT INTO evaluation_standards (id, organization_id, name, version, criteria, is_active, published_at, published_by_actor_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      `INSERT INTO evaluation_standards (id, organization_id, name, version, criteria, maturity_levels, is_active, published_at, published_by_actor_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
       [
         standard.id,
         standard.organizationId,
         standard.name,
         standard.version,
         asJson(standard.criteria),
+        asJson(standard.maturityLevels ?? []),
         standard.isActive,
         standard.publishedAt,
         standard.publishedByActorId,
@@ -3047,7 +3048,7 @@ export class PostgresEvaluationStandardStore implements EvaluationStandardStore 
   }
   async findById(standardId: string): Promise<EvaluationStandard | null> {
     const result = await this.pool.query<EvaluationStandardRow>(
-      `SELECT id, organization_id, name, version, criteria, is_active, published_at, published_by_actor_id
+      `SELECT id, organization_id, name, version, criteria, maturity_levels, is_active, published_at, published_by_actor_id
        FROM evaluation_standards WHERE id = $1`,
       [standardId],
     );
@@ -3057,7 +3058,7 @@ export class PostgresEvaluationStandardStore implements EvaluationStandardStore 
     organizationId: string;
   }): Promise<readonly EvaluationStandard[]> {
     const result = await this.pool.query<EvaluationStandardRow>(
-      `SELECT id, organization_id, name, version, criteria, is_active, published_at, published_by_actor_id FROM evaluation_standards WHERE organization_id = $1 ORDER BY is_active DESC, name, version DESC, id ASC`,
+      `SELECT id, organization_id, name, version, criteria, maturity_levels, is_active, published_at, published_by_actor_id FROM evaluation_standards WHERE organization_id = $1 ORDER BY is_active DESC, name, version DESC, id ASC`,
       [input.organizationId],
     );
     return result.rows.map(toEvaluationStandard);
@@ -3497,7 +3498,7 @@ export class PostgresEvaluationStore implements EvaluationStore {
     evaluationId: string,
   ): Promise<InitiativeEvaluation | null> {
     const result = await this.pool.query<InitiativeEvaluationRow>(
-      `SELECT id, organization_id, workspace_id, initiative_id, initiative_version, standard_id, standard_version, criteria, coverage, quality, evaluated_by_actor_id, evaluated_at, annulled_by_actor_id, annulled_at, annulment_reason FROM initiative_evaluations WHERE id = $1`,
+      `SELECT id, organization_id, workspace_id, initiative_id, initiative_version, standard_id, standard_version, criteria, coverage, quality, maturity, evaluated_by_actor_id, evaluated_at, annulled_by_actor_id, annulled_at, annulment_reason FROM initiative_evaluations WHERE id = $1`,
       [evaluationId],
     );
     return result.rows[0] ? toInitiativeEvaluation(result.rows[0]) : null;
@@ -3539,7 +3540,7 @@ export class PostgresEvaluationStore implements EvaluationStore {
   }
   async findDecision(decisionId: string): Promise<InitiativeDecision | null> {
     const result = await this.pool.query<InitiativeDecisionRow>(
-      `SELECT id, organization_id, workspace_id, initiative_id, evaluation_id, outcome, rationale, evidence, standard_id, standard_version, coverage, quality, decided_by_actor_id, decided_at, next_review_on
+      `SELECT id, organization_id, workspace_id, initiative_id, evaluation_id, outcome, rationale, evidence, standard_id, standard_version, coverage, quality, maturity, decided_by_actor_id, decided_at, next_review_on
        FROM initiative_decisions WHERE id = $1`,
       [decisionId],
     );
@@ -3659,8 +3660,8 @@ async function insertInitiativeEvaluation(
   evaluation: InitiativeEvaluation,
 ): Promise<void> {
   await client.query(
-    `INSERT INTO initiative_evaluations (id, organization_id, workspace_id, initiative_id, initiative_version, standard_id, standard_version, criteria, coverage, quality, evaluated_by_actor_id, evaluated_at, annulled_by_actor_id, annulled_at, annulment_reason)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+    `INSERT INTO initiative_evaluations (id, organization_id, workspace_id, initiative_id, initiative_version, standard_id, standard_version, criteria, coverage, quality, maturity, evaluated_by_actor_id, evaluated_at, annulled_by_actor_id, annulled_at, annulment_reason)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
     [
       evaluation.id,
       evaluation.organizationId,
@@ -3672,6 +3673,7 @@ async function insertInitiativeEvaluation(
       asJson(evaluation.criteria),
       asJson(evaluation.coverage),
       asJson(evaluation.quality),
+      asJson(evaluation.maturity),
       evaluation.evaluatedByActorId,
       evaluation.evaluatedAt,
       evaluation.annulledByActorId,
@@ -3686,8 +3688,8 @@ async function insertInitiativeDecision(
   decision: InitiativeDecision,
 ): Promise<void> {
   await client.query(
-    `INSERT INTO initiative_decisions (id, organization_id, workspace_id, initiative_id, evaluation_id, outcome, rationale, evidence, standard_id, standard_version, coverage, quality, decided_by_actor_id, decided_at, next_review_on)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+    `INSERT INTO initiative_decisions (id, organization_id, workspace_id, initiative_id, evaluation_id, outcome, rationale, evidence, standard_id, standard_version, coverage, quality, maturity, decided_by_actor_id, decided_at, next_review_on)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
     [
       decision.id,
       decision.organizationId,
@@ -3701,6 +3703,7 @@ async function insertInitiativeDecision(
       decision.standardVersion,
       asJson(decision.coverage),
       asJson(decision.quality),
+      asJson(decision.maturity),
       decision.decidedByActorId,
       decision.decidedAt,
       decision.nextReviewOn,
@@ -5936,6 +5939,7 @@ type EvaluationStandardRow = {
   name: string;
   version: number;
   criteria: EvaluationStandard["criteria"];
+  maturity_levels: NonNullable<EvaluationStandard["maturityLevels"]>;
   is_active: boolean;
   published_at: Date;
   published_by_actor_id: string;
@@ -6000,6 +6004,7 @@ type InitiativeEvaluationRow = {
   criteria: InitiativeEvaluation["criteria"];
   coverage: InitiativeEvaluation["coverage"];
   quality: InitiativeEvaluation["quality"];
+  maturity: InitiativeEvaluation["maturity"];
   evaluated_by_actor_id: string;
   evaluated_at: Date;
   annulled_by_actor_id: string | null;
@@ -6060,6 +6065,7 @@ type InitiativeDecisionRow = {
   standard_version: number;
   coverage: InitiativeDecision["coverage"];
   quality: InitiativeDecision["quality"];
+  maturity: InitiativeDecision["maturity"];
   decided_by_actor_id: string;
   decided_at: Date;
   next_review_on: string | null;
@@ -6264,6 +6270,7 @@ function toEvaluationStandard(row: EvaluationStandardRow): EvaluationStandard {
     name: row.name,
     version: row.version,
     criteria: row.criteria,
+    maturityLevels: row.maturity_levels ?? [],
     isActive: row.is_active,
     publishedAt: row.published_at,
     publishedByActorId: row.published_by_actor_id,
@@ -6409,6 +6416,7 @@ function toInitiativeEvaluation(
     criteria: row.criteria,
     coverage: row.coverage,
     quality: row.quality,
+    maturity: row.maturity,
     evaluatedByActorId: row.evaluated_by_actor_id,
     evaluatedAt: row.evaluated_at,
     annulledByActorId: row.annulled_by_actor_id,
@@ -6481,6 +6489,7 @@ function toInitiativeDecision(row: InitiativeDecisionRow): InitiativeDecision {
     standardVersion: row.standard_version,
     coverage: row.coverage,
     quality: row.quality,
+    maturity: row.maturity,
     decidedByActorId: row.decided_by_actor_id,
     decidedAt: row.decided_at,
     nextReviewOn: row.next_review_on,

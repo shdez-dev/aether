@@ -4134,6 +4134,14 @@ components:
         dimension:
           { type: string, minLength: 1, maxLength: 255, default: general }
         isExclusionary: { type: boolean, default: false }
+    EvaluationMaturityLevel:
+      type: object
+      additionalProperties: false
+      required: [code, name, minimumQualityPercentage]
+      properties:
+        code: { type: string, minLength: 1, maxLength: 64 }
+        name: { type: string, minLength: 1, maxLength: 255 }
+        minimumQualityPercentage: { type: integer, minimum: 0, maximum: 100 }
     PublishEvaluationStandardRequest:
       type: object
       additionalProperties: false
@@ -4148,6 +4156,13 @@ components:
             minItems: 1,
             maxItems: 100,
             items: { $ref: "#/components/schemas/EvaluationCriterion" },
+          }
+        maturityLevels:
+          {
+            type: array,
+            maxItems: 10,
+            default: [],
+            items: { $ref: "#/components/schemas/EvaluationMaturityLevel" },
           }
     ActivateEvaluationStandardRequest:
       type: object
@@ -4417,6 +4432,7 @@ components:
           name,
           version,
           criteria,
+          maturityLevels,
           isActive,
           publishedAt,
           publishedByActorId,
@@ -4493,6 +4509,11 @@ components:
             type: array,
             items: { $ref: "#/components/schemas/EvaluationCriterion" },
           }
+        maturityLevels:
+          {
+            type: array,
+            items: { $ref: "#/components/schemas/EvaluationMaturityLevel" },
+          }
         isActive: { type: boolean }
         publishedAt: { type: string, format: date-time }
         publishedByActorId: { type: string }
@@ -4542,6 +4563,7 @@ components:
           standardVersion,
           criteria,
           coverage,
+          maturity,
           evaluatedByActorId,
           evaluatedAt,
           annulledByActorId,
@@ -4593,6 +4615,14 @@ components:
             assessedWeight: { type: number, minimum: 0 }
             metWeight: { type: number, minimum: 0 }
             percentage: { type: integer, minimum: 0, maximum: 100 }
+        maturity:
+          type: [object, "null"]
+          required: [levelCode, levelName, minimumQualityPercentage]
+          properties:
+            levelCode: { type: string }
+            levelName: { type: string }
+            minimumQualityPercentage:
+              { type: integer, minimum: 0, maximum: 100 }
         evaluatedByActorId: { type: string }
         evaluatedAt: { type: string, format: date-time }
         annulledByActorId: { type: [string, "null"] }
@@ -4674,6 +4704,7 @@ components:
           standardVersion,
           coverage,
           quality,
+          maturity,
           decidedByActorId,
           decidedAt,
           nextReviewOn,
@@ -4715,6 +4746,14 @@ components:
             assessedWeight: { type: number, minimum: 0 }
             metWeight: { type: number, minimum: 0 }
             percentage: { type: integer, minimum: 0, maximum: 100 }
+        maturity:
+          type: [object, "null"]
+          required: [levelCode, levelName, minimumQualityPercentage]
+          properties:
+            levelCode: { type: string }
+            levelName: { type: string }
+            minimumQualityPercentage:
+              { type: integer, minimum: 0, maximum: 100 }
         decidedByActorId: { type: string }
         decidedAt: { type: string, format: date-time }
         nextReviewOn: { type: [string, "null"], format: date }

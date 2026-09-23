@@ -7,6 +7,7 @@ import {
   publishEvaluationStandard,
   transitionInitiative,
   type EvaluationCriterion,
+  type EvaluationMaturityLevel,
   type DecisionCondition,
   type InitiativeDecision,
   type InitiativeEvaluation,
@@ -139,6 +140,7 @@ export class EvaluationService {
     name: string;
     version: number;
     criteria: readonly EvaluationCriterion[];
+    maturityLevels?: readonly EvaluationMaturityLevel[];
   }): Promise<EvaluationStandard> {
     await this.assertOwner(input.actorId, input.organizationId);
     const standard = publishEvaluationStandard({
@@ -147,6 +149,7 @@ export class EvaluationService {
       name: input.name,
       version: input.version,
       criteria: input.criteria,
+      maturityLevels: input.maturityLevels ?? [],
       publishedAt: this.dependencies.clock.now(),
       publishedByActorId: input.actorId,
     });

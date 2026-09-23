@@ -7,6 +7,11 @@ export type EvaluationCriterion = Readonly<{
   dimension?: string;
   isExclusionary?: boolean;
 }>;
+export type EvaluationMaturityLevel = Readonly<{
+  code: string;
+  name: string;
+  minimumQualityPercentage: number;
+}>;
 
 export type EvaluationStandard = Readonly<{
   id: string;
@@ -14,6 +19,7 @@ export type EvaluationStandard = Readonly<{
   name: string;
   version: number;
   criteria: readonly EvaluationCriterion[];
+  maturityLevels?: readonly EvaluationMaturityLevel[];
   isActive: boolean;
   publishedAt: Date;
   publishedByActorId: string;
@@ -58,6 +64,11 @@ export type EvaluationQuality = Readonly<{
   metWeight: number;
   percentage: number;
 }>;
+export type EvaluationMaturity = Readonly<{
+  levelCode: string;
+  levelName: string;
+  minimumQualityPercentage: number;
+}>;
 export type EvaluationReviewerAssignmentStatus =
   "assigned" | "abstained" | "reassigned" | "escalated" | "completed";
 export type EvaluationReviewerAssignment = Readonly<{
@@ -97,6 +108,7 @@ export type InitiativeEvaluation = Readonly<{
   criteria: readonly EvaluationCriterionResult[];
   coverage: EvaluationCoverage;
   quality: EvaluationQuality | null;
+  maturity: EvaluationMaturity | null;
   evaluatedByActorId: string;
   evaluatedAt: Date;
   annulledByActorId: string | null;
@@ -118,6 +130,7 @@ export type InitiativeDecision = Readonly<{
   standardVersion: number;
   coverage: EvaluationCoverage;
   quality: EvaluationQuality | null;
+  maturity: EvaluationMaturity | null;
   decidedByActorId: string;
   decidedAt: Date;
   nextReviewOn: string | null;
@@ -146,6 +159,31 @@ export function publishEvaluationStandard(
     throw new EvaluationDomainError("DUPLICATE_CRITERION_CODE");
   if (input.criteria.some((criterion) => criterion.weight <= 0))
     throw new EvaluationDomainError("INVALID_CRITERION_WEIGHT");
+  const maturityLevels = (input.maturityLevels ?? [])
+    .map((level) => ({
+      ...level,
+      code: level.code.trim(),
+      name: level.name.trim(),
+    }))
+    .sort(
+      (left, right) =>
+        left.minimumQualityPercentage - right.minimumQualityPercentage,
+    );
+  if (
+    new Set(maturityLevels.map((level) => level.code)).size !==
+      maturityLevels.length ||
+    new Set(maturityLevels.map((level) => level.minimumQualityPercentage))
+      .size !== maturityLevels.length ||
+    maturityLevels.some(
+      (level) =>
+        !level.code.trim() ||
+        !level.name.trim() ||
+        level.minimumQualityPercentage < 0 ||
+        level.minimumQualityPercentage > 100 ||
+        !Number.isInteger(level.minimumQualityPercentage),
+    )
+  )
+    throw new EvaluationDomainError("INVALID_MATURITY_SCALE");
   return {
     ...input,
     criteria: input.criteria.map((criterion) => ({
@@ -153,6 +191,7 @@ export function publishEvaluationStandard(
       dimension: criterion.dimension?.trim() || "general",
       isExclusionary: criterion.isExclusionary ?? false,
     })),
+    maturityLevels,
     isActive: false,
   };
 }
@@ -218,6 +257,29 @@ export function evaluateInitiative(input: {
   const metWeight = criteria
     .filter((criterion) => criterion.assessment === "met")
     .reduce((total, criterion) => total + criterion.criterion.weight, 0);
+  const coverage: EvaluationCoverage = {
+    totalCriteria,
+    applicableCriteria,
+    assessedCriteria,
+    notApplicableCriteria,
+    percentage:
+      applicableCriteria === 0
+        ? 0
+        : Math.round((assessedCriteria / applicableCriteria) * 100),
+  };
+  const quality: EvaluationQuality = {
+    applicableWeight,
+    assessedWeight,
+    metWeight,
+    percentage:
+      assessedWeight === 0 ? 0 : Math.round((metWeight / assessedWeight) * 100),
+  };
+  const maturityLevel =
+    coverage.percentage === 100
+      ? [...(input.standard.maturityLevels ?? [])]
+          .reverse()
+          .find((level) => quality.percentage >= level.minimumQualityPercentage)
+      : undefined;
   return {
     id: input.id,
     organizationId: input.organizationId,
@@ -227,25 +289,15 @@ export function evaluateInitiative(input: {
     standardId: input.standard.id,
     standardVersion: input.standard.version,
     criteria,
-    coverage: {
-      totalCriteria,
-      applicableCriteria,
-      assessedCriteria,
-      notApplicableCriteria,
-      percentage:
-        applicableCriteria === 0
-          ? 0
-          : Math.round((assessedCriteria / applicableCriteria) * 100),
-    },
-    quality: {
-      applicableWeight,
-      assessedWeight,
-      metWeight,
-      percentage:
-        assessedWeight === 0
-          ? 0
-          : Math.round((metWeight / assessedWeight) * 100),
-    },
+    coverage,
+    quality,
+    maturity: maturityLevel
+      ? {
+          levelCode: maturityLevel.code,
+          levelName: maturityLevel.name,
+          minimumQualityPercentage: maturityLevel.minimumQualityPercentage,
+        }
+      : null,
     evaluatedByActorId: input.evaluatedByActorId,
     evaluatedAt: input.evaluatedAt,
     annulledByActorId: null,
@@ -257,7 +309,7 @@ export function evaluateInitiative(input: {
 export function decideInitiative(
   input: Omit<
     InitiativeDecision,
-    "coverage" | "quality" | "standardId" | "standardVersion"
+    "coverage" | "quality" | "maturity" | "standardId" | "standardVersion"
   > & {
     evaluation: InitiativeEvaluation;
     conditions?: readonly DecisionCondition[];
@@ -289,6 +341,7 @@ export function decideInitiative(
     standardVersion: input.evaluation.standardVersion,
     coverage: input.evaluation.coverage,
     quality: input.evaluation.quality,
+    maturity: input.evaluation.maturity,
     conditions: input.conditions ?? [],
   };
 }
@@ -353,6 +406,7 @@ export class EvaluationDomainError extends Error {
       | "STANDARD_REQUIRES_CRITERIA"
       | "DUPLICATE_CRITERION_CODE"
       | "INVALID_CRITERION_WEIGHT"
+      | "INVALID_MATURITY_SCALE"
       | "INVALID_EVALUATION_CRITERIA"
       | "NOT_APPLICABLE_REQUIRES_JUSTIFICATION"
       | "EVALUATION_ALREADY_ANNULLED"

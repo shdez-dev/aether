@@ -163,11 +163,20 @@ export const EvaluationCriterionInputSchema = z.object({
   dimension: NonEmptyTextSchema.max(255).default("general"),
   isExclusionary: z.boolean().default(false),
 });
+export const EvaluationMaturityLevelInputSchema = z.object({
+  code: z.string().min(1).max(64),
+  name: NonEmptyTextSchema.max(255),
+  minimumQualityPercentage: z.number().int().min(0).max(100),
+});
 export const PublishEvaluationStandardRequestSchema = z.object({
   organizationId: UuidSchema,
   name: NonEmptyTextSchema.max(255),
   version: z.number().int().positive(),
   criteria: z.array(EvaluationCriterionInputSchema).min(1).max(100),
+  maturityLevels: z
+    .array(EvaluationMaturityLevelInputSchema)
+    .max(10)
+    .default([]),
 });
 export const TriageCriterionInputSchema = z.object({
   id: UuidSchema,
@@ -559,6 +568,7 @@ export const EvaluationStandardResponseSchema = z.object({
   nextMilestone: z.string().nullable(),
   version: z.number().int().positive(),
   criteria: z.array(EvaluationCriterionInputSchema),
+  maturityLevels: z.array(EvaluationMaturityLevelInputSchema),
   isActive: z.boolean(),
   publishedAt: z.string().datetime(),
   publishedByActorId: z.string(),
@@ -648,6 +658,13 @@ export const InitiativeEvaluationResponseSchema = z.object({
       percentage: z.number().int().min(0).max(100),
     })
     .nullable(),
+  maturity: z
+    .object({
+      levelCode: z.string(),
+      levelName: z.string(),
+      minimumQualityPercentage: z.number().int().min(0).max(100),
+    })
+    .nullable(),
   evaluatedByActorId: z.string(),
   evaluatedAt: z.string().datetime(),
   annulledByActorId: z.string().nullable(),
@@ -725,6 +742,13 @@ export const InitiativeDecisionResponseSchema = z.object({
       assessedWeight: z.number().nonnegative(),
       metWeight: z.number().nonnegative(),
       percentage: z.number().int().min(0).max(100),
+    })
+    .nullable(),
+  maturity: z
+    .object({
+      levelCode: z.string(),
+      levelName: z.string(),
+      minimumQualityPercentage: z.number().int().min(0).max(100),
     })
     .nullable(),
   decidedByActorId: z.string(),

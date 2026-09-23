@@ -118,6 +118,54 @@ describe("Evaluation and decision", () => {
     ).toThrow(new EvaluationDomainError("EXCLUSIONARY_CRITERION_NOT_MET"));
   });
 
+  it("deriva madurez únicamente desde una escala explícita y una cobertura completa", () => {
+    const maturityStandard = publishEvaluationStandard({
+      ...standard,
+      maturityLevels: [
+        {
+          code: "validated",
+          name: "Validada",
+          minimumQualityPercentage: 75,
+        },
+        {
+          code: "initial",
+          name: "Inicial",
+          minimumQualityPercentage: 0,
+        },
+      ],
+    });
+    const complete = evaluateInitiative({
+      id: "00000000-0000-4000-8000-000000000036",
+      organizationId: standard.organizationId,
+      workspaceId: "00000000-0000-4000-8000-000000000031",
+      initiativeId: "00000000-0000-4000-8000-000000000032",
+      initiativeVersion: 1,
+      standard: maturityStandard,
+      results: [
+        {
+          criterionId: maturityStandard.criteria[0]!.id,
+          assessment: "met",
+          evidence: ["El resultado satisface el estándar."],
+        },
+      ],
+      evaluatedByActorId: "reviewer",
+      evaluatedAt: now,
+    });
+    expect(complete.maturity).toEqual({
+      levelCode: "validated",
+      levelName: "Validada",
+      minimumQualityPercentage: 75,
+    });
+    expect(
+      evaluateInitiative({
+        ...complete,
+        id: "00000000-0000-4000-8000-000000000037",
+        standard: maturityStandard,
+        results: [],
+      }).maturity,
+    ).toBeNull();
+  });
+
   it("nunca informa 100 % cuando un estándar sin criterios llega desde datos heredados", () => {
     const evaluation = evaluateInitiative({
       id: "00000000-0000-4000-8000-000000000017",

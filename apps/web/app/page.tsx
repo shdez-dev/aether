@@ -916,6 +916,13 @@ export default function AetherPage() {
                         {evaluation.quality.assessedWeight} de peso evaluado)
                       </p>
                     ) : null}
+                    {evaluation.maturity ? (
+                      <p>
+                        Madurez: {evaluation.maturity.levelName} (desde{" "}
+                        {evaluation.maturity.minimumQualityPercentage}% de
+                        calidad)
+                      </p>
+                    ) : null}
                   </section>
                 ) : null}
                 {decision ? (
