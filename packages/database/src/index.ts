@@ -3227,6 +3227,89 @@ export class PostgresTriageStore implements TriageStore {
 
 export class PostgresEvaluationStore implements EvaluationStore {
   constructor(private readonly pool: Pool) {}
+  async commitReview(input: {
+    initiative: Initiative;
+    expectedVersion: number;
+    evaluation: InitiativeEvaluation;
+    assignment: EvaluationReviewerAssignment;
+    auditEvent: InitiativeAuditEvent;
+    event: DurableDomainEvent;
+  }): Promise<boolean> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      if (
+        !(await updateInitiativeForEvaluation(
+          client,
+          input.initiative,
+          input.expectedVersion,
+        ))
+      ) {
+        await client.query("ROLLBACK");
+        return false;
+      }
+      await insertInitiativeEvaluation(client, input.evaluation);
+      const assignment = await client.query(
+        `UPDATE initiative_evaluation_reviewer_assignments
+            SET status = 'completed', status_changed_at = $2,
+                status_changed_by_actor_id = $3, reason = NULL
+          WHERE id = $1 AND status = 'assigned' AND initiative_id = $4`,
+        [
+          input.assignment.id,
+          input.assignment.statusChangedAt,
+          input.assignment.statusChangedByActorId,
+          input.initiative.id,
+        ],
+      );
+      if (assignment.rowCount !== 1) {
+        await client.query("ROLLBACK");
+        return false;
+      }
+      await insertInitiativeAuditEvent(client, input.auditEvent);
+      await insertOutboxEvent(client, input.event);
+      await client.query("COMMIT");
+      return true;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+  async commitDecision(input: {
+    initiative: Initiative;
+    expectedVersion: number;
+    decision: InitiativeDecision;
+    auditEvent: InitiativeAuditEvent;
+    event: DurableDomainEvent;
+  }): Promise<boolean> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      if (
+        !(await updateInitiativeForEvaluation(
+          client,
+          input.initiative,
+          input.expectedVersion,
+        ))
+      ) {
+        await client.query("ROLLBACK");
+        return false;
+      }
+      await insertInitiativeDecision(client, input.decision);
+      for (const condition of input.decision.conditions ?? [])
+        await insertDecisionCondition(client, input.decision, condition);
+      await insertInitiativeAuditEvent(client, input.auditEvent);
+      await insertOutboxEvent(client, input.event);
+      await client.query("COMMIT");
+      return true;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
   async createReviewerAssignment(
     assignment: EvaluationReviewerAssignment,
   ): Promise<void> {
@@ -3292,27 +3375,7 @@ export class PostgresEvaluationStore implements EvaluationStore {
       throw new Error("Evaluation reviewer assignment not found");
   }
   async createEvaluation(evaluation: InitiativeEvaluation): Promise<void> {
-    await this.pool.query(
-      `INSERT INTO initiative_evaluations (id, organization_id, workspace_id, initiative_id, initiative_version, standard_id, standard_version, criteria, coverage, quality, evaluated_by_actor_id, evaluated_at, annulled_by_actor_id, annulled_at, annulment_reason)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
-      [
-        evaluation.id,
-        evaluation.organizationId,
-        evaluation.workspaceId,
-        evaluation.initiativeId,
-        evaluation.initiativeVersion,
-        evaluation.standardId,
-        evaluation.standardVersion,
-        asJson(evaluation.criteria),
-        asJson(evaluation.coverage),
-        asJson(evaluation.quality),
-        evaluation.evaluatedByActorId,
-        evaluation.evaluatedAt,
-        evaluation.annulledByActorId,
-        evaluation.annulledAt,
-        evaluation.annulmentReason,
-      ],
-    );
+    await insertInitiativeEvaluation(this.pool, evaluation);
   }
   async findEvaluation(
     evaluationId: string,
@@ -3347,27 +3410,7 @@ export class PostgresEvaluationStore implements EvaluationStore {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
-      await client.query(
-        `INSERT INTO initiative_decisions (id, organization_id, workspace_id, initiative_id, evaluation_id, outcome, rationale, evidence, standard_id, standard_version, coverage, quality, decided_by_actor_id, decided_at, next_review_on)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
-        [
-          decision.id,
-          decision.organizationId,
-          decision.workspaceId,
-          decision.initiativeId,
-          decision.evaluationId,
-          decision.outcome,
-          decision.rationale,
-          asJson(decision.evidence),
-          decision.standardId,
-          decision.standardVersion,
-          asJson(decision.coverage),
-          asJson(decision.quality),
-          decision.decidedByActorId,
-          decision.decidedAt,
-          decision.nextReviewOn,
-        ],
-      );
+      await insertInitiativeDecision(client, decision);
       for (const condition of decision.conditions ?? [])
         await insertDecisionCondition(client, decision, condition);
       await client.query("COMMIT");
@@ -3414,6 +3457,79 @@ export class PostgresEvaluationStore implements EvaluationStore {
     );
     if (updated.rowCount !== 1) throw new Error("Decision condition not found");
   }
+}
+
+async function updateInitiativeForEvaluation(
+  client: PoolClient,
+  initiative: Initiative,
+  expectedVersion: number,
+): Promise<boolean> {
+  const result = await client.query(
+    `UPDATE initiatives SET status = $2, version = $3, updated_at = $4
+      WHERE id = $1 AND version = $5`,
+    [
+      initiative.id,
+      initiative.status,
+      initiative.version,
+      initiative.updatedAt,
+      expectedVersion,
+    ],
+  );
+  return result.rowCount === 1;
+}
+
+async function insertInitiativeEvaluation(
+  client: Pool | PoolClient,
+  evaluation: InitiativeEvaluation,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO initiative_evaluations (id, organization_id, workspace_id, initiative_id, initiative_version, standard_id, standard_version, criteria, coverage, quality, evaluated_by_actor_id, evaluated_at, annulled_by_actor_id, annulled_at, annulment_reason)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+    [
+      evaluation.id,
+      evaluation.organizationId,
+      evaluation.workspaceId,
+      evaluation.initiativeId,
+      evaluation.initiativeVersion,
+      evaluation.standardId,
+      evaluation.standardVersion,
+      asJson(evaluation.criteria),
+      asJson(evaluation.coverage),
+      asJson(evaluation.quality),
+      evaluation.evaluatedByActorId,
+      evaluation.evaluatedAt,
+      evaluation.annulledByActorId,
+      evaluation.annulledAt,
+      evaluation.annulmentReason,
+    ],
+  );
+}
+
+async function insertInitiativeDecision(
+  client: PoolClient,
+  decision: InitiativeDecision,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO initiative_decisions (id, organization_id, workspace_id, initiative_id, evaluation_id, outcome, rationale, evidence, standard_id, standard_version, coverage, quality, decided_by_actor_id, decided_at, next_review_on)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+    [
+      decision.id,
+      decision.organizationId,
+      decision.workspaceId,
+      decision.initiativeId,
+      decision.evaluationId,
+      decision.outcome,
+      decision.rationale,
+      asJson(decision.evidence),
+      decision.standardId,
+      decision.standardVersion,
+      asJson(decision.coverage),
+      asJson(decision.quality),
+      decision.decidedByActorId,
+      decision.decidedAt,
+      decision.nextReviewOn,
+    ],
+  );
 }
 
 async function insertDecisionCondition(

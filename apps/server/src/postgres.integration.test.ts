@@ -1614,6 +1614,36 @@ describe.sequential("PostgreSQL integration", () => {
       };
       const executionStore = new PostgresProjectExecutionStore(pool);
       await executionStore.addNextAction(plannedAction);
+      const localTeamId = randomUUID();
+      const foreignTeamId = randomUUID();
+      await pool.query(
+        `INSERT INTO teams (id, organization_id, workspace_id, name)
+         VALUES ($1,$2,$3,'Local executor'), ($4,$5,$6,'Foreign executor')`,
+        [
+          localTeamId,
+          organizationId,
+          workspaceId,
+          foreignTeamId,
+          otherOrganizationId,
+          otherWorkspaceId,
+        ],
+      );
+      await expect(
+        pool.query(
+          `UPDATE project_next_actions SET executor_team_id = $1 WHERE id = $2`,
+          [foreignTeamId, plannedAction.id],
+        ),
+      ).rejects.toThrow(
+        "next action executor team must belong to its project workspace",
+      );
+      await pool.query(
+        `UPDATE project_next_actions SET executor_team_id = $1 WHERE id = $2`,
+        [localTeamId, plannedAction.id],
+      );
+      await pool.query(
+        `UPDATE project_next_actions SET executor_team_id = NULL WHERE id = $1`,
+        [plannedAction.id],
+      );
       await expect(
         pool.query(
           `INSERT INTO project_next_action_collaborators (action_id, actor_id, added_by_actor_id, added_at)
@@ -2635,6 +2665,63 @@ describe.sequential("PostgreSQL integration", () => {
       ).rejects.toThrow(
         "evaluation reviewer assignment must preserve initiative scope",
       );
+      const existingAudit = await pool.query<{ id: string }>(
+        `SELECT id FROM initiative_audit_events WHERE initiative_id = $1 LIMIT 1`,
+        [draft.id],
+      );
+      const duplicateAuditId = existingAudit.rows[0]!.id;
+      let reviewIdCount = 0;
+      const failingReviewService = new EvaluationService({
+        standards: new PostgresEvaluationStandardStore(pool),
+        evaluations: evaluationsStore,
+        initiatives: initiativesStore,
+        audit: initiativeAudit,
+        tenancy: tenantStore,
+        ids: {
+          next: () => (++reviewIdCount === 2 ? duplicateAuditId : randomUUID()),
+        },
+        clock,
+      });
+      await expect(
+        failingReviewService.review({
+          actorId: "reviewer@example.test",
+          organizationId: organization.id,
+          initiativeId: draft.id,
+          standardId: standard.id,
+          expectedVersion: presented.version,
+          correlationId: randomUUID(),
+          results: [
+            {
+              criterionId: standard.criteria[0]!.id,
+              assessment: "met",
+              evidence: ["Indicador confirmado."],
+            },
+          ],
+        }),
+      ).rejects.toThrow();
+      expect(await initiativesStore.findById(draft.id)).toMatchObject({
+        status: "presented",
+        version: presented.version,
+      });
+      expect(
+        await evaluationsStore.findActiveReviewerAssignment(draft.id),
+      ).toMatchObject({ status: "assigned" });
+      expect(
+        (
+          await pool.query(
+            `SELECT id FROM initiative_evaluations WHERE initiative_id = $1`,
+            [draft.id],
+          )
+        ).rowCount,
+      ).toBe(0);
+      expect(
+        (
+          await pool.query(
+            `SELECT event_id FROM outbox_events WHERE aggregate_id = $1 AND event_type = 'initiative.evaluated.v1'`,
+            [draft.id],
+          )
+        ).rowCount,
+      ).toBe(0);
       const evaluation = await evaluationService.review({
         actorId: "reviewer@example.test",
         organizationId: organization.id,
@@ -2685,6 +2772,14 @@ describe.sequential("PostgreSQL integration", () => {
       const persistedEvaluation = await evaluationsStore.findEvaluation(
         evaluation.id,
       );
+      expect(
+        (
+          await pool.query(
+            `SELECT event_id FROM outbox_events WHERE aggregate_id = $1 AND event_type = 'initiative.evaluated.v1'`,
+            [draft.id],
+          )
+        ).rowCount,
+      ).toBe(1);
       expect(persistedEvaluation).toMatchObject({
         standardId: standard.id,
         standardVersion: 1,
@@ -2818,6 +2913,45 @@ describe.sequential("PostgreSQL integration", () => {
           },
         ],
       };
+      let decisionIdCount = 0;
+      const failingDecisionService = new EvaluationService({
+        standards: new PostgresEvaluationStandardStore(pool),
+        evaluations: evaluationsStore,
+        initiatives: initiativesStore,
+        audit: initiativeAudit,
+        tenancy: tenantStore,
+        ids: {
+          next: () =>
+            ++decisionIdCount === 4 ? duplicateAuditId : randomUUID(),
+        },
+        clock,
+      });
+      await expect(
+        failingDecisionService.decide({
+          ...decisionInput,
+          correlationId: randomUUID(),
+        }),
+      ).rejects.toThrow();
+      expect(await initiativesStore.findById(draft.id)).toMatchObject({
+        status: "under_review",
+        version: reviewing!.version,
+      });
+      expect(
+        (
+          await pool.query(
+            `SELECT id FROM initiative_decisions WHERE initiative_id = $1`,
+            [draft.id],
+          )
+        ).rowCount,
+      ).toBe(0);
+      expect(
+        (
+          await pool.query(
+            `SELECT event_id FROM outbox_events WHERE aggregate_id = $1 AND event_type = 'initiative.decided.v2'`,
+            [draft.id],
+          )
+        ).rowCount,
+      ).toBe(0);
       const decisionAttempts = await Promise.allSettled([
         evaluationService.decide({
           ...decisionInput,
@@ -2840,6 +2974,14 @@ describe.sequential("PostgreSQL integration", () => {
       if (!successfulDecision || successfulDecision.status !== "fulfilled")
         throw new Error("An approved decision was expected");
       const decision = successfulDecision.value;
+      expect(
+        (
+          await pool.query(
+            `SELECT event_id FROM outbox_events WHERE aggregate_id = $1 AND event_type = 'initiative.decided.v2'`,
+            [draft.id],
+          )
+        ).rowCount,
+      ).toBe(1);
       await expect(
         pool.query(
           `UPDATE initiative_evaluations
@@ -3087,8 +3229,11 @@ describe.sequential("PostgreSQL integration", () => {
         maxAttempts: 3,
         lockTimeoutSeconds: 60,
       });
+      const pendingEvents = await pool.query<{ total: number }>(
+        "SELECT count(*)::int AS total FROM outbox_events WHERE status = 'pending'",
+      );
       await worker.processOnce();
-      expect(handled).toHaveLength(1);
+      expect(handled).toHaveLength(pendingEvents.rows[0]!.total);
       const processed = await pool.query<{ status: string }>(
         "SELECT status FROM outbox_events WHERE aggregate_id = $1",
         [project.id],
@@ -3097,7 +3242,7 @@ describe.sequential("PostgreSQL integration", () => {
       const consumptions = await pool.query(
         "SELECT 1 FROM outbox_consumptions WHERE consumer = 'integration-test.v1'",
       );
-      expect(consumptions.rowCount).toBe(1);
+      expect(consumptions.rowCount).toBe(pendingEvents.rows[0]!.total);
 
       const change = await projectService.requestChange({
         actorId: "lead@example.test",

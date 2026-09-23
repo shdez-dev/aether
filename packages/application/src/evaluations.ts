@@ -14,7 +14,11 @@ import {
   type EvaluationReviewerAssignment,
 } from "@aether/domain";
 
-import type { InitiativeAuditStore, InitiativeStore } from "./initiatives.js";
+import type {
+  InitiativeAuditEvent,
+  InitiativeAuditStore,
+  InitiativeStore,
+} from "./initiatives.js";
 import { InitiativeVersionConflictError } from "./initiatives.js";
 import {
   AccessDeniedError,
@@ -24,6 +28,7 @@ import {
 } from "./tenancy.js";
 import type { TemporaryAccessGrantAuthorizer } from "./access-grants.js";
 import type { NotificationService } from "./notifications.js";
+import type { DurableDomainEvent } from "./outbox.js";
 
 export interface EvaluationStandardStore {
   create(standard: EvaluationStandard): Promise<void>;
@@ -40,6 +45,21 @@ export interface EvaluationStandardStore {
   }): Promise<void>;
 }
 export interface EvaluationStore {
+  commitReview?(input: {
+    initiative: import("@aether/domain").Initiative;
+    expectedVersion: number;
+    evaluation: InitiativeEvaluation;
+    assignment: EvaluationReviewerAssignment;
+    auditEvent: InitiativeAuditEvent;
+    event: DurableDomainEvent;
+  }): Promise<boolean>;
+  commitDecision?(input: {
+    initiative: import("@aether/domain").Initiative;
+    expectedVersion: number;
+    decision: InitiativeDecision;
+    auditEvent: InitiativeAuditEvent;
+    event: DurableDomainEvent;
+  }): Promise<boolean>;
   createReviewerAssignment(
     assignment: EvaluationReviewerAssignment,
   ): Promise<void>;
@@ -482,22 +502,14 @@ export class EvaluationService {
       evaluatedAt: now,
     });
     const reviewing = transitionInitiative(initiative, "under_review", now);
-    if (
-      !(await this.dependencies.initiatives.save({
-        initiative: reviewing,
-        expectedVersion: initiative.version,
-      }))
-    )
-      throw new InitiativeVersionConflictError();
-    await this.dependencies.evaluations.createEvaluation(evaluation);
-    await this.dependencies.evaluations.updateReviewerAssignment({
+    const completedAssignment = {
       ...assignment,
       status: "completed",
       statusChangedAt: now,
       statusChangedByActorId: input.actorId,
       reason: null,
-    });
-    await this.record(
+    } as const;
+    const auditEvent = this.makeAuditEvent(
       reviewing,
       input.actorId,
       input.correlationId,
@@ -515,6 +527,32 @@ export class EvaluationService {
         ),
       },
     );
+    if (this.dependencies.evaluations.commitReview) {
+      if (
+        !(await this.dependencies.evaluations.commitReview({
+          initiative: reviewing,
+          expectedVersion: initiative.version,
+          evaluation,
+          assignment: completedAssignment,
+          auditEvent,
+          event: this.durableEvent(reviewing, auditEvent),
+        }))
+      )
+        throw new InitiativeVersionConflictError();
+    } else {
+      if (
+        !(await this.dependencies.initiatives.save({
+          initiative: reviewing,
+          expectedVersion: initiative.version,
+        }))
+      )
+        throw new InitiativeVersionConflictError();
+      await this.dependencies.evaluations.createEvaluation(evaluation);
+      await this.dependencies.evaluations.updateReviewerAssignment(
+        completedAssignment,
+      );
+      await this.dependencies.audit.record(auditEvent);
+    }
     return evaluation;
   }
 
@@ -587,15 +625,7 @@ export class EvaluationService {
       })),
     });
     const decided = transitionInitiative(initiative, decision.outcome, now);
-    if (
-      !(await this.dependencies.initiatives.save({
-        initiative: decided,
-        expectedVersion: initiative.version,
-      }))
-    )
-      throw new InitiativeVersionConflictError();
-    await this.dependencies.evaluations.createDecision(decision);
-    await this.record(
+    const auditEvent = this.makeAuditEvent(
       decided,
       input.actorId,
       input.correlationId,
@@ -611,6 +641,28 @@ export class EvaluationService {
         evidenceCount: decision.evidence.length,
       },
     );
+    if (this.dependencies.evaluations.commitDecision) {
+      if (
+        !(await this.dependencies.evaluations.commitDecision({
+          initiative: decided,
+          expectedVersion: initiative.version,
+          decision,
+          auditEvent,
+          event: this.durableEvent(decided, auditEvent),
+        }))
+      )
+        throw new InitiativeVersionConflictError();
+    } else {
+      if (
+        !(await this.dependencies.initiatives.save({
+          initiative: decided,
+          expectedVersion: initiative.version,
+        }))
+      )
+        throw new InitiativeVersionConflictError();
+      await this.dependencies.evaluations.createDecision(decision);
+      await this.dependencies.audit.record(auditEvent);
+    }
     if (initiative.createdByActorId !== input.actorId)
       await this.dependencies.notifications?.notify({
         organizationId: initiative.organizationId,
@@ -812,7 +864,28 @@ export class EvaluationService {
     toStatus: import("@aether/domain").InitiativeStatus,
     payload: Record<string, unknown>,
   ): Promise<void> {
-    await this.dependencies.audit.record({
+    await this.dependencies.audit.record(
+      this.makeAuditEvent(
+        initiative,
+        actorId,
+        correlationId,
+        eventType,
+        fromStatus,
+        toStatus,
+        payload,
+      ),
+    );
+  }
+  private makeAuditEvent(
+    initiative: Awaited<ReturnType<InitiativeStore["findById"]>> & {},
+    actorId: string,
+    correlationId: string,
+    eventType: string,
+    fromStatus: import("@aether/domain").InitiativeStatus,
+    toStatus: import("@aether/domain").InitiativeStatus,
+    payload: Record<string, unknown>,
+  ): InitiativeAuditEvent {
+    return {
       id: this.dependencies.ids.next(),
       eventType,
       organizationId: initiative.organizationId,
@@ -824,7 +897,25 @@ export class EvaluationService {
       fromStatus,
       toStatus,
       payload,
-    });
+    };
+  }
+  private durableEvent(
+    initiative: import("@aether/domain").Initiative,
+    auditEvent: InitiativeAuditEvent,
+  ): DurableDomainEvent {
+    return {
+      eventId: auditEvent.id,
+      eventType: auditEvent.eventType,
+      occurredAt: auditEvent.occurredAt,
+      aggregateId: initiative.id,
+      aggregateType: "initiative",
+      aggregateVersion: initiative.version,
+      organizationId: initiative.organizationId,
+      correlationId: auditEvent.correlationId,
+      causationId: null,
+      schemaVersion: 1,
+      payload: auditEvent.payload,
+    };
   }
 }
 

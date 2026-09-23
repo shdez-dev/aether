@@ -83,6 +83,14 @@ El revisor asignado registra cada resultado como valoración (`met`, `not_met` o
 vacía que justifique la exclusión del denominador. La revisión crea una
 evaluación inmutable y mueve la iniciativa a `under_review`.
 
+La revisión confirma el cambio de estado y versión, la evaluación inmutable,
+el cierre de la asignación del revisor, la auditoría y el evento durable
+`initiative.evaluated.v1` en una sola transacción PostgreSQL. La decisión
+confirma estado, resolución, condiciones, auditoría y
+`initiative.decided.v2` del mismo modo. Si cualquier escritura falla, todo el
+comando se revierte; el conflicto de versión deja la iniciativa disponible
+para recarga y reintento con datos vigentes.
+
 Un `owner` puede anular una evaluación no decidida con un motivo. La anulación
 no borra respuestas, cobertura ni calidad: conserva el registro y añade actor,
 fecha y motivo. Una evaluación que ya sustenta una decisión no puede anularse,
