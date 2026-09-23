@@ -3011,6 +3011,17 @@ describe.sequential("PostgreSQL integration", () => {
       if (!successfulDecision || successfulDecision.status !== "fulfilled")
         throw new Error("An approved decision was expected");
       const decision = successfulDecision.value;
+      await expect(
+        pool.query(
+          `UPDATE initiative_decisions SET rationale = 'Reescritura no permitida' WHERE id = $1`,
+          [decision.id],
+        ),
+      ).rejects.toThrow("initiative decisions are immutable");
+      await expect(
+        pool.query(`DELETE FROM initiative_decisions WHERE id = $1`, [
+          decision.id,
+        ]),
+      ).rejects.toThrow("initiative decisions are immutable");
       expect(
         (
           await pool.query(

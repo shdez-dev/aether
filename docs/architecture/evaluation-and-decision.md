@@ -129,6 +129,12 @@ contrato HTTP como en el dominio; por tanto no puede omitirse mediante un caso
 de uso interno. El solicitante recibe el mismo aviso neutral de decisión sin
 exponer outcome, fundamento ni evidencia.
 
+La decisión institucional de este alcance no usa comité, quórum ni delegación:
+hay un único `owner` responsable y la reasignación sólo corresponde a la
+revisión previa. Si se incorpora gobierno colegiado, deberá abrirse un agregado
+de comité con miembros, quórum, votos y delegaciones explícitas; no se infiere
+de roles organizacionales existentes.
+
 Cuando hay notificaciones configuradas, el solicitante distinto del decisor
 recibe un aviso neutral asociado a la iniciativa. El aviso no incluye outcome,
 fundamento ni evidencia; el buzón revalida la pertenencia organizacional y de
