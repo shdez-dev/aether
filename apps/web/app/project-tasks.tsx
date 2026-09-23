@@ -26,8 +26,16 @@ type DateImpact = {
   expectedVersion: number;
   currentDueOn: string | null;
   proposedDueOn: string | null;
-  predecessors: { actionId: string; dueOn: string | null }[];
-  successors: { actionId: string; dueOn: string | null }[];
+  predecessors: {
+    actionId: string;
+    description: string;
+    dueOn: string | null;
+  }[];
+  successors: {
+    actionId: string;
+    description: string;
+    dueOn: string | null;
+  }[];
   pendingMilestones: { id: string; title: string; dueOn: string | null }[];
   impactToken: string;
 };
@@ -891,7 +899,7 @@ export function ProjectTasks({
                   ? dateImpact.predecessors
                       .map(
                         (item) =>
-                          `${item.actionId} (${item.dueOn ?? "sin fecha"})`,
+                          `${item.description} (${item.dueOn ?? "sin fecha"})`,
                       )
                       .join(", ")
                   : "ninguna"}
@@ -903,7 +911,7 @@ export function ProjectTasks({
                   ? dateImpact.successors
                       .map(
                         (item) =>
-                          `${item.actionId} (${item.dueOn ?? "sin fecha"})`,
+                          `${item.description} (${item.dueOn ?? "sin fecha"})`,
                       )
                       .join(", ")
                   : "ninguna"}

@@ -145,7 +145,13 @@ it("reviews date impact before sending the versioned confirmation", async () => 
           expectedVersion: task.version,
           currentDueOn: task.dueOn,
           proposedDueOn: "2026-09-25",
-          predecessors: [{ actionId: "predecessor", dueOn: "2026-09-20" }],
+          predecessors: [
+            {
+              actionId: "predecessor",
+              description: "Preparar insumos",
+              dueOn: "2026-09-20",
+            },
+          ],
           successors: [],
           pendingMilestones: [
             { id: "milestone", title: "Entrega", dueOn: "2026-09-30" },
@@ -181,7 +187,8 @@ it("reviews date impact before sending the versioned confirmation", async () => 
     target: { value: "2026-09-25" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Revisar impacto" }));
-  expect(await screen.findByText(/predecessor/)).toBeTruthy();
+  expect(await screen.findByText(/Preparar insumos/)).toBeTruthy();
+  expect(screen.queryByText(/predecessor/)).toBeNull();
   expect(request).toHaveBeenCalledWith(
     expect.stringContaining("expectedVersion=7&proposedDueOn=2026-09-25"),
   );

@@ -4779,9 +4779,10 @@ components:
         impactToken: { type: string, pattern: "^[a-f0-9]{64}$" }
     ProjectTaskDateRelatedAction:
       type: object
-      required: [actionId, dueOn]
+      required: [actionId, description, dueOn]
       properties:
         actionId: { type: string, format: uuid }
+        description: { type: string }
         dueOn: { type: [string, "null"], format: date }
     ChangeProjectTaskDateRequest:
       type: object

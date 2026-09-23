@@ -555,7 +555,13 @@ describe("project conversion and execution", () => {
     const impact = await projects.previewTaskDateChange(dateChangeInput);
     expect(impact).toMatchObject({
       currentDueOn: null,
-      predecessors: [{ actionId: nextAction.id, dueOn: "2026-09-20" }],
+      predecessors: [
+        {
+          actionId: nextAction.id,
+          description: "Preparar piloto",
+          dueOn: "2026-09-20",
+        },
+      ],
       pendingMilestones: [{ title: "Primer hito", dueOn: "2026-10-01" }],
     });
     await expect(

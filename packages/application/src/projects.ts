@@ -75,8 +75,16 @@ export type ProjectTaskDateImpact = Readonly<{
   expectedVersion: number;
   currentDueOn: string | null;
   proposedDueOn: string | null;
-  predecessors: readonly Readonly<{ actionId: string; dueOn: string | null }>[];
-  successors: readonly Readonly<{ actionId: string; dueOn: string | null }>[];
+  predecessors: readonly Readonly<{
+    actionId: string;
+    description: string;
+    dueOn: string | null;
+  }>[];
+  successors: readonly Readonly<{
+    actionId: string;
+    description: string;
+    dueOn: string | null;
+  }>[];
   pendingMilestones: readonly Readonly<{
     id: string;
     title: string;
@@ -1189,7 +1197,11 @@ export class ProjectService {
       ids
         .map((id) => actionById.get(id))
         .filter((item): item is ProjectNextAction => item !== undefined)
-        .map((item) => ({ actionId: item.id, dueOn: item.dueOn }))
+        .map((item) => ({
+          actionId: item.id,
+          description: item.description,
+          dueOn: item.dueOn,
+        }))
         .sort((a, b) => a.actionId.localeCompare(b.actionId));
     const predecessors = related(
       dependencies
