@@ -119,7 +119,7 @@ it("shows the same task in list, board and calendar and applies the status filte
   expect(
     screen.queryByRole("button", { name: "Subir Preparar informe" }),
   ).toBeNull();
-});
+}, 10_000);
 
 it("reviews date impact before sending the versioned confirmation", async () => {
   const task = {

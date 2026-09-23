@@ -1738,6 +1738,92 @@ paths:
           $ref: "#/components/responses/Problem"
         default:
           $ref: "#/components/responses/Problem"
+  /v1/initiatives/{initiativeId}/evaluation-draft:
+    get:
+      tags: [Initiatives]
+      operationId: getInitiativeEvaluationDraft
+      summary: Consultar el borrador activo de evaluación
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/InitiativeId"
+        - $ref: "#/components/parameters/OrganizationContextId"
+      responses:
+        "200":
+          description: Borrador activo.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InitiativeEvaluationDraft" }
+        default: { $ref: "#/components/responses/Problem" }
+    put:
+      tags: [Initiatives]
+      operationId: saveInitiativeEvaluationDraft
+      summary: Guardar respuestas incompletas del revisor asignado
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/InitiativeId"
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SaveEvaluationDraftRequest" }
+      responses:
+        "200":
+          description: Borrador guardado con versión optimista y auditoría.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InitiativeEvaluationDraft" }
+        default: { $ref: "#/components/responses/Problem" }
+  /v1/initiatives/{initiativeId}/evaluation-draft/migrate:
+    post:
+      tags: [Initiatives]
+      operationId: migrateInitiativeEvaluationDraft
+      summary: Migrar explícitamente las respuestas a un estándar activo nuevo
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/InitiativeId"
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              { $ref: "#/components/schemas/MigrateEvaluationDraftRequest" }
+      responses:
+        "200":
+          description: Mapeo y descartes auditados; versión incrementada.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InitiativeEvaluationDraft" }
+        default: { $ref: "#/components/responses/Problem" }
+  /v1/initiatives/{initiativeId}/evaluation-draft/publish:
+    post:
+      tags: [Initiatives]
+      operationId: publishInitiativeEvaluationDraft
+      summary: Publicar un borrador con cobertura completa
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/InitiativeId"
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              { $ref: "#/components/schemas/PublishEvaluationDraftRequest" }
+      responses:
+        "200":
+          description: Evaluación inmutable publicada.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InitiativeEvaluation" }
+        default: { $ref: "#/components/responses/Problem" }
   /v1/initiatives/{initiativeId}/review:
     post:
       tags: [Initiatives]
@@ -3843,6 +3929,60 @@ components:
                   enum: [met, not_met, not_applicable, null],
                 }
               evidence: { type: array, items: { type: string }, maxItems: 50 }
+    SaveEvaluationDraftRequest:
+      type: object
+      required:
+        [
+          organizationId,
+          expectedInitiativeVersion,
+          expectedDraftVersion,
+          standardId,
+          results,
+        ]
+      properties:
+        organizationId: { type: string, format: uuid }
+        expectedInitiativeVersion: { type: integer, minimum: 0 }
+        expectedDraftVersion: { type: [integer, "null"], minimum: 0 }
+        standardId: { type: string, format: uuid }
+        results:
+          { $ref: "#/components/schemas/StartReviewRequest/properties/results" }
+    MigrateEvaluationDraftRequest:
+      type: object
+      required:
+        [
+          organizationId,
+          expectedDraftVersion,
+          standardId,
+          mappings,
+          discardedCriterionIds,
+          reason,
+        ]
+      properties:
+        organizationId: { type: string, format: uuid }
+        expectedDraftVersion: { type: integer, minimum: 0 }
+        standardId: { type: string, format: uuid }
+        mappings:
+          type: array
+          maxItems: 100
+          items:
+            type: object
+            required: [fromCriterionId, toCriterionId]
+            properties:
+              fromCriterionId: { type: string, format: uuid }
+              toCriterionId: { type: string, format: uuid }
+        discardedCriterionIds:
+          type: array
+          maxItems: 100
+          items: { type: string, format: uuid }
+        reason: { type: string, minLength: 1, maxLength: 2000 }
+    PublishEvaluationDraftRequest:
+      type: object
+      required:
+        [organizationId, expectedInitiativeVersion, expectedDraftVersion]
+      properties:
+        organizationId: { type: string, format: uuid }
+        expectedInitiativeVersion: { type: integer, minimum: 0 }
+        expectedDraftVersion: { type: integer, minimum: 0 }
     AnnulEvaluationRequest:
       type: object
       required: [organizationId, reason]
@@ -4287,6 +4427,39 @@ components:
         isActive: { type: boolean }
         publishedAt: { type: string, format: date-time }
         publishedByActorId: { type: string }
+    InitiativeEvaluationDraft:
+      type: object
+      required:
+        [
+          id,
+          organizationId,
+          workspaceId,
+          initiativeId,
+          initiativeVersion,
+          standardId,
+          standardVersion,
+          results,
+          version,
+          status,
+          updatedByActorId,
+          updatedAt,
+          publishedEvaluationId,
+        ]
+      properties:
+        id: { type: string, format: uuid }
+        organizationId: { type: string, format: uuid }
+        workspaceId: { type: string, format: uuid }
+        initiativeId: { type: string, format: uuid }
+        initiativeVersion: { type: integer, minimum: 0 }
+        standardId: { type: string, format: uuid }
+        standardVersion: { type: integer, minimum: 1 }
+        results:
+          { $ref: "#/components/schemas/StartReviewRequest/properties/results" }
+        version: { type: integer, minimum: 0 }
+        status: { type: string, enum: [draft, published] }
+        updatedByActorId: { type: string }
+        updatedAt: { type: string, format: date-time }
+        publishedEvaluationId: { type: [string, "null"], format: uuid }
     InitiativeEvaluation:
       type: object
       required:

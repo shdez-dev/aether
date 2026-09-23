@@ -28,6 +28,21 @@ export type EvaluationResultInput = Readonly<{
   assessment: CriterionAssessment | null;
   evidence: readonly string[];
 }>;
+export type InitiativeEvaluationDraft = Readonly<{
+  id: string;
+  organizationId: string;
+  workspaceId: string;
+  initiativeId: string;
+  initiativeVersion: number;
+  standardId: string;
+  standardVersion: number;
+  results: readonly EvaluationResultInput[];
+  version: number;
+  status: "draft" | "published";
+  updatedByActorId: string;
+  updatedAt: Date;
+  publishedEvaluationId: string | null;
+}>;
 export type EvaluationCoverage = Readonly<{
   totalCriteria: number;
   applicableCriteria: number;
@@ -313,6 +328,11 @@ export class EvaluationDomainError extends Error {
       | "EVALUATION_ALREADY_DECIDED"
       | "EVALUATION_ANNULLED"
       | "EVALUATION_REVIEWER_NOT_ASSIGNED"
+      | "EVALUATION_DRAFT_NOT_FOUND"
+      | "EVALUATION_DRAFT_VERSION_CONFLICT"
+      | "EVALUATION_DRAFT_STANDARD_CHANGED"
+      | "EVALUATION_DRAFT_MIGRATION_INVALID"
+      | "EVALUATION_DRAFT_EXISTS"
       | "EVALUATION_ASSIGNMENT_NOT_ABSTAINED"
       | "RETURNED_DECISION_REQUIRES_NEXT_REVIEW"
       | "NEXT_REVIEW_ONLY_FOR_RETURNED_DECISION"

@@ -28,6 +28,7 @@ import {
   EvaluationService,
   TriageService,
   EvaluationConflictOfInterestError,
+  EvaluationDomainError,
   ProjectService,
   ProjectDomainError,
   ProjectVersionConflictError,
@@ -119,6 +120,9 @@ import {
   DeclareInitiativeRelationshipRequestSchema,
   SaveInitiativeDiagnosticRequestSchema,
   StartReviewRequestSchema,
+  SaveEvaluationDraftRequestSchema,
+  MigrateEvaluationDraftRequestSchema,
+  PublishEvaluationDraftRequestSchema,
   AnnulEvaluationRequestSchema,
   SubmitInitiativeRequestSchema,
   UpdateInitiativeRequestSchema,
@@ -414,6 +418,12 @@ export async function buildServer(input: {
                     ? 404
                     : error instanceof InitiativeVersionConflictError ||
                         error instanceof ProjectVersionConflictError ||
+                        (error instanceof EvaluationDomainError &&
+                          [
+                            "EVALUATION_DRAFT_VERSION_CONFLICT",
+                            "EVALUATION_DRAFT_STANDARD_CHANGED",
+                            "EVALUATION_DRAFT_EXISTS",
+                          ].includes(error.code)) ||
                         (error instanceof IntakeDomainError &&
                           error.code === "INTAKE_ALREADY_ASSIGNED")
                       ? 409
@@ -4320,6 +4330,132 @@ export async function buildServer(input: {
       });
     },
   );
+  app.get(
+    "/v1/initiatives/:initiativeId/evaluation-draft",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      const params = z
+        .object({ initiativeId: z.string().uuid() })
+        .parse(request.params);
+      const query = z
+        .object({ organizationId: z.string().uuid() })
+        .parse(request.query);
+      return toEvaluationDraftResponse(
+        await input.evaluations.getDraft({
+          actorId: session.actorId,
+          ...params,
+          ...query,
+        }),
+      );
+    },
+  );
+  app.put(
+    "/v1/initiatives/:initiativeId/evaluation-draft",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      const params = z
+        .object({ initiativeId: z.string().uuid() })
+        .parse(request.params);
+      const body = SaveEvaluationDraftRequestSchema.parse(request.body);
+      return respondIdempotently({
+        request,
+        reply,
+        store: input.idempotency,
+        actorId: session.actorId,
+        operation: `initiative.evaluation-draft.save:${params.initiativeId}`,
+        requestPayload: { params, body },
+        execute: async () => ({
+          statusCode: 200,
+          body: toEvaluationDraftResponse(
+            await input.evaluations.saveDraft({
+              actorId: session.actorId,
+              correlationId: correlationId(reply),
+              ...params,
+              ...body,
+            }),
+          ),
+        }),
+      });
+    },
+  );
+  app.post(
+    "/v1/initiatives/:initiativeId/evaluation-draft/migrate",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      const params = z
+        .object({ initiativeId: z.string().uuid() })
+        .parse(request.params);
+      const body = MigrateEvaluationDraftRequestSchema.parse(request.body);
+      return respondIdempotently({
+        request,
+        reply,
+        store: input.idempotency,
+        actorId: session.actorId,
+        operation: `initiative.evaluation-draft.migrate:${params.initiativeId}`,
+        requestPayload: { params, body },
+        execute: async () => ({
+          statusCode: 200,
+          body: toEvaluationDraftResponse(
+            await input.evaluations.migrateDraft({
+              actorId: session.actorId,
+              correlationId: correlationId(reply),
+              ...params,
+              ...body,
+            }),
+          ),
+        }),
+      });
+    },
+  );
+  app.post(
+    "/v1/initiatives/:initiativeId/evaluation-draft/publish",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      const params = z
+        .object({ initiativeId: z.string().uuid() })
+        .parse(request.params);
+      const body = PublishEvaluationDraftRequestSchema.parse(request.body);
+      return respondIdempotently({
+        request,
+        reply,
+        store: input.idempotency,
+        actorId: session.actorId,
+        operation: `initiative.evaluation-draft.publish:${params.initiativeId}`,
+        requestPayload: { params, body },
+        execute: async () => ({
+          statusCode: 200,
+          body: toEvaluationResponse(
+            await input.evaluations.publishDraft({
+              actorId: session.actorId,
+              correlationId: correlationId(reply),
+              ...params,
+              ...body,
+            }),
+          ),
+        }),
+      });
+    },
+  );
   app.post("/v1/initiatives/:initiativeId/review", async (request, reply) => {
     const session = await requireSession(
       request,
@@ -4687,6 +4823,11 @@ function toEvaluationResponse(
     evaluatedAt: evaluation.evaluatedAt.toISOString(),
     annulledAt: evaluation.annulledAt?.toISOString() ?? null,
   };
+}
+function toEvaluationDraftResponse(
+  draft: { updatedAt: Date } & Record<string, unknown>,
+) {
+  return { ...draft, updatedAt: draft.updatedAt.toISOString() };
 }
 function toTriageResponse(
   triage: { assessedAt: Date } & Record<string, unknown>,

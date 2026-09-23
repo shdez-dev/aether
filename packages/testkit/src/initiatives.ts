@@ -188,6 +188,50 @@ export class InMemoryEvaluationStandardStore implements EvaluationStandardStore 
 }
 
 export class InMemoryEvaluationStore implements EvaluationStore {
+  readonly drafts = new Map<
+    string,
+    import("@aether/domain").InitiativeEvaluationDraft
+  >();
+  async findActiveDraft(initiativeId: string) {
+    return (
+      [...this.drafts.values()].find(
+        (draft) =>
+          draft.initiativeId === initiativeId && draft.status === "draft",
+      ) ?? null
+    );
+  }
+  async saveDraft(input: {
+    draft: import("@aether/domain").InitiativeEvaluationDraft;
+    expectedVersion: number | null;
+  }): Promise<boolean> {
+    const existing = await this.findActiveDraft(input.draft.initiativeId);
+    if (
+      existing?.version !== input.expectedVersion &&
+      !(existing === null && input.expectedVersion === null)
+    )
+      return false;
+    this.drafts.set(input.draft.id, input.draft);
+    return true;
+  }
+  async publishDraft(input: {
+    draftId: string;
+    expectedVersion: number;
+    evaluationId: string;
+  }): Promise<boolean> {
+    const draft = this.drafts.get(input.draftId);
+    if (
+      !draft ||
+      draft.status !== "draft" ||
+      draft.version !== input.expectedVersion
+    )
+      return false;
+    this.drafts.set(input.draftId, {
+      ...draft,
+      status: "published",
+      publishedEvaluationId: input.evaluationId,
+    });
+    return true;
+  }
   readonly reviewerAssignments = new Map<
     string,
     EvaluationReviewerAssignment

@@ -12,6 +12,8 @@ import {
   type InitiativeEvaluation,
   type EvaluationStandard,
   type EvaluationReviewerAssignment,
+  type InitiativeEvaluationDraft,
+  type EvaluationResultInput,
 } from "@aether/domain";
 
 import type {
@@ -45,6 +47,23 @@ export interface EvaluationStandardStore {
   }): Promise<void>;
 }
 export interface EvaluationStore {
+  findActiveDraft(
+    initiativeId: string,
+  ): Promise<InitiativeEvaluationDraft | null>;
+  saveDraft(input: {
+    draft: InitiativeEvaluationDraft;
+    expectedVersion: number | null;
+  }): Promise<boolean>;
+  saveDraftWithAudit?(input: {
+    draft: InitiativeEvaluationDraft;
+    expectedVersion: number | null;
+    auditEvent: InitiativeAuditEvent;
+  }): Promise<boolean>;
+  publishDraft(input: {
+    draftId: string;
+    expectedVersion: number;
+    evaluationId: string;
+  }): Promise<boolean>;
   commitReview?(input: {
     initiative: import("@aether/domain").Initiative;
     expectedVersion: number;
@@ -52,6 +71,7 @@ export interface EvaluationStore {
     assignment: EvaluationReviewerAssignment;
     auditEvent: InitiativeAuditEvent;
     event: DurableDomainEvent;
+    draft?: { id: string; expectedVersion: number };
   }): Promise<boolean>;
   commitDecision?(input: {
     initiative: import("@aether/domain").Initiative;
@@ -151,6 +171,249 @@ export class EvaluationService {
   }): Promise<readonly EvaluationStandard[]> {
     await this.assertOrganizationManager(input.actorId, input.organizationId);
     return this.dependencies.standards.list(input);
+  }
+  async getDraft(input: {
+    actorId: string;
+    organizationId: string;
+    initiativeId: string;
+  }): Promise<InitiativeEvaluationDraft> {
+    const initiative = await this.requireInitiative(
+      input.initiativeId,
+      input.organizationId,
+    );
+    await this.assertAssignedReviewerOrOwner(
+      initiative.id,
+      input.actorId,
+      input.organizationId,
+    );
+    const draft = await this.dependencies.evaluations.findActiveDraft(
+      initiative.id,
+    );
+    if (!draft) throw new EvaluationDomainError("EVALUATION_DRAFT_NOT_FOUND");
+    return draft;
+  }
+  async saveDraft(input: {
+    actorId: string;
+    organizationId: string;
+    initiativeId: string;
+    expectedInitiativeVersion: number;
+    expectedDraftVersion: number | null;
+    standardId: string;
+    results: readonly EvaluationResultInput[];
+    correlationId: string;
+  }): Promise<InitiativeEvaluationDraft> {
+    const initiative = await this.requireInitiative(
+      input.initiativeId,
+      input.organizationId,
+    );
+    await assertWorkspaceWritable(
+      this.dependencies.tenancy,
+      initiative.workspaceId,
+    );
+    await this.assertAssignedReviewer(
+      initiative.id,
+      input.actorId,
+      input.organizationId,
+    );
+    if (initiative.version !== input.expectedInitiativeVersion)
+      throw new InitiativeVersionConflictError();
+    if (initiative.status !== "presented")
+      throw new EvaluationDomainError("EVALUATION_INCOMPLETE");
+    const standard = await this.requireActiveStandard(
+      input.standardId,
+      input.organizationId,
+    );
+    const existing = await this.dependencies.evaluations.findActiveDraft(
+      initiative.id,
+    );
+    if (
+      existing?.version !== input.expectedDraftVersion &&
+      !(existing === null && input.expectedDraftVersion === null)
+    )
+      throw new EvaluationDomainError("EVALUATION_DRAFT_VERSION_CONFLICT");
+    if (
+      existing &&
+      (existing.standardId !== standard.id ||
+        existing.standardVersion !== standard.version)
+    )
+      throw new EvaluationDomainError("EVALUATION_DRAFT_STANDARD_CHANGED");
+    evaluateInitiative({
+      id: this.dependencies.ids.next(),
+      organizationId: initiative.organizationId,
+      workspaceId: initiative.workspaceId,
+      initiativeId: initiative.id,
+      initiativeVersion: initiative.version,
+      standard,
+      results: input.results,
+      evaluatedByActorId: input.actorId,
+      evaluatedAt: this.dependencies.clock.now(),
+    });
+    const draft: InitiativeEvaluationDraft = {
+      id: existing?.id ?? this.dependencies.ids.next(),
+      organizationId: initiative.organizationId,
+      workspaceId: initiative.workspaceId,
+      initiativeId: initiative.id,
+      initiativeVersion: initiative.version,
+      standardId: standard.id,
+      standardVersion: standard.version,
+      results: input.results.map((result) => ({
+        ...result,
+        evidence: [...result.evidence],
+      })),
+      version: existing ? existing.version + 1 : 0,
+      status: "draft",
+      updatedByActorId: input.actorId,
+      updatedAt: this.dependencies.clock.now(),
+      publishedEvaluationId: null,
+    };
+    await this.persistDraft(
+      draft,
+      existing?.version ?? null,
+      this.makeAuditEvent(
+        initiative,
+        input.actorId,
+        input.correlationId,
+        "initiative.evaluation_draft_saved.v1",
+        initiative.status,
+        initiative.status,
+        {
+          draftId: draft.id,
+          draftVersion: draft.version,
+          standardId: standard.id,
+        },
+      ),
+    );
+    return draft;
+  }
+  async migrateDraft(input: {
+    actorId: string;
+    organizationId: string;
+    initiativeId: string;
+    expectedDraftVersion: number;
+    standardId: string;
+    mappings: readonly { fromCriterionId: string; toCriterionId: string }[];
+    discardedCriterionIds: readonly string[];
+    reason: string;
+    correlationId: string;
+  }): Promise<InitiativeEvaluationDraft> {
+    const initiative = await this.requireInitiative(
+      input.initiativeId,
+      input.organizationId,
+    );
+    await assertWorkspaceWritable(
+      this.dependencies.tenancy,
+      initiative.workspaceId,
+    );
+    await this.assertAssignedReviewer(
+      initiative.id,
+      input.actorId,
+      input.organizationId,
+    );
+    if (initiative.status !== "presented")
+      throw new EvaluationDomainError("EVALUATION_INCOMPLETE");
+    const draft = await this.dependencies.evaluations.findActiveDraft(
+      initiative.id,
+    );
+    if (!draft) throw new EvaluationDomainError("EVALUATION_DRAFT_NOT_FOUND");
+    if (draft.version !== input.expectedDraftVersion)
+      throw new EvaluationDomainError("EVALUATION_DRAFT_VERSION_CONFLICT");
+    if (draft.initiativeVersion !== initiative.version)
+      throw new InitiativeVersionConflictError();
+    const standard = await this.requireActiveStandard(
+      input.standardId,
+      input.organizationId,
+    );
+    if (draft.standardId === standard.id)
+      throw new EvaluationDomainError("EVALUATION_DRAFT_MIGRATION_INVALID");
+    const sourceIds = draft.results.map((result) => result.criterionId);
+    const usedSourceIds = [
+      ...input.mappings.map((item) => item.fromCriterionId),
+      ...input.discardedCriterionIds,
+    ];
+    const targets = input.mappings.map((item) => item.toCriterionId);
+    if (
+      !input.reason.trim() ||
+      new Set(usedSourceIds).size !== usedSourceIds.length ||
+      new Set(targets).size !== targets.length ||
+      sourceIds.length !== usedSourceIds.length ||
+      usedSourceIds.some((id) => !sourceIds.includes(id)) ||
+      targets.some(
+        (id) => !standard.criteria.some((criterion) => criterion.id === id),
+      )
+    )
+      throw new EvaluationDomainError("EVALUATION_DRAFT_MIGRATION_INVALID");
+    const results = input.mappings.map((item) => {
+      const source = draft.results.find(
+        (result) => result.criterionId === item.fromCriterionId,
+      )!;
+      return { ...source, criterionId: item.toCriterionId };
+    });
+    evaluateInitiative({
+      id: this.dependencies.ids.next(),
+      organizationId: initiative.organizationId,
+      workspaceId: initiative.workspaceId,
+      initiativeId: initiative.id,
+      initiativeVersion: initiative.version,
+      standard,
+      results,
+      evaluatedByActorId: input.actorId,
+      evaluatedAt: this.dependencies.clock.now(),
+    });
+    const migrated: InitiativeEvaluationDraft = {
+      ...draft,
+      standardId: standard.id,
+      standardVersion: standard.version,
+      results,
+      version: draft.version + 1,
+      updatedByActorId: input.actorId,
+      updatedAt: this.dependencies.clock.now(),
+    };
+    await this.persistDraft(
+      migrated,
+      draft.version,
+      this.makeAuditEvent(
+        initiative,
+        input.actorId,
+        input.correlationId,
+        "initiative.evaluation_draft_migrated.v1",
+        initiative.status,
+        initiative.status,
+        {
+          draftId: draft.id,
+          oldStandardId: draft.standardId,
+          newStandardId: standard.id,
+          mappings: input.mappings,
+          discardedCriterionIds: input.discardedCriterionIds,
+          reason: input.reason,
+        },
+      ),
+    );
+    return migrated;
+  }
+  async publishDraft(input: {
+    actorId: string;
+    organizationId: string;
+    initiativeId: string;
+    expectedInitiativeVersion: number;
+    expectedDraftVersion: number;
+    correlationId: string;
+  }): Promise<InitiativeEvaluation> {
+    const draft = await this.getDraft(input);
+    if (draft.version !== input.expectedDraftVersion)
+      throw new EvaluationDomainError("EVALUATION_DRAFT_VERSION_CONFLICT");
+    if (draft.initiativeVersion !== input.expectedInitiativeVersion)
+      throw new InitiativeVersionConflictError();
+    await this.requireActiveStandard(draft.standardId, input.organizationId);
+    return this.review({
+      actorId: input.actorId,
+      organizationId: input.organizationId,
+      initiativeId: input.initiativeId,
+      standardId: draft.standardId,
+      expectedVersion: input.expectedInitiativeVersion,
+      correlationId: input.correlationId,
+      results: draft.results,
+      draft: { id: draft.id, expectedVersion: draft.version },
+    });
   }
   async getEvaluation(input: {
     actorId: string;
@@ -460,6 +723,7 @@ export class EvaluationService {
       assessment: "met" | "not_met" | "not_applicable" | null;
       evidence: readonly string[];
     }[];
+    draft?: { id: string; expectedVersion: number };
   }): Promise<InitiativeEvaluation> {
     await this.assertOrganizationManager(input.actorId, input.organizationId);
     const initiative = await this.requireInitiative(
@@ -478,6 +742,17 @@ export class EvaluationService {
       );
     if (!assignment || assignment.assignedActorId !== input.actorId)
       throw new EvaluationDomainError("EVALUATION_REVIEWER_NOT_ASSIGNED");
+    const activeDraft = await this.dependencies.evaluations.findActiveDraft(
+      initiative.id,
+    );
+    if (
+      activeDraft &&
+      (activeDraft.id !== input.draft?.id ||
+        activeDraft.version !== input.draft.expectedVersion)
+    )
+      throw new EvaluationDomainError("EVALUATION_DRAFT_EXISTS");
+    if (!activeDraft && input.draft)
+      throw new EvaluationDomainError("EVALUATION_DRAFT_NOT_FOUND");
     if (initiative.version !== input.expectedVersion)
       throw new InitiativeVersionConflictError();
     const standard = await this.dependencies.standards.findById(
@@ -501,6 +776,8 @@ export class EvaluationService {
       evaluatedByActorId: input.actorId,
       evaluatedAt: now,
     });
+    if (evaluation.coverage.percentage !== 100)
+      throw new EvaluationDomainError("EVALUATION_INCOMPLETE");
     const reviewing = transitionInitiative(initiative, "under_review", now);
     const completedAssignment = {
       ...assignment,
@@ -536,6 +813,7 @@ export class EvaluationService {
           assignment: completedAssignment,
           auditEvent,
           event: this.durableEvent(reviewing, auditEvent),
+          ...(input.draft ? { draft: input.draft } : {}),
         }))
       )
         throw new InitiativeVersionConflictError();
@@ -551,6 +829,15 @@ export class EvaluationService {
       await this.dependencies.evaluations.updateReviewerAssignment(
         completedAssignment,
       );
+      if (
+        input.draft &&
+        !(await this.dependencies.evaluations.publishDraft({
+          draftId: input.draft.id,
+          expectedVersion: input.draft.expectedVersion,
+          evaluationId: evaluation.id,
+        }))
+      )
+        throw new EvaluationDomainError("EVALUATION_DRAFT_VERSION_CONFLICT");
       await this.dependencies.audit.record(auditEvent);
     }
     return evaluation;
@@ -786,6 +1073,69 @@ export class EvaluationService {
     if (!initiative || initiative.organizationId !== organizationId)
       throw new ResourceNotFoundError("INITIATIVE_NOT_FOUND");
     return initiative;
+  }
+  private async requireActiveStandard(
+    standardId: string,
+    organizationId: string,
+  ): Promise<EvaluationStandard> {
+    const standard = await this.dependencies.standards.findById(standardId);
+    if (
+      !standard ||
+      standard.organizationId !== organizationId ||
+      !standard.isActive
+    )
+      throw new EvaluationDomainError("EVALUATION_DRAFT_STANDARD_CHANGED");
+    return standard;
+  }
+  private async assertAssignedReviewer(
+    initiativeId: string,
+    actorId: string,
+    organizationId: string,
+  ): Promise<void> {
+    await this.assertOrganizationManager(actorId, organizationId);
+    const assignment =
+      await this.dependencies.evaluations.findActiveReviewerAssignment(
+        initiativeId,
+      );
+    if (!assignment || assignment.assignedActorId !== actorId)
+      throw new EvaluationDomainError("EVALUATION_REVIEWER_NOT_ASSIGNED");
+  }
+  private async assertAssignedReviewerOrOwner(
+    initiativeId: string,
+    actorId: string,
+    organizationId: string,
+  ): Promise<void> {
+    const role = await this.dependencies.tenancy.findOrganizationRole({
+      actorId,
+      organizationId,
+    });
+    if (role === "owner") return;
+    await this.assertAssignedReviewer(initiativeId, actorId, organizationId);
+  }
+  private async persistDraft(
+    draft: InitiativeEvaluationDraft,
+    expectedVersion: number | null,
+    auditEvent: InitiativeAuditEvent,
+  ): Promise<void> {
+    if (this.dependencies.evaluations.saveDraftWithAudit) {
+      if (
+        !(await this.dependencies.evaluations.saveDraftWithAudit({
+          draft,
+          expectedVersion,
+          auditEvent,
+        }))
+      )
+        throw new EvaluationDomainError("EVALUATION_DRAFT_VERSION_CONFLICT");
+    } else {
+      if (
+        !(await this.dependencies.evaluations.saveDraft({
+          draft,
+          expectedVersion,
+        }))
+      )
+        throw new EvaluationDomainError("EVALUATION_DRAFT_VERSION_CONFLICT");
+      await this.dependencies.audit.record(auditEvent);
+    }
   }
   private async requireReviewerAssignment(
     assignmentId: string,

@@ -83,6 +83,16 @@ El revisor asignado registra cada resultado como valoración (`met`, `not_met` o
 vacía que justifique la exclusión del denominador. La revisión crea una
 evaluación inmutable y mueve la iniciativa a `under_review`.
 
+Antes de publicar, el revisor puede guardar un borrador versionado con
+respuestas incompletas. Cada guardado conserva la versión de la iniciativa y
+del estándar, exige `expectedDraftVersion` y se audita. Publicar sólo acepta un
+borrador de cobertura 100 % y lo consume en la misma transacción que crea la
+evaluación. Si la organización adopta otro estándar, el borrador no se migra
+automáticamente: el revisor debe enviar un mapeo completo de criterios previos
+a criterios nuevos, declarar los descartes y explicar el motivo. El mapeo,
+los descartes y el motivo quedan en auditoría; después de migrar, la versión
+anterior ya no puede publicarse.
+
 La revisión confirma el cambio de estado y versión, la evaluación inmutable,
 el cierre de la asignación del revisor, la auditoría y el evento durable
 `initiative.evaluated.v1` en una sola transacción PostgreSQL. La decisión

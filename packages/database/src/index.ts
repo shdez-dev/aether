@@ -86,6 +86,7 @@ import type {
   TriageStandard,
   InitiativeTriage,
   InitiativeEvaluation,
+  InitiativeEvaluationDraft,
   EvaluationReviewerAssignment,
   InitiativeDecision,
   DecisionCondition,
@@ -3227,6 +3228,51 @@ export class PostgresTriageStore implements TriageStore {
 
 export class PostgresEvaluationStore implements EvaluationStore {
   constructor(private readonly pool: Pool) {}
+  async findActiveDraft(
+    initiativeId: string,
+  ): Promise<InitiativeEvaluationDraft | null> {
+    const result = await this.pool.query<InitiativeEvaluationDraftRow>(
+      `SELECT * FROM initiative_evaluation_drafts
+        WHERE initiative_id = $1 AND status = 'draft'`,
+      [initiativeId],
+    );
+    return result.rows[0] ? toInitiativeEvaluationDraft(result.rows[0]) : null;
+  }
+  async saveDraft(input: {
+    draft: InitiativeEvaluationDraft;
+    expectedVersion: number | null;
+  }): Promise<boolean> {
+    return saveInitiativeEvaluationDraft(this.pool, input);
+  }
+  async saveDraftWithAudit(input: {
+    draft: InitiativeEvaluationDraft;
+    expectedVersion: number | null;
+    auditEvent: InitiativeAuditEvent;
+  }): Promise<boolean> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      if (!(await saveInitiativeEvaluationDraft(client, input))) {
+        await client.query("ROLLBACK");
+        return false;
+      }
+      await insertInitiativeAuditEvent(client, input.auditEvent);
+      await client.query("COMMIT");
+      return true;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+  async publishDraft(input: {
+    draftId: string;
+    expectedVersion: number;
+    evaluationId: string;
+  }): Promise<boolean> {
+    return publishInitiativeEvaluationDraft(this.pool, input);
+  }
   async commitReview(input: {
     initiative: Initiative;
     expectedVersion: number;
@@ -3234,6 +3280,7 @@ export class PostgresEvaluationStore implements EvaluationStore {
     assignment: EvaluationReviewerAssignment;
     auditEvent: InitiativeAuditEvent;
     event: DurableDomainEvent;
+    draft?: { id: string; expectedVersion: number };
   }): Promise<boolean> {
     const client = await this.pool.connect();
     try {
@@ -3249,6 +3296,17 @@ export class PostgresEvaluationStore implements EvaluationStore {
         return false;
       }
       await insertInitiativeEvaluation(client, input.evaluation);
+      if (
+        input.draft &&
+        !(await publishInitiativeEvaluationDraft(client, {
+          draftId: input.draft.id,
+          expectedVersion: input.draft.expectedVersion,
+          evaluationId: input.evaluation.id,
+        }))
+      ) {
+        await client.query("ROLLBACK");
+        return false;
+      }
       const assignment = await client.query(
         `UPDATE initiative_evaluation_reviewer_assignments
             SET status = 'completed', status_changed_at = $2,
@@ -3474,6 +3532,66 @@ async function updateInitiativeForEvaluation(
       initiative.updatedAt,
       expectedVersion,
     ],
+  );
+  return result.rowCount === 1;
+}
+
+async function saveInitiativeEvaluationDraft(
+  client: Pool | PoolClient,
+  input: { draft: InitiativeEvaluationDraft; expectedVersion: number | null },
+): Promise<boolean> {
+  const draft = input.draft;
+  const result =
+    input.expectedVersion === null
+      ? await client.query(
+          `INSERT INTO initiative_evaluation_drafts
+         (id, organization_id, workspace_id, initiative_id, initiative_version,
+          standard_id, standard_version, results, version, status,
+          updated_by_actor_id, updated_at, published_evaluation_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'draft',$10,$11,NULL)
+         ON CONFLICT DO NOTHING`,
+          [
+            draft.id,
+            draft.organizationId,
+            draft.workspaceId,
+            draft.initiativeId,
+            draft.initiativeVersion,
+            draft.standardId,
+            draft.standardVersion,
+            asJson(draft.results),
+            draft.version,
+            draft.updatedByActorId,
+            draft.updatedAt,
+          ],
+        )
+      : await client.query(
+          `UPDATE initiative_evaluation_drafts
+            SET standard_id = $2, standard_version = $3, results = $4,
+                version = $5, updated_by_actor_id = $6, updated_at = $7
+          WHERE id = $1 AND version = $8 AND status = 'draft'`,
+          [
+            draft.id,
+            draft.standardId,
+            draft.standardVersion,
+            asJson(draft.results),
+            draft.version,
+            draft.updatedByActorId,
+            draft.updatedAt,
+            input.expectedVersion,
+          ],
+        );
+  return result.rowCount === 1;
+}
+
+async function publishInitiativeEvaluationDraft(
+  client: Pool | PoolClient,
+  input: { draftId: string; expectedVersion: number; evaluationId: string },
+): Promise<boolean> {
+  const result = await client.query(
+    `UPDATE initiative_evaluation_drafts
+        SET status = 'published', published_evaluation_id = $3
+      WHERE id = $1 AND version = $2 AND status = 'draft'`,
+    [input.draftId, input.expectedVersion, input.evaluationId],
   );
   return result.rowCount === 1;
 }
@@ -5830,6 +5948,21 @@ type InitiativeEvaluationRow = {
   annulled_at: Date | null;
   annulment_reason: string | null;
 };
+type InitiativeEvaluationDraftRow = {
+  id: string;
+  organization_id: string;
+  workspace_id: string;
+  initiative_id: string;
+  initiative_version: number;
+  standard_id: string;
+  standard_version: number;
+  results: InitiativeEvaluationDraft["results"];
+  version: number;
+  status: InitiativeEvaluationDraft["status"];
+  updated_by_actor_id: string;
+  updated_at: Date;
+  published_evaluation_id: string | null;
+};
 type EvaluationReviewerAssignmentRow = {
   id: string;
   organization_id: string;
@@ -6210,6 +6343,25 @@ function toInitiativeEvaluation(
     annulledByActorId: row.annulled_by_actor_id,
     annulledAt: row.annulled_at,
     annulmentReason: row.annulment_reason,
+  };
+}
+function toInitiativeEvaluationDraft(
+  row: InitiativeEvaluationDraftRow,
+): InitiativeEvaluationDraft {
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    workspaceId: row.workspace_id,
+    initiativeId: row.initiative_id,
+    initiativeVersion: row.initiative_version,
+    standardId: row.standard_id,
+    standardVersion: row.standard_version,
+    results: row.results,
+    version: row.version,
+    status: row.status,
+    updatedByActorId: row.updated_by_actor_id,
+    updatedAt: row.updated_at,
+    publishedEvaluationId: row.published_evaluation_id,
   };
 }
 function toEvaluationReviewerAssignment(

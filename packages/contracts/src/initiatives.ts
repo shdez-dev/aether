@@ -55,6 +55,33 @@ export const StartReviewRequestSchema = z.object({
     )
     .max(100),
 });
+export const SaveEvaluationDraftRequestSchema = z.object({
+  organizationId: UuidSchema,
+  expectedInitiativeVersion: z.number().int().nonnegative(),
+  expectedDraftVersion: z.number().int().nonnegative().nullable(),
+  standardId: UuidSchema,
+  results: StartReviewRequestSchema.shape.results,
+});
+export const MigrateEvaluationDraftRequestSchema = z.object({
+  organizationId: UuidSchema,
+  expectedDraftVersion: z.number().int().nonnegative(),
+  standardId: UuidSchema,
+  mappings: z
+    .array(
+      z.object({
+        fromCriterionId: UuidSchema,
+        toCriterionId: UuidSchema,
+      }),
+    )
+    .max(100),
+  discardedCriterionIds: z.array(UuidSchema).max(100),
+  reason: NonEmptyTextSchema.max(2_000),
+});
+export const PublishEvaluationDraftRequestSchema = z.object({
+  organizationId: UuidSchema,
+  expectedInitiativeVersion: z.number().int().nonnegative(),
+  expectedDraftVersion: z.number().int().nonnegative(),
+});
 export const AnnulEvaluationRequestSchema = z.object({
   organizationId: UuidSchema,
   reason: NonEmptyTextSchema.max(2_000),
@@ -616,6 +643,21 @@ export const InitiativeEvaluationResponseSchema = z.object({
   annulledByActorId: z.string().nullable(),
   annulledAt: z.string().datetime().nullable(),
   annulmentReason: z.string().nullable(),
+});
+export const InitiativeEvaluationDraftResponseSchema = z.object({
+  id: UuidSchema,
+  organizationId: UuidSchema,
+  workspaceId: UuidSchema,
+  initiativeId: UuidSchema,
+  initiativeVersion: z.number().int().nonnegative(),
+  standardId: UuidSchema,
+  standardVersion: z.number().int().positive(),
+  results: StartReviewRequestSchema.shape.results,
+  version: z.number().int().nonnegative(),
+  status: z.enum(["draft", "published"]),
+  updatedByActorId: z.string(),
+  updatedAt: z.string().datetime(),
+  publishedEvaluationId: UuidSchema.nullable(),
 });
 export const EvaluationReviewerAssignmentResponseSchema = z.object({
   id: UuidSchema,

@@ -3351,6 +3351,171 @@ describe.sequential("PostgreSQL integration", () => {
         baseline: { version: 1, snapshot: { id: project.id } },
         differences: [],
       });
+
+      const draftInitiative = await initiativeService.create({
+        actorId: owner,
+        organizationId: organization.id,
+        workspaceId: workspace.id,
+        correlationId: randomUUID(),
+        title: "Evaluación en borrador",
+        problemStatement: "Es necesario revisar la evidencia.",
+        expectedOutcome: "Decidir con una versión explícita.",
+        classification: "internal",
+        requestedPriority: "medium",
+      });
+      const draftPresented = await initiativeService.present({
+        actorId: owner,
+        organizationId: organization.id,
+        initiativeId: draftInitiative.id,
+        expectedVersion: draftInitiative.version,
+        correlationId: randomUUID(),
+      });
+      await evaluationService.assignReviewer({
+        actorId: owner,
+        organizationId: organization.id,
+        initiativeId: draftInitiative.id,
+        reviewerActorId: "reviewer@example.test",
+        correlationId: randomUUID(),
+      });
+      const partialDraft = await evaluationService.saveDraft({
+        actorId: "reviewer@example.test",
+        organizationId: organization.id,
+        initiativeId: draftInitiative.id,
+        expectedInitiativeVersion: draftPresented.version,
+        expectedDraftVersion: null,
+        standardId: replacementStandard.id,
+        results: [
+          {
+            criterionId: replacementStandard.criteria[0]!.id,
+            assessment: null,
+            evidence: [],
+          },
+        ],
+        correlationId: randomUUID(),
+      });
+      await expect(
+        evaluationService.publishDraft({
+          actorId: "reviewer@example.test",
+          organizationId: organization.id,
+          initiativeId: draftInitiative.id,
+          expectedInitiativeVersion: draftPresented.version,
+          expectedDraftVersion: partialDraft.version,
+          correlationId: randomUUID(),
+        }),
+      ).rejects.toMatchObject({ code: "EVALUATION_INCOMPLETE" });
+      const newestStandard = await evaluationService.publishStandard({
+        actorId: owner,
+        organizationId: organization.id,
+        name: standard.name,
+        version: 3,
+        criteria: [
+          {
+            id: randomUUID(),
+            code: "IMPACT_V3",
+            name: "Impacto actualizado",
+            description: "Versión nueva.",
+            weight: 3,
+          },
+        ],
+      });
+      await evaluationService.activateStandard({
+        actorId: owner,
+        organizationId: organization.id,
+        standardId: newestStandard.id,
+      });
+      await expect(
+        evaluationService.publishDraft({
+          actorId: "reviewer@example.test",
+          organizationId: organization.id,
+          initiativeId: draftInitiative.id,
+          expectedInitiativeVersion: draftPresented.version,
+          expectedDraftVersion: partialDraft.version,
+          correlationId: randomUUID(),
+        }),
+      ).rejects.toMatchObject({ code: "EVALUATION_DRAFT_STANDARD_CHANGED" });
+      const migratedDraft = await evaluationService.migrateDraft({
+        actorId: "reviewer@example.test",
+        organizationId: organization.id,
+        initiativeId: draftInitiative.id,
+        expectedDraftVersion: partialDraft.version,
+        standardId: newestStandard.id,
+        mappings: [
+          {
+            fromCriterionId: replacementStandard.criteria[0]!.id,
+            toCriterionId: newestStandard.criteria[0]!.id,
+          },
+        ],
+        discardedCriterionIds: [],
+        reason: "Nueva versión adoptada.",
+        correlationId: randomUUID(),
+      });
+      expect(migratedDraft).toMatchObject({
+        standardId: newestStandard.id,
+        version: partialDraft.version + 1,
+        results: [
+          { criterionId: newestStandard.criteria[0]!.id, assessment: null },
+        ],
+      });
+      await expect(
+        evaluationService.saveDraft({
+          actorId: "reviewer@example.test",
+          organizationId: organization.id,
+          initiativeId: draftInitiative.id,
+          expectedInitiativeVersion: draftPresented.version,
+          expectedDraftVersion: partialDraft.version,
+          standardId: newestStandard.id,
+          results: [],
+          correlationId: randomUUID(),
+        }),
+      ).rejects.toMatchObject({ code: "EVALUATION_DRAFT_VERSION_CONFLICT" });
+      const completedDraft = await evaluationService.saveDraft({
+        actorId: "reviewer@example.test",
+        organizationId: organization.id,
+        initiativeId: draftInitiative.id,
+        expectedInitiativeVersion: draftPresented.version,
+        expectedDraftVersion: migratedDraft.version,
+        standardId: newestStandard.id,
+        results: [
+          {
+            criterionId: newestStandard.criteria[0]!.id,
+            assessment: "met",
+            evidence: ["Evidencia migrada y revisada."],
+          },
+        ],
+        correlationId: randomUUID(),
+      });
+      const publishedDraftEvaluation = await evaluationService.publishDraft({
+        actorId: "reviewer@example.test",
+        organizationId: organization.id,
+        initiativeId: draftInitiative.id,
+        expectedInitiativeVersion: draftPresented.version,
+        expectedDraftVersion: completedDraft.version,
+        correlationId: randomUUID(),
+      });
+      expect(await initiativesStore.findById(draftInitiative.id)).toMatchObject(
+        { status: "under_review" },
+      );
+      expect(
+        (
+          await pool.query<{ status: string; published_evaluation_id: string }>(
+            `SELECT status, published_evaluation_id FROM initiative_evaluation_drafts WHERE id = $1`,
+            [completedDraft.id],
+          )
+        ).rows,
+      ).toEqual([
+        {
+          status: "published",
+          published_evaluation_id: publishedDraftEvaluation.id,
+        },
+      ]);
+      expect(
+        (
+          await pool.query(
+            `SELECT event_id FROM outbox_events WHERE aggregate_id = $1 AND event_type = 'initiative.evaluated.v1'`,
+            [draftInitiative.id],
+          )
+        ).rowCount,
+      ).toBe(1);
     },
     120_000,
   );
