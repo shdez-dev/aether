@@ -56,6 +56,7 @@ function TaskCard({
   task,
   onEditDate,
   onManage,
+  onCollaborators,
   onMove,
   lastPosition,
   orderBusy = false,
@@ -64,6 +65,7 @@ function TaskCard({
   task: Task;
   onEditDate: (task: Task) => void;
   onManage: (task: Task) => void;
+  onCollaborators: (task: Task) => void;
   onMove?: (task: Task, position: number) => void;
   lastPosition?: number;
   orderBusy?: boolean;
@@ -125,6 +127,13 @@ function TaskCard({
           Cambiar fecha
         </button>
       ) : null}
+      <button
+        className="task-link-button"
+        type="button"
+        onClick={() => onCollaborators(task)}
+      >
+        Colaboradores
+      </button>
       {!readOnly &&
       task.workflowStatus !== "done" &&
       task.workflowStatus !== "cancelled" ? (
@@ -189,11 +198,20 @@ export function ProjectTasks({
   const [workflowError, setWorkflowError] = useState("");
   const [orderBusy, setOrderBusy] = useState(false);
   const [orderError, setOrderError] = useState("");
+  const [collaboratorTaskId, setCollaboratorTaskId] = useState<string | null>(
+    null,
+  );
+  const [collaborators, setCollaborators] = useState<string[]>([]);
+  const [collaboratorDraft, setCollaboratorDraft] = useState("");
+  const [collaboratorLoading, setCollaboratorLoading] = useState(false);
+  const [collaboratorBusy, setCollaboratorBusy] = useState(false);
+  const [collaboratorError, setCollaboratorError] = useState("");
   const [revision, setRevision] = useState(0);
   const canReorder = !executorTeamId && !ownerActorId;
 
   const selectedTask = tasks.find((task) => task.id === dateEdit?.taskId);
   const workflowTask = tasks.find((task) => task.id === workflowEdit?.taskId);
+  const collaboratorTask = tasks.find((task) => task.id === collaboratorTaskId);
   const workflowCanBlock =
     workflowEdit?.status === "in_progress" ||
     workflowEdit?.status === "in_review";
@@ -250,6 +268,7 @@ export function ProjectTasks({
     setDateImpact(null);
     setDateError("");
     setWorkflowEdit(null);
+    setCollaboratorTaskId(null);
   }
   function manageTask(task: Task) {
     if (dateBusy || workflowBusy || readOnly) return;
@@ -262,6 +281,49 @@ export function ProjectTasks({
     setWorkflowError("");
     setDateEdit(null);
     setDateImpact(null);
+    setCollaboratorTaskId(null);
+  }
+
+  function manageCollaborators(task: Task) {
+    setCollaboratorTaskId(task.id);
+    setCollaborators([]);
+    setCollaboratorDraft("");
+    setCollaboratorError("");
+    setDateEdit(null);
+    setDateImpact(null);
+    setWorkflowEdit(null);
+  }
+
+  async function addCollaborator() {
+    if (!collaboratorTask || collaboratorBusy || readOnly) return;
+    const actorId = collaboratorDraft.trim();
+    if (!actorId || collaborators.includes(actorId)) return;
+    setCollaboratorBusy(true);
+    setCollaboratorError("");
+    try {
+      await request(
+        `projects/${projectId}/next-actions/${collaboratorTask.id}/collaborators`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            organizationId,
+            actorId,
+            expectedVersion: collaboratorTask.version,
+          }),
+        },
+      );
+      setCollaboratorDraft("");
+      onChanged?.();
+    } catch (caught) {
+      setCollaboratorError(
+        caught instanceof Error
+          ? caught.message
+          : "No se pudo agregar el colaborador.",
+      );
+    } finally {
+      setRevision((current) => current + 1);
+      setCollaboratorBusy(false);
+    }
   }
 
   async function claimTask() {
@@ -399,6 +461,35 @@ export function ProjectTasks({
       setDateBusy(false);
     }
   }
+
+  useEffect(() => {
+    if (!collaboratorTaskId) return;
+    let active = true;
+    setCollaboratorLoading(true);
+    void request(
+      `projects/${projectId}/next-actions/${collaboratorTaskId}/collaborators?${new URLSearchParams({ organizationId })}`,
+    )
+      .then(async (response) => {
+        const actorIds = (await response.json()) as string[];
+        if (active) setCollaborators(actorIds);
+      })
+      .catch((caught: unknown) => {
+        if (active) {
+          setCollaborators([]);
+          setCollaboratorError(
+            caught instanceof Error
+              ? caught.message
+              : "No se pudieron cargar los colaboradores.",
+          );
+        }
+      })
+      .finally(() => {
+        if (active) setCollaboratorLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [projectId, organizationId, collaboratorTaskId, revision, request]);
 
   useEffect(() => {
     let active = true;
@@ -596,6 +687,7 @@ export function ProjectTasks({
                 task={task}
                 onEditDate={editDate}
                 onManage={manageTask}
+                onCollaborators={manageCollaborators}
                 {...(canReorder ? { onMove: moveTask } : {})}
                 lastPosition={statusCounts.get(task.workflowStatus) ?? 0}
                 orderBusy={orderBusy}
@@ -632,6 +724,7 @@ export function ProjectTasks({
                           task={task}
                           onEditDate={editDate}
                           onManage={manageTask}
+                          onCollaborators={manageCollaborators}
                           {...(canReorder ? { onMove: moveTask } : {})}
                           lastPosition={
                             statusCounts.get(task.workflowStatus) ?? 0
@@ -664,6 +757,7 @@ export function ProjectTasks({
                   task={task}
                   onEditDate={editDate}
                   onManage={manageTask}
+                  onCollaborators={manageCollaborators}
                   readOnly={readOnly}
                 />
               ))}
@@ -703,6 +797,7 @@ export function ProjectTasks({
                           task={task}
                           onEditDate={editDate}
                           onManage={manageTask}
+                          onCollaborators={manageCollaborators}
                           readOnly={readOnly}
                         />
                       ))}
@@ -722,6 +817,7 @@ export function ProjectTasks({
                     task={task}
                     onEditDate={editDate}
                     onManage={manageTask}
+                    onCollaborators={manageCollaborators}
                     readOnly={readOnly}
                   />
                 ))}
@@ -954,6 +1050,72 @@ export function ProjectTasks({
               </button>
             </div>
           </form>
+        </section>
+      ) : null}
+      {collaboratorTask ? (
+        <section
+          className="task-date-editor"
+          aria-label="Colaboradores de tarea"
+        >
+          <h3>Colaboradores de {collaboratorTask.description}</h3>
+          {collaboratorLoading ? (
+            <p role="status">Cargando colaboradores…</p>
+          ) : (
+            <p>
+              {collaborators.length
+                ? collaborators.join(", ")
+                : "Sin colaboradores."}
+            </p>
+          )}
+          {collaboratorError ? <p role="alert">{collaboratorError}</p> : null}
+          {!readOnly ? (
+            <form
+              className="nested-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void addCollaborator();
+              }}
+            >
+              <label className="ui-field task-month">
+                ID del nuevo colaborador
+                <input
+                  value={collaboratorDraft}
+                  maxLength={255}
+                  disabled={collaboratorBusy}
+                  onChange={(event) => setCollaboratorDraft(event.target.value)}
+                />
+              </label>
+              <div className="form-actions">
+                <button
+                  className="ui-button"
+                  type="submit"
+                  disabled={
+                    collaboratorBusy ||
+                    collaboratorLoading ||
+                    !collaboratorDraft.trim() ||
+                    collaborators.includes(collaboratorDraft.trim())
+                  }
+                >
+                  Agregar colaborador
+                </button>
+                <button
+                  className="task-link-button"
+                  type="button"
+                  onClick={() => setCollaboratorTaskId(null)}
+                >
+                  Cerrar
+                </button>
+              </div>
+            </form>
+          ) : (
+            <button
+              className="task-link-button"
+              type="button"
+              onClick={() => setCollaboratorTaskId(null)}
+            >
+              Cerrar
+            </button>
+          )}
         </section>
       ) : null}
     </section>

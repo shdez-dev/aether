@@ -373,3 +373,71 @@ it("moves a task within its shared column using its current version", async () =
     ),
   );
 });
+
+it("adds a collaborator to the versioned task and reloads the shared record", async () => {
+  let task = {
+    id: "task-id",
+    description: "Coordinar entrega",
+    workflowStatus: "in_progress",
+    position: 1,
+    ownerActorId: "owner",
+    executorTeamId: null,
+    reviewerActorId: null,
+    blockedReason: null,
+    unblockResponsibleActorId: null,
+    dueOn: null,
+    priority: "medium",
+    version: 5,
+  };
+  let collaborators: string[] = [];
+  const onChanged = vi.fn();
+  const request = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith("/teams")) return new Response("[]");
+    if (url.includes("/collaborators?") && !init)
+      return new Response(JSON.stringify(collaborators));
+    if (url.endsWith("/collaborators") && init?.method === "POST") {
+      collaborators = ["colleague"];
+      task = { ...task, version: 6 };
+      return new Response(null, { status: 204 });
+    }
+    return new Response(
+      JSON.stringify(
+        url.includes("/calendar?") ? { dated: [], undated: [task] } : [task],
+      ),
+    );
+  });
+  render(
+    createElement(ProjectTasks, {
+      projectId: "project",
+      organizationId: "organization",
+      workspaceId: "workspace",
+      refreshKey: 0,
+      request,
+      onChanged,
+    }),
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Colaboradores" }));
+  expect(await screen.findByText("Sin colaboradores.")).toBeTruthy();
+  fireEvent.change(
+    screen.getByRole("textbox", { name: "ID del nuevo colaborador" }),
+    {
+      target: { value: " colleague " },
+    },
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Agregar colaborador" }));
+  await waitFor(() =>
+    expect(request).toHaveBeenCalledWith(
+      "projects/project/next-actions/task-id/collaborators",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          organizationId: "organization",
+          actorId: "colleague",
+          expectedVersion: 5,
+        }),
+      }),
+    ),
+  );
+  expect(await screen.findByText("colleague")).toBeTruthy();
+  expect(onChanged).toHaveBeenCalledOnce();
+});
