@@ -8,6 +8,6 @@ Type=oneshot
 User=athe
 Group=athe
 WorkingDirectory=/home/athe/aether
-ExecStart=/home/athe/aether/infra/deploy/update.sh
+ExecStart=/usr/bin/bash /home/athe/aether/infra/deploy/update.sh
 Nice=10
 IOSchedulingClass=idle

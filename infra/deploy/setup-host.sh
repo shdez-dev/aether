@@ -42,4 +42,4 @@ sudo install -m 0644 "$ROOT/infra/deploy/aether-deploy.timer" /etc/systemd/syste
 sudo systemctl daemon-reload
 sudo systemctl enable --now aether-deploy.timer
 
-echo "Deployment secrets initialized. Run infra/deploy/deploy.sh once to launch AETHER."
+echo "Deployment secrets initialized. Run bash infra/deploy/deploy.sh once to launch AETHER."

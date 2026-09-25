@@ -20,4 +20,4 @@ sed -i \
   -e 's|^AETHER_BIND_ADDRESS=.*|AETHER_BIND_ADDRESS=127.0.0.1|' \
   "$COMPOSE_ENV"
 
-"$ROOT/infra/deploy/deploy.sh"
+/usr/bin/bash "$ROOT/infra/deploy/deploy.sh"
