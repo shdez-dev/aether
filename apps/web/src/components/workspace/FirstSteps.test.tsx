@@ -28,7 +28,7 @@ it("permite crear una organización con la política requerida", async () => {
   );
 
   fireEvent.click(screen.getByRole("button", { name: /^Crear organización/ }));
-  fireEvent.change(screen.getByLabelText("Nombre de la organización"), {
+  fireEvent.change(await screen.findByLabelText("Nombre de la organización"), {
     target: { value: "Equipo Aurora" },
   });
   fireEvent.click(screen.getByRole("button", { name: /^Crear organización$/ }));
@@ -70,7 +70,7 @@ it("acepta una invitación sin conceder acceso sólo por tener cuenta", async ()
   fireEvent.click(
     screen.getByRole("button", { name: /^Unirme con invitación/ }),
   );
-  fireEvent.change(screen.getByLabelText("Código de invitación"), {
+  fireEvent.change(await screen.findByLabelText("Código de invitación"), {
     target: { value: "valid-invitation-token" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Aceptar invitación" }));
@@ -80,5 +80,45 @@ it("acepta una invitación sin conceder acceso sólo por tener cuenta", async ()
   expect(request).toHaveBeenCalledWith("invitations/accept", {
     method: "POST",
     body: JSON.stringify({ token: "valid-invitation-token" }),
+  });
+});
+
+it("reemplaza las opciones por el flujo elegido y permite volver", async () => {
+  render(
+    <FirstSteps
+      organization={null}
+      request={vi.fn()}
+      onOrganizationReady={vi.fn(async () => {})}
+      onWorkspaceReady={vi.fn()}
+      onLogout={vi.fn(async () => {})}
+    />,
+  );
+
+  fireEvent.click(
+    screen.getByRole("button", { name: /^Unirme con invitación/ }),
+  );
+
+  expect(await screen.findByLabelText("Código de invitación")).toBeTruthy();
+  await waitFor(() => {
+    expect(
+      screen.queryByRole("button", { name: /^Crear organización/ }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /^Unirme con invitación/ }),
+    ).toBeNull();
+  });
+
+  fireEvent.click(
+    screen.getByRole("button", { name: "Volver a las opciones" }),
+  );
+
+  expect(
+    await screen.findByRole("button", { name: /^Crear organización/ }),
+  ).toBeTruthy();
+  expect(
+    screen.getByRole("button", { name: /^Unirme con invitación/ }),
+  ).toBeTruthy();
+  await waitFor(() => {
+    expect(screen.queryByLabelText("Código de invitación")).toBeNull();
   });
 });
