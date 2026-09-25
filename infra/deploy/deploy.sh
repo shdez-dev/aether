@@ -81,6 +81,8 @@ compose up -d postgres keycloak garage clamav
 compose run --rm keycloak-config
 compose run --rm migrate
 compose up -d --remove-orphans
+# Refresh the single-file Caddy bind mount after Git replaces Caddyfile by inode.
+compose up -d --force-recreate gateway
 
 HEALTH_URL="http://${AETHER_BIND_ADDRESS:-127.0.0.1}:${AETHER_PORT:-8081}/"
 for attempt in $(seq 1 40); do
