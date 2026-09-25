@@ -72,8 +72,9 @@ compose run --rm keycloak-config
 compose run --rm migrate
 compose up -d --remove-orphans
 
+HEALTH_URL="http://${AETHER_BIND_ADDRESS:-127.0.0.1}:${AETHER_PORT:-8081}/"
 for attempt in $(seq 1 40); do
-  if curl --fail --silent --show-error "http://127.0.0.1:${AETHER_PORT:-8081}/" >/dev/null; then
+  if curl --fail --silent --show-error "$HEALTH_URL" >/dev/null; then
     echo "AETHER deployment healthy at $AETHER_PUBLIC_URL"
     exit 0
   fi
