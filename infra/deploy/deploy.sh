@@ -28,6 +28,10 @@ fi
   echo "Missing deployment secrets under /srv/aether/secrets" >&2
   exit 1
 }
+if ! grep -q '^GARAGE_RPC_SECRET=' "$COMPOSE_ENV"; then
+  printf 'GARAGE_RPC_SECRET=%s\n' "$(openssl rand -hex 32)" >>"$COMPOSE_ENV"
+  chmod 0600 "$COMPOSE_ENV"
+fi
 mkdir -p "$RUNTIME_DIR"
 set -a
 # shellcheck disable=SC1090
