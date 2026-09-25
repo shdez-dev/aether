@@ -11,6 +11,7 @@ LOCK_FILE="/run/lock/aether-deploy.lock"
 exec 9>"$LOCK_FILE"
 flock -n 9 || exit 0
 
+BUILD_IMAGES=1
 if [[ "${1:-}" == "--update" ]]; then
   cd "$ROOT"
   git fetch --quiet origin main
@@ -22,6 +23,11 @@ if [[ "${1:-}" == "--update" ]]; then
     exit 1
   }
   git checkout --detach "$target"
+  if git diff --quiet "$current" "$target" -- \
+    apps packages Dockerfile package.json pnpm-lock.yaml pnpm-workspace.yaml \
+    infra/deploy/configure-keycloak.mjs; then
+    BUILD_IMAGES=0
+  fi
 fi
 
 [[ -r "$COMPOSE_ENV" && -r "$BREVO_ENV" ]] || {
@@ -42,10 +48,14 @@ compose() {
   sudo docker compose --env-file "$COMPOSE_ENV" -f "$COMPOSE_FILE" "$@"
 }
 
-sudo docker build --target runtime -t aether-app:local -f "$ROOT/Dockerfile" "$ROOT"
-sudo docker build --target web \
-  --build-arg "NEXT_PUBLIC_APP_URL=$AETHER_PUBLIC_URL" \
-  -t aether-web:local -f "$ROOT/Dockerfile" "$ROOT"
+if [[ "$BUILD_IMAGES" == "1" ]]; then
+  sudo docker build --target runtime -t aether-app:local -f "$ROOT/Dockerfile" "$ROOT"
+  sudo docker build --target web \
+    --build-arg "NEXT_PUBLIC_APP_URL=$AETHER_PUBLIC_URL" \
+    -t aether-web:local -f "$ROOT/Dockerfile" "$ROOT"
+else
+  echo "No application source changes detected; reusing existing AETHER images."
+fi
 
 sudo docker run --rm --user "$(id -u):$(id -g)" --env-file "$COMPOSE_ENV" \
   -v "$ROOT:/app" -v "$RUNTIME_DIR:/run/aether" \

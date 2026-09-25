@@ -8,7 +8,8 @@
 		reverse_proxy keycloak:8080
 	}
 
-	handle /auth/continuar /auth/crear-cuenta {
+	@auth_redirect path /auth/continuar /auth/crear-cuenta
+	handle @auth_redirect {
 		reverse_proxy web:3000
 	}
 
