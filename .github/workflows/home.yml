@@ -1,0 +1,37 @@
+name: Home quality
+
+on:
+  pull_request:
+    paths: ["apps/web/**", "packages/ui/**", "packages/contracts/**", "packages/config/**", "pnpm-lock.yaml", ".github/workflows/home.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  home:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @aether/web exec playwright install --with-deps chromium firefox webkit
+      - run: pnpm --filter @aether/web build
+      - run: pnpm --filter @aether/web test:e2e --workers=2
+      - run: pnpm --filter @aether/web lighthouse
+      - run: pnpm --filter @aether/web lighthouse --config=lighthouserc.mobile.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: home-quality-reports
+          path: |
+            apps/web/test-results
+            apps/web/.lighthouseci
+          include-hidden-files: true

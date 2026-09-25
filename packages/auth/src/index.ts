@@ -107,6 +107,7 @@ export interface OidcProvider {
     state: string;
     nonce: string;
     codeChallenge: string;
+    intent?: "login" | "register";
   }): Promise<string>;
   exchangeAuthorizationCode(input: {
     callbackUrl: string;
@@ -147,7 +148,9 @@ export class AuthService {
     this.now = options.now ?? (() => new Date());
   }
 
-  async beginLogin(): Promise<LoginStart> {
+  async beginLogin(
+    intent: "login" | "register" = "login",
+  ): Promise<LoginStart> {
     const now = this.now();
     const handle = randomOpaqueToken();
     const state = randomOpaqueToken();
@@ -157,6 +160,7 @@ export class AuthService {
       state,
       nonce,
       codeChallenge: calculateCodeChallenge(codeVerifier),
+      intent,
     });
     await this.options.store.createLoginTransaction({
       id: randomUUID(),
@@ -493,6 +497,7 @@ export function createKeycloakOidcProvider(config: {
           nonce: input.nonce,
           code_challenge: input.codeChallenge,
           code_challenge_method: "S256",
+          ...(input.intent === "register" ? { prompt: "create" } : {}),
         }).href;
       } catch (error) {
         throw oidcProviderError(error);

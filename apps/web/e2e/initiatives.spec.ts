@@ -87,8 +87,11 @@ test("carga una iniciativa y la presenta", async ({ page }) => {
       },
     }),
   );
-  await page.goto("/");
-  await expect(page.getByText("Contexto activo")).toBeVisible();
+  await page.goto("/workspace");
+  await expect(
+    page.getByRole("heading", { name: "Lo importante, en movimiento." }),
+  ).toBeVisible();
+  await page.getByRole("link", { name: "Iniciativas" }).click();
   await expect(
     page.getByRole("button", { name: "Reducir espera" }),
   ).toBeVisible();

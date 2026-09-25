@@ -16,5 +16,5 @@
     "packages/**/*.ts",
     "packages/**/*.tsx"
   ],
-  "exclude": ["apps/web/app/**/*"]
+  "exclude": ["apps/web/src/app/**/*"]
 }

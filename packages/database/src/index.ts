@@ -3498,7 +3498,7 @@ export class PostgresEvaluationStore implements EvaluationStore {
     evaluationId: string,
   ): Promise<InitiativeEvaluation | null> {
     const result = await this.pool.query<InitiativeEvaluationRow>(
-      `SELECT id, organization_id, workspace_id, initiative_id, initiative_version, standard_id, standard_version, criteria, coverage, quality, maturity, evaluated_by_actor_id, evaluated_at, annulled_by_actor_id, annulled_at, annulment_reason FROM initiative_evaluations WHERE id = $1`,
+      `SELECT id, organization_id, workspace_id, initiative_id, initiative_version, standard_id, standard_version, criteria, findings, recommendation, coverage, quality, maturity, evaluated_by_actor_id, evaluated_at, annulled_by_actor_id, annulled_at, annulment_reason FROM initiative_evaluations WHERE id = $1`,
       [evaluationId],
     );
     return result.rows[0] ? toInitiativeEvaluation(result.rows[0]) : null;
@@ -3605,9 +3605,9 @@ async function saveInitiativeEvaluationDraft(
       ? await client.query(
           `INSERT INTO initiative_evaluation_drafts
          (id, organization_id, workspace_id, initiative_id, initiative_version,
-          standard_id, standard_version, results, version, status,
+          standard_id, standard_version, results, findings, recommendation, version, status,
           updated_by_actor_id, updated_at, published_evaluation_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'draft',$10,$11,NULL)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'draft',$12,$13,NULL)
          ON CONFLICT DO NOTHING`,
           [
             draft.id,
@@ -3618,6 +3618,8 @@ async function saveInitiativeEvaluationDraft(
             draft.standardId,
             draft.standardVersion,
             asJson(draft.results),
+            asJson(draft.findings),
+            draft.recommendation,
             draft.version,
             draft.updatedByActorId,
             draft.updatedAt,
@@ -3626,13 +3628,16 @@ async function saveInitiativeEvaluationDraft(
       : await client.query(
           `UPDATE initiative_evaluation_drafts
             SET standard_id = $2, standard_version = $3, results = $4,
-                version = $5, updated_by_actor_id = $6, updated_at = $7
-          WHERE id = $1 AND version = $8 AND status = 'draft'`,
+                findings = $5, recommendation = $6, version = $7,
+                updated_by_actor_id = $8, updated_at = $9
+          WHERE id = $1 AND version = $10 AND status = 'draft'`,
           [
             draft.id,
             draft.standardId,
             draft.standardVersion,
             asJson(draft.results),
+            asJson(draft.findings),
+            draft.recommendation,
             draft.version,
             draft.updatedByActorId,
             draft.updatedAt,
@@ -3660,8 +3665,8 @@ async function insertInitiativeEvaluation(
   evaluation: InitiativeEvaluation,
 ): Promise<void> {
   await client.query(
-    `INSERT INTO initiative_evaluations (id, organization_id, workspace_id, initiative_id, initiative_version, standard_id, standard_version, criteria, coverage, quality, maturity, evaluated_by_actor_id, evaluated_at, annulled_by_actor_id, annulled_at, annulment_reason)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+    `INSERT INTO initiative_evaluations (id, organization_id, workspace_id, initiative_id, initiative_version, standard_id, standard_version, criteria, findings, recommendation, coverage, quality, maturity, evaluated_by_actor_id, evaluated_at, annulled_by_actor_id, annulled_at, annulment_reason)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
     [
       evaluation.id,
       evaluation.organizationId,
@@ -3671,6 +3676,8 @@ async function insertInitiativeEvaluation(
       evaluation.standardId,
       evaluation.standardVersion,
       asJson(evaluation.criteria),
+      asJson(evaluation.findings),
+      evaluation.recommendation,
       asJson(evaluation.coverage),
       asJson(evaluation.quality),
       asJson(evaluation.maturity),
@@ -6002,6 +6009,8 @@ type InitiativeEvaluationRow = {
   standard_id: string;
   standard_version: number;
   criteria: InitiativeEvaluation["criteria"];
+  findings: InitiativeEvaluation["findings"];
+  recommendation: InitiativeEvaluation["recommendation"];
   coverage: InitiativeEvaluation["coverage"];
   quality: InitiativeEvaluation["quality"];
   maturity: InitiativeEvaluation["maturity"];
@@ -6020,6 +6029,8 @@ type InitiativeEvaluationDraftRow = {
   standard_id: string;
   standard_version: number;
   results: InitiativeEvaluationDraft["results"];
+  findings: InitiativeEvaluationDraft["findings"];
+  recommendation: InitiativeEvaluationDraft["recommendation"];
   version: number;
   status: InitiativeEvaluationDraft["status"];
   updated_by_actor_id: string;
@@ -6414,6 +6425,8 @@ function toInitiativeEvaluation(
     standardId: row.standard_id,
     standardVersion: row.standard_version,
     criteria: row.criteria,
+    findings: row.findings ?? [],
+    recommendation: row.recommendation ?? null,
     coverage: row.coverage,
     quality: row.quality,
     maturity: row.maturity,
@@ -6436,6 +6449,8 @@ function toInitiativeEvaluationDraft(
     standardId: row.standard_id,
     standardVersion: row.standard_version,
     results: row.results,
+    findings: row.findings ?? [],
+    recommendation: row.recommendation ?? null,
     version: row.version,
     status: row.status,
     updatedByActorId: row.updated_by_actor_id,

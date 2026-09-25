@@ -35,6 +35,7 @@ const packages = [
     allows: ["@aether/application", "@aether/contracts", "@aether/domain"],
   },
   { name: "@aether/ui", directory: "packages/ui", allows: [] },
+  { name: "@aether/config", directory: "packages/config", allows: [] },
   {
     name: "@aether/server",
     directory: "apps/server",
@@ -67,6 +68,7 @@ const packages = [
 ];
 
 const documentedExceptions = new Map([
+  ["@aether/web:@aether/config", "docs/adr/0017-configuracion-publica-y-home.md"],
   ["@aether/database:@aether/auth", "docs/adr/0007-puerto-de-sesiones-oidc-en-auth.md"],
 ]);
 
@@ -76,7 +78,7 @@ async function sourceFiles(directory) {
     entries.map(async (entry) => {
       const entryPath = resolve(directory, entry.name);
       if (entry.isDirectory()) return sourceFiles(entryPath);
-      if (entry.isFile() && entry.name.endsWith(".ts") && !entry.name.endsWith(".test.ts")) {
+      if (entry.isFile() && /\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name)) {
         return [entryPath];
       }
       return [];

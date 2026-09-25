@@ -211,6 +211,8 @@ export class EvaluationService {
     expectedDraftVersion: number | null;
     standardId: string;
     results: readonly EvaluationResultInput[];
+    findings?: readonly string[];
+    recommendation?: string | null;
     correlationId: string;
   }): Promise<InitiativeEvaluationDraft> {
     const initiative = await this.requireInitiative(
@@ -256,6 +258,8 @@ export class EvaluationService {
       initiativeVersion: initiative.version,
       standard,
       results: input.results,
+      findings: input.findings ?? [],
+      recommendation: input.recommendation ?? null,
       evaluatedByActorId: input.actorId,
       evaluatedAt: this.dependencies.clock.now(),
     });
@@ -271,6 +275,8 @@ export class EvaluationService {
         ...result,
         evidence: [...result.evidence],
       })),
+      findings: [...(input.findings ?? [])],
+      recommendation: input.recommendation ?? null,
       version: existing ? existing.version + 1 : 0,
       status: "draft",
       updatedByActorId: input.actorId,
@@ -423,6 +429,8 @@ export class EvaluationService {
       expectedVersion: input.expectedInitiativeVersion,
       correlationId: input.correlationId,
       results: draft.results,
+      findings: draft.findings,
+      recommendation: draft.recommendation,
       draft: { id: draft.id, expectedVersion: draft.version },
     });
   }
@@ -837,6 +845,8 @@ export class EvaluationService {
       assessment: "met" | "not_met" | "not_applicable" | null;
       evidence: readonly string[];
     }[];
+    findings?: readonly string[];
+    recommendation?: string | null;
     draft?: { id: string; expectedVersion: number };
   }): Promise<InitiativeEvaluation> {
     await this.assertOrganizationManager(input.actorId, input.organizationId);
@@ -894,6 +904,8 @@ export class EvaluationService {
       initiativeVersion: initiative.version,
       standard,
       results: input.results,
+      findings: input.findings ?? [],
+      recommendation: input.recommendation ?? null,
       evaluatedByActorId: input.actorId,
       evaluatedAt: now,
     });

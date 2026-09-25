@@ -1,8 +1,26 @@
 {
   "realm": "aether-local",
   "enabled": true,
-  "displayName": "Aether Local",
-  "registrationAllowed": false,
+  "displayName": "AETHER",
+  "displayNameHtml": "AETHER",
+  "loginTheme": "aether",
+  "emailTheme": "aether",
+  "internationalizationEnabled": true,
+  "supportedLocales": ["es"],
+  "defaultLocale": "es",
+  "registrationAllowed": true,
+  "registrationEmailAsUsername": true,
+  "verifyEmail": true,
+  "resetPasswordAllowed": true,
+  "smtpServer": {
+    "host": "mailpit",
+    "port": "1025",
+    "from": "no-reply@aether.local",
+    "fromDisplayName": "AETHER",
+    "ssl": "false",
+    "starttls": "false",
+    "auth": "false"
+  },
   "clients": [
     {
       "clientId": "aether-local",

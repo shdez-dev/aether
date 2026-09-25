@@ -6,25 +6,36 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "prettier --check src app",
+    "lint": "prettier --check src",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:home": "playwright test home.spec.ts",
+    "lighthouse": "node scripts/lighthouse.mjs"
   },
   "dependencies": {
+    "@aether/config": "workspace:*",
     "@aether/contracts": "workspace:*",
     "@aether/ui": "workspace:*",
+    "@fontsource-variable/inter": "^5.3.0",
+    "framer-motion": "^13.4.1",
+    "lucide-react": "^1.47.0",
     "next": "^16.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
+    "@lhci/cli": "^0.15.1",
     "@playwright/test": "^1.58.2",
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
+    "@tailwindcss/postcss": "^4.3.3",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
     "jsdom": "^28.1.0",
+    "postcss": "^8.5.28",
+    "tailwindcss": "^4.3.3",
     "vitest-axe": "^0.1.0"
   }
 }

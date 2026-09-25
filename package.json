@@ -23,7 +23,8 @@
     "verify": "pnpm lint && pnpm typecheck && pnpm architecture:check && pnpm openapi:validate && pnpm test && pnpm build",
     "db:migrate": "pnpm --filter @aether/database migrate",
     "local:up": "docker compose -f infra/compose.yaml up -d",
-    "local:down": "docker compose -f infra/compose.yaml down"
+    "local:down": "docker compose -f infra/compose.yaml down",
+    "local:email:brevo": "node scripts/configure-keycloak-brevo.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

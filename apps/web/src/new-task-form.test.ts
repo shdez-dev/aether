@@ -11,7 +11,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 
-import { NewTaskForm } from "../app/new-task-form";
+import { NewTaskForm } from "./components/workspace/new-task-form";
 
 afterEach(cleanup);
 

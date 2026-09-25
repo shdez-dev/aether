@@ -176,6 +176,7 @@ export const PublicHttpRoutes = [
   "/metrics",
   "/ready",
   "/auth/login",
+  "/auth/register",
   "/auth/account-management/status",
   "/auth/account-management",
   "/auth/callback",
@@ -617,6 +618,15 @@ export async function buildServer(input: {
     );
     return reply.redirect(login.authorizationUrl);
   });
+  app.get("/auth/register", async (_request, reply) => {
+    const registration = await input.auth.beginLogin("register");
+    reply.setCookie(
+      transactionCookie,
+      registration.transactionHandle,
+      transientCookieOptions(input.config),
+    );
+    return reply.redirect(registration.authorizationUrl);
+  });
   app.get("/auth/account-management/status", async () => ({
     available: Boolean(input.config.oidcAccountManagementUrl),
     authority: "oidc-provider" as const,
@@ -653,7 +663,7 @@ export async function buildServer(input: {
         transactionCookie,
         transientCookieOptions(input.config),
       );
-      return reply.redirect(input.config.webOrigin);
+      return reply.redirect(new URL("/workspace", input.config.webOrigin).href);
     } catch (error) {
       reply.clearCookie(
         transactionCookie,

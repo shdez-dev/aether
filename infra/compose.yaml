@@ -36,6 +36,7 @@ services:
     volumes:
       [
         ./keycloak/aether-local-realm.json:/opt/keycloak/data/import/aether-local-realm.json:ro,
+        ./keycloak/themes/aether:/opt/keycloak/themes/aether:ro,
       ]
 
   minio:

@@ -143,6 +143,29 @@ const fakeOidc: OidcProvider = {
 };
 
 describe("AuthService", () => {
+  it("conserva la intención de registro dentro del flujo OIDC protegido", async () => {
+    const intents: Array<"login" | "register" | undefined> = [];
+    const auth = new AuthService({
+      store: new InMemoryAuthStore(),
+      cipher: createAesGcmCipher(testSessionEncryptionKey),
+      oidc: {
+        async buildAuthorizationUrl(input) {
+          intents.push(input.intent);
+          return `https://identity.example/authorize?state=${input.state}`;
+        },
+        async exchangeAuthorizationCode() {
+          return { subject: "actor-123", email: "actor@example.test" };
+        },
+      },
+      issuer: "https://identity.example",
+      sessionTtlSeconds: 3600,
+      sessionRenewalWindowSeconds: 600,
+    });
+    await auth.beginLogin();
+    await auth.beginLogin("register");
+    expect(intents).toEqual(["login", "register"]);
+  });
+
   it("no conserva transacciones ni crea sesiones cuando OIDC no está disponible", async () => {
     const store = new InMemoryAuthStore();
     const unavailableOidc: OidcProvider = {

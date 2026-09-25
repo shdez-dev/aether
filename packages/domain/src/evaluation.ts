@@ -45,6 +45,8 @@ export type InitiativeEvaluationDraft = Readonly<{
   standardId: string;
   standardVersion: number;
   results: readonly EvaluationResultInput[];
+  findings: readonly string[];
+  recommendation: string | null;
   version: number;
   status: "draft" | "published";
   updatedByActorId: string;
@@ -106,6 +108,8 @@ export type InitiativeEvaluation = Readonly<{
   standardId: string;
   standardVersion: number;
   criteria: readonly EvaluationCriterionResult[];
+  findings: readonly string[];
+  recommendation: string | null;
   coverage: EvaluationCoverage;
   quality: EvaluationQuality | null;
   maturity: EvaluationMaturity | null;
@@ -204,9 +208,15 @@ export function evaluateInitiative(input: {
   initiativeVersion: number;
   standard: EvaluationStandard;
   results: readonly EvaluationResultInput[];
+  findings?: readonly string[];
+  recommendation?: string | null;
   evaluatedByActorId: string;
   evaluatedAt: Date;
 }): InitiativeEvaluation {
+  const findings = [...(input.findings ?? [])].map((finding) => finding.trim());
+  const recommendation = input.recommendation?.trim() || null;
+  if (findings.some((finding) => !finding))
+    throw new EvaluationDomainError("INVALID_EVALUATION_FINDINGS");
   const resultById = new Map(
     input.results.map((result) => [result.criterionId, result]),
   );
@@ -289,6 +299,8 @@ export function evaluateInitiative(input: {
     standardId: input.standard.id,
     standardVersion: input.standard.version,
     criteria,
+    findings,
+    recommendation,
     coverage,
     quality,
     maturity: maturityLevel
@@ -408,6 +420,7 @@ export class EvaluationDomainError extends Error {
       | "INVALID_CRITERION_WEIGHT"
       | "INVALID_MATURITY_SCALE"
       | "INVALID_EVALUATION_CRITERIA"
+      | "INVALID_EVALUATION_FINDINGS"
       | "NOT_APPLICABLE_REQUIRES_JUSTIFICATION"
       | "EVALUATION_ALREADY_ANNULLED"
       | "EVALUATION_ALREADY_DECIDED"

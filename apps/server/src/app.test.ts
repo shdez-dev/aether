@@ -1068,6 +1068,16 @@ describe("HTTP authentication boundary", () => {
       idempotency: new InMemoryIdempotencyStore(),
     });
     const login = await app.inject({ method: "GET", url: "/auth/login" });
+    const registration = await app.inject({
+      method: "GET",
+      url: "/auth/register",
+    });
+    expect(registration.statusCode).toBe(302);
+    expect(
+      responseCookies(registration).find((cookie) =>
+        cookie.startsWith("aether_oidc_tx="),
+      ),
+    ).toContain("HttpOnly");
     const loginCookies = responseCookies(login);
     expect(
       loginCookies.find((cookie) => cookie.startsWith("aether_oidc_tx=")),
@@ -1083,6 +1093,7 @@ describe("HTTP authentication boundary", () => {
         cookie: `aether_oidc_tx=${cookieValue(loginCookies, "aether_oidc_tx")}`,
       },
     });
+    expect(callback.headers.location).toBe(`${config.webOrigin}/workspace`);
     const callbackCookies = responseCookies(callback);
     const sessionHeader = callbackCookies.find((cookie) =>
       cookie.startsWith("aether_session="),

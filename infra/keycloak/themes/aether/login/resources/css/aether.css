@@ -1,0 +1,502 @@
+:root {
+  color-scheme: light;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body#keycloak-bg {
+  min-height: 100%;
+  margin: 0;
+}
+
+body#keycloak-bg,
+.pf-v5-c-login {
+  color: #15234b;
+  background: #fdfefe;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+}
+
+.pf-v5-c-login {
+  min-height: 100svh;
+  padding: 0;
+}
+
+.pf-v5-c-login__container {
+  display: grid;
+  grid-template-columns: minmax(0, 1.02fr) minmax(0, 0.98fr);
+  gap: 0;
+  width: 100%;
+  max-width: none;
+  min-height: 100svh;
+  padding: 0;
+}
+
+#kc-header {
+  position: relative;
+  grid-area: 1 / 1 / 2 / 2;
+  min-width: 0;
+  min-height: 100svh;
+  margin: 0;
+  padding: clamp(30px, 3.4vw, 58px);
+  overflow: hidden;
+  isolation: isolate;
+  background-color: #0c1940;
+  background-image:
+    url("../img/orbit.svg"),
+    radial-gradient(ellipse at 75% 85%, rgb(57 94 203 / 34%), transparent 47%),
+    radial-gradient(ellipse at 10% 10%, rgb(34 68 181 / 34%), transparent 46%);
+  background-repeat: no-repeat;
+  background-size:
+    min(72%, 480px) auto,
+    cover,
+    cover;
+  background-position:
+    center 76%,
+    center,
+    center;
+  color: #f5f8ff;
+  text-align: left;
+}
+
+#kc-header::before {
+  position: absolute;
+  top: clamp(170px, 22%, 220px);
+  left: clamp(30px, 3.4vw, 58px);
+  content: "01 / ACCESO SEGURO";
+  color: #a9c3ff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+}
+
+#kc-header::after {
+  position: absolute;
+  top: clamp(370px, 45%, 430px);
+  left: clamp(30px, 3.4vw, 58px);
+  max-width: 350px;
+  content: "Tus iniciativas, decisiones y proyectos. Todo sigue conectado en AETHER.";
+  color: #b9c7e5;
+  font-size: 15px;
+  line-height: 1.65;
+}
+
+#kc-header-wrapper {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  width: auto;
+  color: #fff;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 0.27em;
+  line-height: 1;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+#kc-header-wrapper::before {
+  display: block;
+  flex: none;
+  width: 38px;
+  height: 38px;
+  content: "";
+  background: url("../img/mark.svg") center / contain no-repeat;
+}
+
+#kc-header-wrapper::after {
+  position: absolute;
+  top: clamp(210px, 26%, 260px);
+  left: clamp(30px, 3.4vw, 58px);
+  width: min(75%, 580px);
+  content: "Un mismo lugar para volver a avanzar.";
+  color: #f5f8ff;
+  font-size: clamp(38px, 3.7vw, 62px);
+  font-weight: 560;
+  letter-spacing: -0.055em;
+  line-height: 1.1;
+  text-align: left;
+  text-transform: none;
+  text-wrap: balance;
+}
+
+.pf-v5-c-login__main {
+  grid-area: 1 / 2 / 2 / 3;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  min-height: 100svh;
+  margin: 0;
+  padding: clamp(30px, 4vw, 72px);
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background:
+    radial-gradient(ellipse at 100% 0%, #f4f7ff 0%, transparent 36%), #fdfefe;
+}
+
+.pf-v5-c-login__main-header,
+.pf-v5-c-login__main-body,
+.pf-v5-c-login__main-footer {
+  width: min(100%, 490px);
+  margin-right: auto;
+  margin-left: auto;
+  padding-right: 0;
+  padding-left: 0;
+  background: transparent;
+}
+
+.pf-v5-c-login__main-header {
+  display: block;
+  margin-bottom: 30px;
+  padding: 0;
+  border-top: 0;
+}
+
+.pf-v5-c-login__main-header::before {
+  display: block;
+  margin-bottom: 20px;
+  content: "ACCESO A TU ESPACIO";
+  color: #2244b5;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.17em;
+}
+
+#kc-page-title {
+  margin: 0;
+  color: #101f45;
+  font-size: clamp(38px, 3.3vw, 54px);
+  font-weight: 570;
+  letter-spacing: -0.06em;
+  line-height: 1.12;
+  text-wrap: balance;
+}
+
+.pf-v5-c-login__main-body {
+  flex: none;
+}
+
+.pf-v5-c-login__main-body form.pf-v5-c-form {
+  display: grid;
+  gap: 21px;
+}
+
+.pf-v5-c-login__main-body .pf-v5-c-form__group {
+  margin: 0;
+}
+
+.pf-v5-c-login__main-body .pf-v5-c-form__label {
+  margin-bottom: 8px;
+  color: #28375b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.pf-v5-c-login__main-body .pf-v5-c-form-control {
+  min-height: 52px;
+  border: 1px solid #dce3ef;
+  border-radius: 8px;
+  box-shadow: none;
+  background: #fff;
+}
+
+.pf-v5-c-login__main-body .pf-v5-c-form-control::before,
+.pf-v5-c-login__main-body .pf-v5-c-form-control::after {
+  border: 0;
+}
+
+.pf-v5-c-login__main-body .pf-v5-c-form-control:focus-within {
+  border-color: #5271ca;
+  box-shadow: 0 0 0 3px rgb(70 104 205 / 12%);
+}
+
+.pf-v5-c-login__main-body .pf-v5-c-form-control input {
+  width: 100%;
+  min-height: 50px;
+  padding: 12px 15px;
+  color: #172448;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font-family: inherit;
+  font-size: 14px;
+}
+
+.pf-v5-c-login__main-body .pf-v5-c-input-group {
+  gap: 0;
+}
+
+.pf-v5-c-login__main-body .pf-v5-c-input-group .pf-v5-c-form-control {
+  border-right: 0;
+  border-radius: 8px 0 0 8px;
+}
+
+.pf-v5-c-login__main-body
+  .pf-v5-c-input-group
+  .pf-v5-c-form-control:focus-within {
+  box-shadow: none;
+}
+
+.pf-v5-c-login__main-body .pf-v5-c-input-group:focus-within {
+  border-radius: 8px;
+  box-shadow: 0 0 0 3px rgb(70 104 205 / 12%);
+}
+
+.pf-v5-c-login__main-body
+  .pf-v5-c-input-group:focus-within
+  .pf-v5-c-form-control,
+.pf-v5-c-login__main-body
+  .pf-v5-c-input-group:focus-within
+  [data-password-toggle] {
+  border-color: #5271ca;
+}
+
+.pf-v5-c-login__main-body [data-password-toggle] {
+  display: grid;
+  place-items: center;
+  width: 51px;
+  min-height: 52px;
+  padding: 0;
+  color: #69748b;
+  border: 1px solid #dce3ef;
+  border-left: 1px solid #dce3ef;
+  border-radius: 0 8px 8px 0;
+  background: #fff;
+}
+
+.pf-v5-c-login__main-body [data-password-toggle]::after {
+  content: none;
+}
+
+.pf-v5-c-login__main-body [data-password-toggle]:hover {
+  color: #2244b5;
+}
+
+.pf-v5-c-login__main-body .pf-v5-c-form__actions {
+  padding-top: 9px;
+}
+
+.pf-v5-c-login__main-body .pf-v5-c-button.pf-m-primary {
+  width: 100%;
+  min-height: 58px;
+  padding: 15px 20px;
+  color: #fff;
+  border: 1px solid #2244b5;
+  border-radius: 8px;
+  background: #2244b5;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.4;
+  transition:
+    background 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.2s ease;
+}
+
+.pf-v5-c-login__main-body .pf-v5-c-button.pf-m-primary:hover {
+  color: #fff;
+  border-color: #183898;
+  background: #183898;
+  box-shadow: 0 10px 24px rgb(34 68 181 / 18%);
+  transform: translateY(-2px);
+}
+
+.pf-v5-c-login__main-body .pf-v5-c-button.pf-m-primary:active {
+  transform: translateY(0);
+}
+
+.pf-v5-c-login__main-footer {
+  margin-top: 28px;
+}
+
+.pf-v5-c-login__main-footer:empty {
+  display: none;
+}
+
+.aether-login-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 22px;
+  border-top: 1px solid #dfe5f1;
+  color: #69748b;
+  font-size: 12px;
+}
+
+.aether-login-footer a,
+.pf-v5-c-login__main-body a {
+  color: #2244b5;
+  font-weight: 700;
+}
+
+.aether-login-footer a:hover,
+.pf-v5-c-login__main-body a:hover {
+  text-decoration: underline;
+}
+
+.aether-login-assurance {
+  margin: 18px 0 0;
+  color: #7d889d;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.pf-v5-c-login__container:has(#kc-register-form) #kc-header::before {
+  content: "02 / CREA TU CUENTA";
+}
+
+.pf-v5-c-login__container:has(#kc-register-form) #kc-header-wrapper::after {
+  content: "Tu lugar en AETHER empieza aquí.";
+}
+
+.pf-v5-c-login__main:has(#kc-register-form) {
+  padding-block: clamp(22px, 3vw, 42px);
+}
+
+.pf-v5-c-login__main:has(#kc-register-form) .pf-v5-c-login__main-header {
+  margin-bottom: 14px;
+}
+
+.pf-v5-c-login__main:has(#kc-register-form)
+  .pf-v5-c-login__main-header::before {
+  margin-bottom: 12px;
+  content: "UNA CUENTA PERSONAL";
+}
+
+.pf-v5-c-login__main:has(#kc-register-form) #kc-page-title {
+  font-size: clamp(36px, 3vw, 46px);
+}
+
+.pf-v5-c-login__main-body #kc-register-form.pf-v5-c-form {
+  gap: 9px;
+}
+
+#kc-register-form .pf-v5-c-form__label {
+  margin-bottom: 5px;
+}
+
+#kc-register-form .pf-v5-c-form-control,
+#kc-register-form [data-password-toggle] {
+  min-height: 42px;
+}
+
+#kc-register-form .pf-v5-c-form-control input {
+  min-height: 40px;
+  padding-block: 8px;
+}
+
+#kc-register-form .pf-v5-c-form__actions {
+  padding-top: 0;
+}
+
+#kc-register-form .pf-v5-c-button.pf-m-primary {
+  min-height: 49px;
+}
+
+.pf-v5-c-login__main:has(#kc-register-form) .pf-v5-c-login__main-footer {
+  display: none;
+}
+
+.pf-v5-c-alert {
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+:where(a, button, input, select):focus-visible {
+  outline: 3px solid #5271ca;
+  outline-offset: 3px;
+}
+
+@media (max-width: 900px) {
+  #kc-header-wrapper::after {
+    font-size: 39px;
+  }
+  #kc-header::after {
+    top: 43%;
+  }
+  #kc-header {
+    background-size:
+      min(83%, 380px) auto,
+      cover,
+      cover;
+    background-position:
+      center 72%,
+      center,
+      center;
+  }
+}
+
+@media (max-width: 760px) {
+  .pf-v5-c-login__container {
+    display: block;
+  }
+  #kc-header {
+    min-height: 0;
+    padding: 23px 24px;
+    background: #0c1940;
+  }
+  #kc-header::before,
+  #kc-header::after,
+  #kc-header-wrapper::after {
+    display: none;
+  }
+  #kc-header-wrapper {
+    font-size: 15px;
+  }
+  #kc-header-wrapper::before {
+    width: 29px;
+    height: 29px;
+  }
+  .pf-v5-c-login__main {
+    min-height: calc(100svh - 76px);
+    padding: 48px 24px 30px;
+  }
+  #kc-page-title {
+    font-size: clamp(36px, 9vw, 46px);
+  }
+}
+
+@media (max-width: 480px) {
+  .pf-v5-c-login__main {
+    justify-content: flex-start;
+    padding-top: 65px;
+  }
+  .aether-login-footer {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 9px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pf-v5-c-login__main-body .pf-v5-c-button.pf-m-primary {
+    transition: none;
+  }
+  .pf-v5-c-login__main-body .pf-v5-c-button.pf-m-primary:hover,
+  .pf-v5-c-login__main-body .pf-v5-c-button.pf-m-primary:active {
+    transform: none;
+  }
+}

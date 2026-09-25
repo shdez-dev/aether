@@ -123,6 +123,21 @@ paths:
               schema: { type: string, format: uri }
         "429":
           $ref: "#/components/responses/Problem"
+  /auth/register:
+    get:
+      tags: [Authentication]
+      operationId: beginRegistration
+      summary: Iniciar autorregistro OIDC con PKCE y prompt=create
+      security: []
+      responses:
+        "302":
+          description: Redirección al formulario de registro del proveedor OIDC.
+          headers:
+            Location:
+              required: true
+              schema: { type: string, format: uri }
+        "429":
+          $ref: "#/components/responses/Problem"
   /auth/account-management/status:
     get:
       tags: [Authentication]
@@ -3983,6 +3998,10 @@ components:
                   enum: [met, not_met, not_applicable, null],
                 }
               evidence: { type: array, items: { type: string }, maxItems: 50 }
+        findings:
+          { type: array, items: { type: string }, maxItems: 100, default: [] }
+        recommendation:
+          { type: [string, "null"], maxLength: 2000, default: null }
     SaveEvaluationDraftRequest:
       type: object
       required:
@@ -4000,6 +4019,14 @@ components:
         standardId: { type: string, format: uuid }
         results:
           { $ref: "#/components/schemas/StartReviewRequest/properties/results" }
+        findings:
+          {
+            $ref: "#/components/schemas/StartReviewRequest/properties/findings",
+          }
+        recommendation:
+          {
+            $ref: "#/components/schemas/StartReviewRequest/properties/recommendation",
+          }
     MigrateEvaluationDraftRequest:
       type: object
       required:
@@ -4432,7 +4459,6 @@ components:
           name,
           version,
           criteria,
-          maturityLevels,
           isActive,
           publishedAt,
           publishedByActorId,
@@ -4529,6 +4555,8 @@ components:
           standardId,
           standardVersion,
           results,
+          findings,
+          recommendation,
           version,
           status,
           updatedByActorId,
@@ -4545,6 +4573,14 @@ components:
         standardVersion: { type: integer, minimum: 1 }
         results:
           { $ref: "#/components/schemas/StartReviewRequest/properties/results" }
+        findings:
+          {
+            $ref: "#/components/schemas/StartReviewRequest/properties/findings",
+          }
+        recommendation:
+          {
+            $ref: "#/components/schemas/StartReviewRequest/properties/recommendation",
+          }
         version: { type: integer, minimum: 0 }
         status: { type: string, enum: [draft, published] }
         updatedByActorId: { type: string }
@@ -4562,6 +4598,8 @@ components:
           standardId,
           standardVersion,
           criteria,
+          findings,
+          recommendation,
           coverage,
           maturity,
           evaluatedByActorId,
@@ -4591,6 +4629,8 @@ components:
                   enum: [met, not_met, not_applicable, null],
                 }
               evidence: { type: array, items: { type: string } }
+        findings: { type: array, items: { type: string } }
+        recommendation: { type: [string, "null"] }
         coverage:
           type: object
           required:

@@ -1,0 +1,236 @@
+/* Motion stays restrained; only the requested hexagon mark loops. SSR content never waits for reveals. */
+@layer motion {
+  :root {
+    --motion-ease: cubic-bezier(0.22, 1, 0.36, 1);
+    --motion-fast: 160ms;
+    --motion-feedback: 240ms;
+    --motion-settle: 420ms;
+  }
+
+  .hex-connections path {
+    stroke: var(--connection-color);
+    stroke-dasharray: 1;
+    stroke-dashoffset: 1;
+    opacity: 0;
+  }
+  .hex-connections path[data-active="true"] {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  .hex-spokes path[data-active="true"] {
+    stroke: var(--aether-primary);
+  }
+  .hex-nodes li[data-active="true"] .hex-node {
+    box-shadow: 0 0 0 5px
+      color-mix(in srgb, var(--phase-color), transparent 90%);
+  }
+  .workflow-steps li::after {
+    transform-origin: left;
+  }
+  .phase-card:hover,
+  .hex-node:is(:hover, :focus-visible) {
+    transform: none;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .back-to-top {
+      transition:
+        opacity var(--motion-feedback),
+        visibility 0s var(--motion-feedback),
+        transform var(--motion-feedback) var(--motion-ease),
+        background-color var(--motion-feedback);
+    }
+    .back-to-top[data-visible="true"] {
+      transition-delay: 0s;
+    }
+    .aether-action {
+      transition:
+        transform var(--motion-fast) var(--motion-ease),
+        background-color var(--motion-feedback),
+        box-shadow var(--motion-feedback),
+        color var(--motion-feedback);
+    }
+    .aether-action:active {
+      transform: scale(0.985);
+    }
+    .aether-action > svg,
+    .case-details summary svg {
+      transition: transform var(--motion-feedback) var(--motion-ease);
+    }
+    .case-details[open] summary svg {
+      transform: rotate(45deg);
+    }
+    .case-details[open] > p,
+    .workflow-copy {
+      animation: content-settle 260ms var(--motion-ease);
+    }
+    /* Confirmation remains fully readable throughout its entrance. */
+    .demo-ready {
+      animation: feedback-settle 240ms var(--motion-ease);
+    }
+    .hex-tooltip {
+      animation: tooltip-appear 180ms var(--motion-ease);
+    }
+    .hex-node {
+      transition:
+        transform var(--motion-feedback) var(--motion-ease),
+        box-shadow var(--motion-feedback);
+    }
+    .hex-connections path {
+      transition:
+        stroke-dashoffset var(--motion-settle) var(--motion-ease),
+        opacity var(--motion-feedback);
+    }
+    .hex-spokes path {
+      transition: stroke var(--motion-feedback);
+    }
+    .hex-rotor {
+      transition: transform 600ms var(--motion-ease);
+    }
+    .hex-rotor-bars {
+      transform-origin: 300px 300px;
+      animation: hex-breathe-spin 7.2s ease-in-out infinite;
+    }
+    .hex-diagram[data-exploring="true"] .hex-rotor {
+      transform: rotate(3deg);
+    }
+    .step-number {
+      transition:
+        box-shadow var(--motion-feedback),
+        border-color var(--motion-feedback),
+        background-color var(--motion-feedback);
+    }
+    .workflow-steps li::after {
+      transition: background-color var(--motion-settle);
+    }
+    .demo-field :is(input, textarea) {
+      transition:
+        border-color var(--motion-fast),
+        box-shadow var(--motion-fast);
+    }
+    .aether-dialog-overlay[data-state="open"] {
+      animation: overlay-in 200ms ease-out;
+    }
+    .aether-dialog-overlay[data-state="closed"] {
+      animation: overlay-out 160ms ease-in;
+    }
+    .aether-dialog[data-state="open"] {
+      animation: dialog-in 260ms var(--motion-ease);
+    }
+    .aether-dialog[data-state="closed"] {
+      animation: dialog-out 160ms ease-in;
+    }
+
+    @media (hover: hover) and (pointer: fine) {
+      .phase-card,
+      .feature-card,
+      .actor-card,
+      .value-tile {
+        transition:
+          transform var(--motion-feedback) var(--motion-ease),
+          border-color var(--motion-feedback),
+          box-shadow var(--motion-feedback),
+          background-color var(--motion-feedback);
+      }
+      .phase-card:hover,
+      .feature-card:hover,
+      .actor-card:hover {
+        transform: translateY(-2px);
+      }
+      .feature-card:hover {
+        border-color: #b9c9e7;
+        box-shadow: 0 8px 24px -18px #193c7833;
+      }
+      .aether-action:hover > svg {
+        transform: translateX(2px);
+      }
+      .hex-node:hover {
+        transform: scale(1.06);
+      }
+    }
+  }
+}
+
+@keyframes hex-breathe-spin {
+  0%,
+  8% {
+    transform: rotate(0deg) scale(1);
+  }
+  22% {
+    transform: rotate(0deg) scale(0.9);
+  }
+  38% {
+    transform: rotate(0deg) scale(1);
+  }
+  84%,
+  100% {
+    transform: rotate(360deg) scale(1);
+  }
+}
+
+@keyframes content-settle {
+  from {
+    opacity: 0.6;
+    translate: 0 4px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+@keyframes feedback-settle {
+  from {
+    translate: 0 4px;
+  }
+  to {
+    translate: 0 0;
+  }
+}
+@keyframes tooltip-appear {
+  from {
+    opacity: 0;
+    translate: 0 3px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes overlay-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    translate: 0 8px;
+    scale: 0.99;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+    scale: 1;
+  }
+}
+@keyframes dialog-out {
+  from {
+    opacity: 1;
+    translate: 0 0;
+  }
+  to {
+    opacity: 0;
+    translate: 0 4px;
+  }
+}

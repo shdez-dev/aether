@@ -54,6 +54,8 @@ export const StartReviewRequestSchema = z.object({
       }),
     )
     .max(100),
+  findings: z.array(NonEmptyTextSchema.max(2_000)).max(100).default([]),
+  recommendation: NonEmptyTextSchema.max(2_000).nullable().default(null),
 });
 export const SaveEvaluationDraftRequestSchema = z.object({
   organizationId: UuidSchema,
@@ -61,6 +63,8 @@ export const SaveEvaluationDraftRequestSchema = z.object({
   expectedDraftVersion: z.number().int().nonnegative().nullable(),
   standardId: UuidSchema,
   results: StartReviewRequestSchema.shape.results,
+  findings: StartReviewRequestSchema.shape.findings,
+  recommendation: StartReviewRequestSchema.shape.recommendation,
 });
 export const MigrateEvaluationDraftRequestSchema = z.object({
   organizationId: UuidSchema,
@@ -643,6 +647,8 @@ export const InitiativeEvaluationResponseSchema = z.object({
       evidence: z.array(z.string()),
     }),
   ),
+  findings: z.array(z.string()),
+  recommendation: z.string().nullable(),
   coverage: z.object({
     totalCriteria: z.number().int(),
     applicableCriteria: z.number().int(),
@@ -680,6 +686,8 @@ export const InitiativeEvaluationDraftResponseSchema = z.object({
   standardId: UuidSchema,
   standardVersion: z.number().int().positive(),
   results: StartReviewRequestSchema.shape.results,
+  findings: StartReviewRequestSchema.shape.findings,
+  recommendation: StartReviewRequestSchema.shape.recommendation,
   version: z.number().int().nonnegative(),
   status: z.enum(["draft", "published"]),
   updatedByActorId: z.string(),

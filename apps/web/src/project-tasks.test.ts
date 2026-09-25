@@ -12,7 +12,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 
-import { ProjectTasks } from "../app/project-tasks";
+import { ProjectTasks } from "./components/workspace/project-tasks";
 
 afterEach(cleanup);
 
