@@ -1,0 +1,13 @@
+.git
+.github
+node_modules
+**/node_modules
+**/.next
+**/coverage
+**/test-results
+**/playwright-report
+**/.lighthouseci
+artifacts
+infra/deploy/runtime
+**/*.env
+**/.env.*

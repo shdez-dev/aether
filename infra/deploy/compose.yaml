@@ -1,0 +1,218 @@
+name: aether
+
+services:
+  postgres:
+    image: postgres:17.6-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: aether
+      POSTGRES_USER: aether
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in compose.env}
+      KEYCLOAK_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?Set KEYCLOAK_DB_PASSWORD in compose.env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./init-keycloak-db.sh:/docker-entrypoint-initdb.d/10-keycloak-db.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aether -d aether"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.4.0
+    restart: unless-stopped
+    command: ["start", "--import-realm"]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?Set KEYCLOAK_DB_PASSWORD in compose.env}
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:?Set KEYCLOAK_ADMIN_USERNAME in compose.env}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Set KEYCLOAK_ADMIN_PASSWORD in compose.env}
+      KC_HTTP_ENABLED: "true"
+      KC_HTTP_RELATIVE_PATH: /identity
+      KC_PROXY_HEADERS: xforwarded
+      KC_HOSTNAME: ${AETHER_PUBLIC_URL:?Set AETHER_PUBLIC_URL in compose.env}/identity
+      KC_HOSTNAME_STRICT: "true"
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "true"
+    volumes:
+      - ./runtime/realm.import.json:/opt/keycloak/data/import/aether-local-realm.json:ro
+      - ../keycloak/themes/aether:/opt/keycloak/themes/aether:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/9000'"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 90s
+
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: ["server", "/data", "--console-address", ":9001"]
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:?Set S3_ACCESS_KEY_ID in compose.env}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:?Set S3_SECRET_ACCESS_KEY in compose.env}
+    volumes:
+      - minio-data:/data
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_started
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - until mc alias set aether http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"; do sleep 2; done; mc mb --ignore-existing aether/aether-documents
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:?Set S3_ACCESS_KEY_ID in compose.env}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:?Set S3_SECRET_ACCESS_KEY in compose.env}
+
+  clamav:
+    image: clamav/clamav:1.5.4_base-debian13-slim
+    restart: unless-stopped
+    volumes:
+      - clamav-data:/var/lib/clamav
+    healthcheck:
+      test: ["CMD-SHELL", "clamdscan --ping 5"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 180s
+
+  migrate:
+    profiles: ["tools"]
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: runtime
+    image: aether-app:local
+    command: ["pnpm", "--filter", "@aether/database", "migrate"]
+    env_file:
+      - ./runtime/app.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  keycloak-config:
+    profiles: ["tools"]
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: runtime
+    image: aether-app:local
+    command:
+      [
+        "node",
+        "infra/deploy/configure-keycloak.mjs",
+        "/run/aether/realm.import.json",
+      ]
+    env_file:
+      - ./runtime/app.env
+    volumes:
+      - ./runtime:/run/aether:ro
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    image: aether-app:local
+    command:
+      ["pnpm", "--filter", "@aether/server", "exec", "tsx", "src/index.ts"]
+    env_file:
+      - ./runtime/app.env
+    volumes:
+      - ./runtime:/run/aether:ro
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      keycloak:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 45s
+
+  worker:
+    image: aether-app:local
+    command:
+      ["pnpm", "--filter", "@aether/worker", "exec", "tsx", "src/index.ts"]
+    env_file:
+      - ./runtime/app.env
+    environment:
+      CLAMAV_HOST: clamav
+      CLAMAV_PORT: "3310"
+      WORKER_ID: aether-worker
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+      clamav:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: web
+      args:
+        NEXT_PUBLIC_APP_URL: ${AETHER_PUBLIC_URL:?Set AETHER_PUBLIC_URL in compose.env}
+    image: aether-web:local
+    environment:
+      NODE_ENV: production
+      AETHER_API_URL: http://api:4000
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  gateway:
+    image: caddy:2.10.2-alpine
+    restart: unless-stopped
+    ports:
+      - "${AETHER_BIND_ADDRESS:-0.0.0.0}:${AETHER_PORT:-8081}:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      web:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+  minio-data:
+  clamav-data:

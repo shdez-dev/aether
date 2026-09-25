@@ -1,0 +1,26 @@
+:80 {
+	@admin path /identity/admin /identity/admin/*
+	handle @admin {
+		respond "Not found" 404
+	}
+
+	handle /identity/* {
+		reverse_proxy keycloak:8080
+	}
+
+	handle /auth/continuar /auth/crear-cuenta {
+		reverse_proxy web:3000
+	}
+
+	handle /auth/* {
+		reverse_proxy api:4000
+	}
+
+	handle /api/* {
+		reverse_proxy web:3000
+	}
+
+	handle {
+		reverse_proxy web:3000
+	}
+}
