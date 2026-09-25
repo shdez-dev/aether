@@ -1,6 +1,6 @@
 # Despliegue AETHER en Raspberry Pi
 
-El despliegue usa Docker Compose en Debian ARM64. PostgreSQL, Keycloak, MinIO y ClamAV quedan en la red privada de Compose; únicamente el gateway publica AETHER en el puerto 8081 de la interfaz LAN. Para exponerlo por ngrok, el gateway se cambia a localhost y el agente conecta por loopback, sin abrir puertos en el router. Keycloak se importa con valores de correo, cliente OIDC y URLs generados para el origen elegido.
+El despliegue usa Docker Compose en Debian ARM64. PostgreSQL, Keycloak, Garage y ClamAV quedan en la red privada de Compose; únicamente el gateway publica AETHER en el puerto 8081 de la interfaz LAN. Garage expone el API compatible con S3 para documentos, con un volumen persistente y credenciales privadas. Para exponerlo por ngrok, el gateway se cambia a localhost y el agente conecta por loopback, sin abrir puertos en el router. Keycloak se importa con valores de correo, cliente OIDC y URLs generados para el origen elegido.
 
 ## Arquitectura de ejecución
 
@@ -9,7 +9,7 @@ El despliegue usa Docker Compose en Debian ARM64. PostgreSQL, Keycloak, MinIO y 
 - `worker`: trabajos de outbox y análisis de documentos con ClamAV.
 - `postgres`: datos de AETHER y base de Keycloak en bases separadas.
 - `keycloak`: identidad persistente, realm AETHER y plantillas de correo.
-- `minio`: almacenamiento de documentos y bucket aprovisionado al iniciar.
+- `garage`: almacenamiento compatible con S3; en la Raspberry de un solo nodo no existe redundancia física, así que los documentos importantes requieren copia externa.
 - `gateway`: enrutamiento por rutas para web, API, callback OIDC e identidad.
 
 ## Secretos y URLs

@@ -33,7 +33,13 @@ SESSION_ENCRYPTION_KEY=$(openssl rand -base64 32 | tr -d '\n')
 METRICS_TOKEN=$(openssl rand -hex 32)
 S3_ACCESS_KEY_ID=$(openssl rand -hex 16)
 S3_SECRET_ACCESS_KEY=$(openssl rand -hex 32)
+GARAGE_RPC_SECRET=$(openssl rand -hex 32)
 EOF
+  chmod 0600 "$SECRETS_DIR/compose.env"
+fi
+
+if ! grep -q '^GARAGE_RPC_SECRET=' "$SECRETS_DIR/compose.env"; then
+  printf 'GARAGE_RPC_SECRET=%s\n' "$(openssl rand -hex 32)" >>"$SECRETS_DIR/compose.env"
   chmod 0600 "$SECRETS_DIR/compose.env"
 fi
 

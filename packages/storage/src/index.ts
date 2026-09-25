@@ -27,7 +27,7 @@ export class S3DocumentObjectStore implements DocumentObjectStore {
   ) {
     this.client = new S3Client({
       endpoint: config.endpoint,
-      region: "us-east-1",
+      region: process.env.S3_REGION ?? "us-east-1",
       forcePathStyle: true,
       credentials: {
         accessKeyId: config.accessKeyId,

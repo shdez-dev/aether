@@ -56,10 +56,14 @@ sudo docker run --rm --user "$(id -u):$(id -g)" --env-file "$COMPOSE_ENV" \
   node /app/infra/deploy/render-realm.mjs \
   /app/infra/keycloak/aether-local-realm.json \
   /run/aether/realm.import.json /run/secrets/brevo.env
-chmod 0600 "$RUNTIME_DIR/app.env" "$RUNTIME_DIR/realm.import.json"
+sudo docker run --rm --user "$(id -u):$(id -g)" \
+  -v "$ROOT:/app" -v "/srv/aether/secrets:/run/secrets:ro" \
+  -v "$RUNTIME_DIR:/run/aether" -w /app aether-app:local \
+  node /app/infra/deploy/render-garage-config.mjs \
+  /run/secrets/compose.env /run/aether/garage.toml
+chmod 0600 "$RUNTIME_DIR/app.env" "$RUNTIME_DIR/realm.import.json" "$RUNTIME_DIR/garage.toml"
 
-compose up -d postgres keycloak minio clamav
-compose run --rm minio-init
+compose up -d postgres keycloak garage clamav
 compose run --rm keycloak-config
 compose run --rm migrate
 compose up -d --remove-orphans
