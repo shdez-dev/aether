@@ -15,6 +15,7 @@ import {
   ResourceNotFoundError,
   type TenantStore,
 } from "./tenancy.js";
+import type { OrganizationResponsibilityStore } from "./organization-responsibilities.js";
 
 export type UnassignedIntakeException = Readonly<{
   organizationId: string;
@@ -52,6 +53,10 @@ export class IntakeService {
       tenancy: TenantStore;
       ids: IntakeIdGenerator;
       clock: IntakeClock;
+      responsibilities?: Pick<
+        OrganizationResponsibilityStore,
+        "hasActiveAssignment"
+      >;
     },
   ) {}
 
@@ -64,12 +69,16 @@ export class IntakeService {
     nextReviewOn: string;
     correlationId: string;
   }): Promise<IntakeResponsibility> {
-    await this.assertOrganizationManager(input.actorId, input.organizationId);
     const initiative = await this.dependencies.initiatives.findById(
       input.initiativeId,
     );
     if (!initiative || initiative.organizationId !== input.organizationId)
       throw new ResourceNotFoundError("INITIATIVE_NOT_FOUND");
+    await this.assertCoordinatorOrManager(
+      input.actorId,
+      initiative.organizationId,
+      initiative.workspaceId,
+    );
     await assertWorkspaceWritable(
       this.dependencies.tenancy,
       initiative.workspaceId,
@@ -114,7 +123,10 @@ export class IntakeService {
         nextReviewOn: assignment.nextReviewOn,
       },
     };
-    await this.dependencies.assignments.createWithAudit({ assignment, auditEvent });
+    await this.dependencies.assignments.createWithAudit({
+      assignment,
+      auditEvent,
+    });
     return assignment;
   }
 
@@ -128,7 +140,10 @@ export class IntakeService {
     });
   }
 
-  private async assertOrganizationManager(actorId: string, organizationId: string) {
+  private async assertOrganizationManager(
+    actorId: string,
+    organizationId: string,
+  ) {
     const role = await this.dependencies.tenancy.findOrganizationRole({
       actorId,
       organizationId,
@@ -142,14 +157,43 @@ export class IntakeService {
     organizationId: string,
     workspaceId: string,
   ) {
-    const organizationRole = await this.dependencies.tenancy.findOrganizationRole({
+    const organizationRole =
+      await this.dependencies.tenancy.findOrganizationRole({
+        actorId,
+        organizationId,
+      });
+    if (organizationRole === "owner" || organizationRole === "admin") return;
+    if (
+      organizationRole &&
+      (await this.dependencies.tenancy.findWorkspaceRole({
+        actorId,
+        workspaceId,
+      }))
+    )
+      return;
+    throw new AccessDeniedError("workspace:manage");
+  }
+
+  private async assertCoordinatorOrManager(
+    actorId: string,
+    organizationId: string,
+    workspaceId: string,
+  ) {
+    const role = await this.dependencies.tenancy.findOrganizationRole({
       actorId,
       organizationId,
     });
-    if (organizationRole === "owner" || organizationRole === "admin") return;
-    if (organizationRole && (await this.dependencies.tenancy.findWorkspaceRole({ actorId, workspaceId })))
+    if (role === "owner" || role === "admin") return;
+    if (
+      await this.dependencies.responsibilities?.hasActiveAssignment({
+        actorId,
+        organizationId,
+        workspaceId,
+        roleKey: "initiative_coordinator",
+      })
+    )
       return;
-    throw new AccessDeniedError("workspace:manage");
+    throw new AccessDeniedError("organization:manage");
   }
 }
 

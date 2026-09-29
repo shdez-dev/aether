@@ -6,7 +6,11 @@ import type {
   LoginTransaction,
 } from "@aether/auth";
 import { ProjectAlreadyExistsError } from "@aether/application";
-import { IntakeDomainError } from "@aether/domain";
+import {
+  emptyInitiativeProposalDetails,
+  IntakeDomainError,
+  type InitiativeProposalDetails,
+} from "@aether/domain";
 import type {
   InitiativeAuditEvent,
   InitiativeAuditStore,
@@ -57,6 +61,10 @@ import type {
   EvidenceSubjectLookup,
   ProjectClosureStore,
   Invitation,
+  OrganizationResponsibilityAssignment,
+  OrganizationResponsibilityAuditEvent,
+  OrganizationResponsibilityMember,
+  OrganizationResponsibilityStore,
   LifecycleAudit,
   Organization,
   OrganizationPolicy,
@@ -120,6 +128,7 @@ import type {
 import type { Pool, PoolClient } from "pg";
 
 export { migratePool } from "./migrations.js";
+export { PostgresUserProfileStore } from "./user-profile.js";
 
 /** Adaptador PostgreSQL para transacciones OIDC y sesiones opacas. */
 export class PostgresAuthStore implements AuthStore, AuthSessionAuditStore {
@@ -130,19 +139,23 @@ export class PostgresAuthStore implements AuthStore, AuthSessionAuditStore {
     issuer: string;
     subject: string;
     email: string | null;
+    name?: string | null;
     authenticatedAt: Date;
   }): Promise<{ actorId: string }> {
     const result = await this.pool.query<{ id: string }>(
-      `INSERT INTO actor_identities (id, issuer, subject, email, created_at, last_authenticated_at)
-       VALUES ($1,$2,$3,$4,$5,$5)
+      `INSERT INTO actor_identities (id, issuer, subject, email, display_name, created_at, last_authenticated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$6)
        ON CONFLICT (issuer, subject) DO UPDATE
-       SET email = EXCLUDED.email, last_authenticated_at = EXCLUDED.last_authenticated_at
+       SET email = EXCLUDED.email,
+           display_name = COALESCE(EXCLUDED.display_name, actor_identities.display_name),
+           last_authenticated_at = EXCLUDED.last_authenticated_at
        RETURNING id`,
       [
         input.id,
         input.issuer,
         input.subject,
         input.email,
+        input.name ?? null,
         input.authenticatedAt,
       ],
     );
@@ -1097,6 +1110,8 @@ export class PostgresTenantStore implements TenantStore {
           SELECT 1 FROM project_next_actions JOIN projects ON projects.id = project_next_actions.project_id WHERE projects.organization_id = $1 AND projects.status IN ('planned', 'active', 'paused', 'blocked') AND project_next_actions.owner_actor_id = $2 AND project_next_actions.completed_at IS NULL
           UNION ALL
           SELECT 1 FROM initiative_intake_assignments WHERE organization_id = $1 AND responsible_actor_id = $2
+          UNION ALL
+          SELECT 1 FROM organization_responsibility_assignments WHERE organization_id = $1 AND actor_id = $2 AND revoked_at IS NULL AND (valid_until IS NULL OR valid_until > NOW())
         ) AS exists`,
         [input.organizationId, input.targetActorId],
       );
@@ -2706,8 +2721,8 @@ export class PostgresInitiativeStore implements InitiativeStore {
 
   async create(initiative: Initiative): Promise<void> {
     await this.pool.query(
-      `INSERT INTO initiatives (id, organization_id, workspace_id, created_by_actor_id, title, problem_statement, expected_outcome, classification, requested_priority, operational_priority, status, version, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+      `INSERT INTO initiatives (id, organization_id, workspace_id, created_by_actor_id, title, problem_statement, expected_outcome, proposal_details, classification, requested_priority, operational_priority, status, version, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
       [
         initiative.id,
         initiative.organizationId,
@@ -2716,6 +2731,9 @@ export class PostgresInitiativeStore implements InitiativeStore {
         initiative.title,
         initiative.problemStatement,
         initiative.expectedOutcome,
+        JSON.stringify(
+          initiative.proposalDetails ?? emptyInitiativeProposalDetails,
+        ),
         initiative.classification,
         initiative.requestedPriority,
         initiative.operationalPriority,
@@ -2728,7 +2746,7 @@ export class PostgresInitiativeStore implements InitiativeStore {
   }
   async findById(initiativeId: string): Promise<Initiative | null> {
     const result = await this.pool.query<InitiativeRow>(
-      `SELECT id, organization_id, workspace_id, created_by_actor_id, title, problem_statement, expected_outcome, classification, requested_priority, operational_priority, status, version, created_at, updated_at
+      `SELECT id, organization_id, workspace_id, created_by_actor_id, title, problem_statement, expected_outcome, proposal_details, classification, requested_priority, operational_priority, status, version, created_at, updated_at
        FROM initiatives WHERE id = $1`,
       [initiativeId],
     );
@@ -2739,7 +2757,7 @@ export class PostgresInitiativeStore implements InitiativeStore {
     workspaceId: string;
   }): Promise<readonly Initiative[]> {
     const result = await this.pool.query<InitiativeRow>(
-      `SELECT id, organization_id, workspace_id, created_by_actor_id, title, problem_statement, expected_outcome, classification, requested_priority, operational_priority, status, version, created_at, updated_at
+      `SELECT id, organization_id, workspace_id, created_by_actor_id, title, problem_statement, expected_outcome, proposal_details, classification, requested_priority, operational_priority, status, version, created_at, updated_at
        FROM initiatives WHERE organization_id = $1 AND workspace_id = $2 ORDER BY updated_at DESC, id DESC`,
       [input.organizationId, input.workspaceId],
     );
@@ -2750,13 +2768,16 @@ export class PostgresInitiativeStore implements InitiativeStore {
     expectedVersion: number;
   }): Promise<boolean> {
     const result = await this.pool.query(
-      `UPDATE initiatives SET title = $2, problem_statement = $3, expected_outcome = $4, classification = $5, requested_priority = $6, operational_priority = $7, status = $8, version = $9, updated_at = $10
-       WHERE id = $1 AND version = $11`,
+      `UPDATE initiatives SET title = $2, problem_statement = $3, expected_outcome = $4, proposal_details = $5, classification = $6, requested_priority = $7, operational_priority = $8, status = $9, version = $10, updated_at = $11
+       WHERE id = $1 AND version = $12`,
       [
         input.initiative.id,
         input.initiative.title,
         input.initiative.problemStatement,
         input.initiative.expectedOutcome,
+        JSON.stringify(
+          input.initiative.proposalDetails ?? emptyInitiativeProposalDetails,
+        ),
         input.initiative.classification,
         input.initiative.requestedPriority,
         input.initiative.operationalPriority,
@@ -3025,6 +3046,367 @@ export class PostgresIntakeAssignmentStore implements IntakeAssignmentStore {
     );
     return result.rows.map(toUnassignedIntakeException);
   }
+}
+
+export class PostgresOrganizationResponsibilityStore implements OrganizationResponsibilityStore {
+  constructor(private readonly pool: Pool) {}
+
+  async listMembers(input: {
+    organizationId: string;
+    workspaceId: string;
+  }): Promise<readonly OrganizationResponsibilityMember[]> {
+    const result = await this.pool.query<{
+      actor_id: string;
+      actor_name: string;
+      actor_email: string | null;
+      organization_role: OrganizationRole;
+      workspace_role: WorkspaceRole | null;
+    }>(
+      `SELECT membership.actor_id,
+              COALESCE(NULLIF(profile.display_name, ''),
+                       NULLIF(identity.display_name, ''),
+                       NULLIF(membership.actor_email, ''), membership.actor_id) AS actor_name,
+              NULLIF(membership.actor_email, '') AS actor_email,
+              membership.role AS organization_role,
+              workspace_membership.role AS workspace_role
+         FROM organization_memberships AS membership
+         LEFT JOIN workspace_memberships AS workspace_membership
+           ON workspace_membership.workspace_id = $2
+          AND workspace_membership.actor_id = membership.actor_id
+         LEFT JOIN actor_identities AS identity
+           ON identity.id::text = membership.actor_id
+         LEFT JOIN user_profiles AS profile ON profile.actor_id = identity.id
+        WHERE membership.organization_id = $1
+          AND membership.status = 'active'
+          AND (membership.role IN ('owner', 'admin') OR workspace_membership.actor_id IS NOT NULL)
+        ORDER BY actor_name, membership.actor_id`,
+      [input.organizationId, input.workspaceId],
+    );
+    return result.rows.map((row) => ({
+      actorId: row.actor_id,
+      actorName: row.actor_name,
+      actorEmail: row.actor_email,
+      organizationRole: row.organization_role,
+      workspaceRole: row.workspace_role,
+    }));
+  }
+
+  async listAssignments(input: {
+    organizationId: string;
+    workspaceId: string;
+  }): Promise<readonly OrganizationResponsibilityAssignment[]> {
+    const result =
+      await this.pool.query<OrganizationResponsibilityAssignmentRow>(
+        `${organizationResponsibilitySelect}
+        WHERE assignment.organization_id = $1
+          AND assignment.workspace_id = $2
+          AND assignment.revoked_at IS NULL
+          AND (assignment.valid_until IS NULL OR assignment.valid_until > NOW())
+        ORDER BY assignment.role_key, actor_name, assignment.assigned_at`,
+        [input.organizationId, input.workspaceId],
+      );
+    return result.rows.map(toOrganizationResponsibilityAssignment);
+  }
+
+  async listInitiatives(input: {
+    organizationId: string;
+    workspaceId: string;
+  }): Promise<
+    readonly import("@aether/application").OrganizationResponsibilityInitiative[]
+  > {
+    const result = await this.pool.query<{
+      id: string;
+      title: string;
+      status: string;
+    }>(
+      `SELECT id, title, status FROM initiatives
+        WHERE organization_id = $1 AND workspace_id = $2
+          AND status NOT IN ('withdrawn', 'rejected')
+        ORDER BY updated_at DESC, id`,
+      [input.organizationId, input.workspaceId],
+    );
+    return result.rows;
+  }
+
+  async findInitiative(input: {
+    organizationId: string;
+    workspaceId: string;
+    initiativeId: string;
+  }): Promise<
+    import("@aether/application").OrganizationResponsibilityInitiative | null
+  > {
+    const result = await this.pool.query<{
+      id: string;
+      title: string;
+      status: string;
+    }>(
+      `SELECT id, title, status FROM initiatives
+        WHERE organization_id = $1 AND workspace_id = $2 AND id = $3
+          AND status NOT IN ('withdrawn', 'rejected')`,
+      [input.organizationId, input.workspaceId, input.initiativeId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async findAssignment(input: {
+    organizationId: string;
+    assignmentId: string;
+  }): Promise<OrganizationResponsibilityAssignment | null> {
+    const result =
+      await this.pool.query<OrganizationResponsibilityAssignmentRow>(
+        `${organizationResponsibilitySelect}
+        WHERE assignment.organization_id = $1
+          AND assignment.id = $2
+          AND assignment.revoked_at IS NULL`,
+        [input.organizationId, input.assignmentId],
+      );
+    return result.rows[0]
+      ? toOrganizationResponsibilityAssignment(result.rows[0])
+      : null;
+  }
+
+  async createAssignment(input: {
+    assignment: OrganizationResponsibilityAssignment;
+    auditEvent: OrganizationResponsibilityAuditEvent;
+  }): Promise<"created" | "already_assigned" | "member_not_active"> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      if (input.assignment.roleKey === "initiative_mentor") {
+        const mentorScope = [
+          input.assignment.organizationId,
+          input.assignment.workspaceId,
+          input.assignment.actorId,
+          input.assignment.initiativeId,
+        ].join(":");
+        await client.query(
+          "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+          [mentorScope],
+        );
+        const existingMentor = await client.query<{ exists: boolean }>(
+          `SELECT EXISTS (
+             SELECT 1 FROM organization_responsibility_assignments
+              WHERE organization_id = $1 AND workspace_id = $2
+                AND actor_id = $3 AND role_key = 'initiative_mentor'
+                AND initiative_id = $4 AND revoked_at IS NULL
+                AND valid_until > $5
+           ) AS exists`,
+          [
+            input.assignment.organizationId,
+            input.assignment.workspaceId,
+            input.assignment.actorId,
+            input.assignment.initiativeId,
+            input.assignment.assignedAt,
+          ],
+        );
+        if (existingMentor.rows[0]?.exists) {
+          await client.query("ROLLBACK");
+          return "already_assigned";
+        }
+      }
+      const inserted = await client.query(
+        `INSERT INTO organization_responsibility_assignments
+         (id, organization_id, workspace_id, actor_id, role_key,
+            assigned_by_actor_id, assigned_at, initiative_id, valid_until)
+         SELECT $1, workspace.organization_id, workspace.id, membership.actor_id,
+                $5, $6, $7, $8, $9
+           FROM workspaces AS workspace
+           JOIN organization_memberships AS membership
+             ON membership.organization_id = workspace.organization_id
+            AND membership.actor_id = $4
+            AND membership.status = 'active'
+           LEFT JOIN workspace_memberships AS workspace_membership
+             ON workspace_membership.workspace_id = workspace.id
+            AND workspace_membership.actor_id = membership.actor_id
+          WHERE workspace.organization_id = $2
+            AND workspace.id = $3
+            AND workspace.status = 'active'
+            AND (membership.role IN ('owner', 'admin') OR workspace_membership.actor_id IS NOT NULL)`,
+        [
+          input.assignment.id,
+          input.assignment.organizationId,
+          input.assignment.workspaceId,
+          input.assignment.actorId,
+          input.assignment.roleKey,
+          input.assignment.assignedByActorId,
+          input.assignment.assignedAt,
+          input.assignment.initiativeId,
+          input.assignment.validUntil,
+        ],
+      );
+      if (inserted.rowCount !== 1) {
+        await client.query("ROLLBACK");
+        return "member_not_active";
+      }
+      await client.query(
+        `INSERT INTO organization_responsibility_audit_events
+           (id, organization_id, workspace_id, actor_id, target_actor_id,
+            role_key, initiative_id, valid_until, event_type, correlation_id, occurred_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+        [
+          input.auditEvent.id,
+          input.auditEvent.organizationId,
+          input.auditEvent.workspaceId,
+          input.auditEvent.actorId,
+          input.auditEvent.targetActorId,
+          input.auditEvent.roleKey,
+          input.auditEvent.initiativeId,
+          input.auditEvent.validUntil,
+          input.auditEvent.eventType,
+          input.auditEvent.correlationId,
+          input.auditEvent.occurredAt,
+        ],
+      );
+      await client.query("COMMIT");
+      return "created";
+    } catch (error) {
+      await client.query("ROLLBACK");
+      if (
+        (error as { code?: string; constraint?: string }).code === "23505" &&
+        (error as { constraint?: string }).constraint ===
+          "organization_responsibility_assignments_active_unique"
+      )
+        return "already_assigned";
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async revokeAssignment(input: {
+    organizationId: string;
+    assignmentId: string;
+    actorId: string;
+    auditEvent: OrganizationResponsibilityAuditEvent;
+  }): Promise<"revoked" | "not_found"> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const revoked = await client.query(
+        `UPDATE organization_responsibility_assignments
+            SET revoked_by_actor_id = $3, revoked_at = $4
+          WHERE organization_id = $1 AND id = $2 AND revoked_at IS NULL
+          RETURNING id`,
+        [
+          input.organizationId,
+          input.assignmentId,
+          input.actorId,
+          input.auditEvent.occurredAt,
+        ],
+      );
+      if (revoked.rowCount !== 1) {
+        await client.query("ROLLBACK");
+        return "not_found";
+      }
+      await client.query(
+        `INSERT INTO organization_responsibility_audit_events
+           (id, organization_id, workspace_id, actor_id, target_actor_id,
+            role_key, initiative_id, valid_until, event_type, correlation_id, occurred_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+        [
+          input.auditEvent.id,
+          input.auditEvent.organizationId,
+          input.auditEvent.workspaceId,
+          input.auditEvent.actorId,
+          input.auditEvent.targetActorId,
+          input.auditEvent.roleKey,
+          input.auditEvent.initiativeId,
+          input.auditEvent.validUntil,
+          input.auditEvent.eventType,
+          input.auditEvent.correlationId,
+          input.auditEvent.occurredAt,
+        ],
+      );
+      await client.query("COMMIT");
+      return "revoked";
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async hasActiveAssignment(input: {
+    organizationId: string;
+    workspaceId: string;
+    actorId: string;
+    roleKey: import("@aether/application").InitiativeResponsibilityRole;
+    initiativeId?: string;
+  }): Promise<boolean> {
+    const result = await this.pool.query<{ exists: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1 FROM organization_responsibility_assignments
+          WHERE organization_id = $1 AND workspace_id = $2
+            AND actor_id = $3 AND role_key = $4 AND revoked_at IS NULL
+            AND (role_key <> 'initiative_mentor'
+                 OR (initiative_id = $5 AND valid_until > NOW()))
+       ) AS exists`,
+      [
+        input.organizationId,
+        input.workspaceId,
+        input.actorId,
+        input.roleKey,
+        input.initiativeId ?? null,
+      ],
+    );
+    return result.rows[0]?.exists ?? false;
+  }
+}
+
+type OrganizationResponsibilityAssignmentRow = {
+  id: string;
+  organization_id: string;
+  workspace_id: string;
+  workspace_name: string;
+  actor_id: string;
+  actor_name: string;
+  actor_email: string | null;
+  role_key: import("@aether/application").InitiativeResponsibilityRole;
+  initiative_id: string | null;
+  initiative_title: string | null;
+  valid_until: Date | null;
+  assigned_by_actor_id: string;
+  assigned_at: Date;
+};
+
+const organizationResponsibilitySelect = `SELECT assignment.id,
+       assignment.organization_id, assignment.workspace_id,
+       workspace.name AS workspace_name, assignment.actor_id,
+       COALESCE(NULLIF(profile.display_name, ''),
+                NULLIF(identity.display_name, ''),
+                NULLIF(membership.actor_email, ''), assignment.actor_id) AS actor_name,
+       NULLIF(membership.actor_email, '') AS actor_email,
+       assignment.role_key, assignment.initiative_id, initiative.title AS initiative_title,
+       assignment.valid_until,
+       assignment.assigned_by_actor_id, assignment.assigned_at
+  FROM organization_responsibility_assignments AS assignment
+  JOIN workspaces AS workspace ON workspace.id = assignment.workspace_id
+  JOIN organization_memberships AS membership
+    ON membership.organization_id = assignment.organization_id
+   AND membership.actor_id = assignment.actor_id
+  LEFT JOIN actor_identities AS identity ON identity.id::text = assignment.actor_id
+  LEFT JOIN user_profiles AS profile ON profile.actor_id = identity.id
+  LEFT JOIN initiatives AS initiative ON initiative.id = assignment.initiative_id`;
+
+function toOrganizationResponsibilityAssignment(
+  row: OrganizationResponsibilityAssignmentRow,
+): OrganizationResponsibilityAssignment {
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    workspaceId: row.workspace_id,
+    workspaceName: row.workspace_name,
+    actorId: row.actor_id,
+    actorName: row.actor_name,
+    actorEmail: row.actor_email,
+    roleKey: row.role_key,
+    initiativeId: row.initiative_id,
+    initiativeTitle: row.initiative_title,
+    validUntil: row.valid_until,
+    assignedByActorId: row.assigned_by_actor_id,
+    assignedAt: row.assigned_at,
+  };
 }
 
 export class PostgresEvaluationStandardStore implements EvaluationStandardStore {
@@ -5827,6 +6209,7 @@ type InitiativeRow = {
   title: string;
   problem_statement: string;
   expected_outcome: string;
+  proposal_details: InitiativeProposalDetails;
   classification: InitiativeClassification;
   requested_priority: InitiativePriority | null;
   operational_priority: InitiativePriority | null;
@@ -5915,6 +6298,10 @@ function toInitiative(row: InitiativeRow): Initiative {
     title: row.title,
     problemStatement: row.problem_statement,
     expectedOutcome: row.expected_outcome,
+    proposalDetails: {
+      ...emptyInitiativeProposalDetails,
+      ...row.proposal_details,
+    },
     classification: row.classification,
     requestedPriority: row.requested_priority,
     operationalPriority: row.operational_priority,

@@ -13,8 +13,32 @@ afterEach(cleanup);
 
 it("permite crear una organización con la política requerida", async () => {
   const request = vi.fn(
-    async (_url: string, _init?: RequestInit) =>
-      new Response("{}", { status: 201 }),
+    async (url: string, _init?: RequestInit) =>
+      new Response(
+        JSON.stringify(
+          url.startsWith("organization-role-profiles/")
+            ? {
+                version: 1,
+                organizationType: "business",
+                profileKey: "business",
+                profileLabel: "Equipo o empresa",
+                organizationAccessRoles: [],
+                workspaceAccessRoles: [],
+                initiativeResponsibilities: [
+                  {
+                    key: "initiative_coordinator",
+                    label: "Coordinación de iniciativas",
+                    scope: "initiative",
+                    description: "Organiza el ingreso de ideas.",
+                    implementationStatus: "restricted",
+                  },
+                ],
+                projectResponsibilities: [],
+              }
+            : {},
+        ),
+        { status: url.startsWith("organization-role-profiles/") ? 200 : 201 },
+      ),
   );
   const onOrganizationReady = vi.fn(async () => {});
   render(
@@ -41,7 +65,12 @@ it("permite crear una organización con la política requerida", async () => {
       body: expect.any(String),
     }),
   );
-  const body = JSON.parse(request.mock.calls[0]![1]!.body as string);
+  expect(request).toHaveBeenCalledWith("organization-role-profiles/business");
+  expect(await screen.findByText("Coordinación de iniciativas")).toBeTruthy();
+  const organizationRequest = request.mock.calls.find(
+    ([url, init]) => url === "organizations" && init?.method === "POST",
+  );
+  const body = JSON.parse(organizationRequest?.[1]?.body as string);
   expect(body).toMatchObject({
     name: "Equipo Aurora",
     organizationType: "business",

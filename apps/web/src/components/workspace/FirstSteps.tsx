@@ -1,11 +1,19 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+} from "react";
 import { AnimatePresence, motion, MotionConfig } from "framer-motion";
 import {
   ArrowLeft,
   ArrowRight,
   Building2,
+  Check,
+  ChevronDown,
   KeyRound,
   Layers3,
   LogOut,
@@ -16,14 +24,194 @@ import type {
   WorkspaceResponse,
 } from "@aether/contracts";
 import { Brand } from "../layout/Brand";
+import { OrganizationRoleProfilePreview } from "./OrganizationRoleProfilePreview";
 
 type FirstStepsProps = {
   organization: OrganizationResponse | null;
   request: (url: string, init?: RequestInit) => Promise<Response>;
   onOrganizationReady: (organizationId?: string) => Promise<void>;
   onWorkspaceReady: (workspace: WorkspaceResponse) => void;
-  onLogout: () => Promise<void>;
+  onLogout: () => void;
 };
+
+type OrganizationType = "personal" | "business" | "institutional";
+
+const organizationTypes: {
+  value: OrganizationType;
+  label: string;
+  description: string;
+}[] = [
+  {
+    value: "business",
+    label: "Equipo o empresa",
+    description: "Coordina el trabajo y las decisiones de tu equipo.",
+  },
+  {
+    value: "institutional",
+    label: "Institución",
+    description: "Da estructura a la colaboración institucional.",
+  },
+  {
+    value: "personal",
+    label: "Uso personal",
+    description: "Organiza tus iniciativas en un espacio individual.",
+  },
+];
+
+function OrganizationTypePicker({
+  value,
+  onChange,
+}: {
+  value: OrganizationType;
+  onChange: (value: OrganizationType) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(() =>
+    organizationTypes.findIndex((option) => option.value === value),
+  );
+  const pickerRef = useRef<HTMLDivElement>(null);
+  const selectedIndex = organizationTypes.findIndex(
+    (option) => option.value === value,
+  );
+  const selectedOption =
+    organizationTypes[selectedIndex] ?? organizationTypes[0];
+
+  useEffect(() => {
+    if (!open) return;
+    function closeOnOutsidePointer(event: PointerEvent) {
+      if (!pickerRef.current?.contains(event.target as Node)) setOpen(false);
+    }
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    return () =>
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+  }, [open]);
+
+  function handleKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const direction = event.key === "ArrowDown" ? 1 : -1;
+      const nextIndex = open
+        ? (activeIndex + direction + organizationTypes.length) %
+          organizationTypes.length
+        : (selectedIndex + direction + organizationTypes.length) %
+          organizationTypes.length;
+      setActiveIndex(nextIndex);
+      setOpen(true);
+      return;
+    }
+    if (!open) return;
+    if (event.key === "Home" || event.key === "End") {
+      event.preventDefault();
+      setActiveIndex(event.key === "Home" ? 0 : organizationTypes.length - 1);
+    } else if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      const activeOption = organizationTypes[activeIndex];
+      if (activeOption) onChange(activeOption.value);
+      setOpen(false);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      setOpen(false);
+    }
+  }
+
+  if (!selectedOption) return null;
+
+  return (
+    <div
+      className={`first-steps__picker${open ? " is-open" : ""}`}
+      ref={pickerRef}
+    >
+      <button
+        id="first-steps-type"
+        className="first-steps__picker-trigger"
+        type="button"
+        role="combobox"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={open ? "first-steps-type-options" : undefined}
+        aria-activedescendant={
+          open ? `first-steps-type-option-${activeIndex}` : undefined
+        }
+        onClick={() => {
+          setActiveIndex(selectedIndex);
+          setOpen((current) => !current);
+        }}
+        onKeyDown={handleKeyDown}
+        onBlur={(event) => {
+          if (!event.currentTarget.parentElement?.contains(event.relatedTarget))
+            setOpen(false);
+        }}
+      >
+        <span className="first-steps__picker-label" aria-live="polite">
+          <AnimatePresence initial={false} mode="sync">
+            <motion.span
+              key={selectedOption.value}
+              initial={{ opacity: 0, filter: "blur(2px)" }}
+              animate={{ opacity: 1, filter: "blur(0px)" }}
+              exit={{ opacity: 0, filter: "blur(1px)" }}
+              transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+            >
+              {selectedOption.label}
+            </motion.span>
+          </AnimatePresence>
+        </span>
+        <ChevronDown
+          size={17}
+          strokeWidth={1.8}
+          aria-hidden="true"
+          className="first-steps__picker-chevron"
+        />
+      </button>
+      <AnimatePresence initial={false}>
+        {open ? (
+          <motion.div
+            key="organization-type-options"
+            id="first-steps-type-options"
+            className="first-steps__picker-menu"
+            role="listbox"
+            aria-labelledby="first-steps-type"
+            initial={{ opacity: 0, y: -8, scale: 0.985 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -5, scale: 0.99 }}
+            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+          >
+            <p className="first-steps__picker-caption">ELIGE TU ESPACIO</p>
+            {organizationTypes.map((option, index) => {
+              const selected = option.value === value;
+              return (
+                <div
+                  key={option.value}
+                  id={`first-steps-type-option-${index}`}
+                  className="first-steps__picker-option"
+                  role="option"
+                  aria-selected={selected}
+                  data-active={index === activeIndex}
+                  onMouseEnter={() => setActiveIndex(index)}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => {
+                    onChange(option.value);
+                    setActiveIndex(index);
+                    setOpen(false);
+                  }}
+                >
+                  <span className="first-steps__picker-option-copy">
+                    <strong>{option.label}</strong>
+                    <span>{option.description}</span>
+                  </span>
+                  <Check
+                    size={17}
+                    aria-hidden="true"
+                    className="first-steps__picker-check"
+                  />
+                </div>
+              );
+            })}
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+    </div>
+  );
+}
 
 export function FirstSteps({
   organization,
@@ -34,9 +222,8 @@ export function FirstSteps({
 }: FirstStepsProps) {
   const [choice, setChoice] = useState<"create" | "join" | null>(null);
   const [name, setName] = useState("");
-  const [organizationType, setOrganizationType] = useState<
-    "personal" | "business" | "institutional"
-  >("business");
+  const [organizationType, setOrganizationType] =
+    useState<OrganizationType>("business");
   const [token, setToken] = useState("");
   const [workspaceName, setWorkspaceName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -161,17 +348,14 @@ export function FirstSteps({
       {choice === "create" && !organization ? (
         <>
           <label htmlFor="first-steps-type">Tipo de organización</label>
-          <select
-            id="first-steps-type"
+          <OrganizationTypePicker
             value={organizationType}
-            onChange={(event) =>
-              setOrganizationType(event.target.value as typeof organizationType)
-            }
-          >
-            <option value="business">Equipo o empresa</option>
-            <option value="institutional">Institución</option>
-            <option value="personal">Uso personal</option>
-          </select>
+            onChange={setOrganizationType}
+          />
+          <OrganizationRoleProfilePreview
+            organizationType={organizationType}
+            request={request}
+          />
           <p>
             En esta instalación local, los datos permanecen en el entorno de
             desarrollo.
@@ -207,7 +391,7 @@ export function FirstSteps({
       <main className="first-steps">
         <header className="first-steps__header">
           <Brand />
-          <button type="button" onClick={() => void onLogout()}>
+          <button type="button" onClick={onLogout}>
             <LogOut size={16} aria-hidden="true" /> Cerrar sesión
           </button>
         </header>

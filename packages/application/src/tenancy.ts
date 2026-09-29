@@ -1,5 +1,6 @@
 import {
   calculateCapabilities,
+  getOrganizationRoleProfile,
   isActionAllowed,
   isRoleAllowed,
   isWithinBusinessHours,
@@ -7,13 +8,14 @@ import {
   type AuthorizationAction,
   type BusinessHoursPolicy,
   type OrganizationRole,
+  type OrganizationType,
   type WorkspaceRole,
 } from "@aether/domain";
 
 export type Organization = Readonly<{
   id: string;
   name: string;
-  organizationType: "personal" | "business" | "institutional" | null;
+  organizationType: OrganizationType | null;
   timezone: string;
   locale: string;
   version: number;
@@ -553,6 +555,20 @@ export class TenantService {
   }
   async listOrganizations(actorId: string): Promise<readonly Organization[]> {
     return this.dependencies.store.listOrganizations(actorId);
+  }
+  async organizationRoleProfile(input: {
+    actorId: string;
+    organizationId: string;
+  }) {
+    const organization = (
+      await this.dependencies.store.listOrganizations(input.actorId)
+    ).find((candidate) => candidate.id === input.organizationId);
+    if (!organization)
+      throw new ResourceNotFoundError("ORGANIZATION_NOT_FOUND");
+    return getOrganizationRoleProfile(organization.organizationType);
+  }
+  organizationRoleProfileForType(organizationType: OrganizationType) {
+    return getOrganizationRoleProfile(organizationType);
   }
   async listWorkspaces(input: {
     actorId: string;

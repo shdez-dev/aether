@@ -71,14 +71,18 @@ const clients = await request(
 if (!Array.isArray(clients) || clients.length !== 1)
   throw new Error("Expected exactly one AETHER OIDC client in Keycloak");
 const client = clients[0];
+const desiredClient = realm.clients.find(
+  ({ clientId }) => clientId === "aether-local",
+);
 Object.assign(client, {
-  secret: realm.clients.find(({ clientId }) => clientId === "aether-local")
-    .secret,
-  redirectUris: realm.clients.find(
-    ({ clientId }) => clientId === "aether-local",
-  ).redirectUris,
-  webOrigins: realm.clients.find(({ clientId }) => clientId === "aether-local")
-    .webOrigins,
+  secret: desiredClient.secret,
+  redirectUris: desiredClient.redirectUris,
+  webOrigins: desiredClient.webOrigins,
+  attributes: {
+    ...client.attributes,
+    "post.logout.redirect.uris":
+      desiredClient.attributes["post.logout.redirect.uris"],
+  },
 });
 await request(
   `/realms/${encodeURIComponent(realm.realm)}/clients/${encodeURIComponent(client.id)}`,

@@ -33,6 +33,10 @@ import {
 import type { TemporaryAccessGrantAuthorizer } from "./access-grants.js";
 import type { NotificationService } from "./notifications.js";
 import type { DurableDomainEvent } from "./outbox.js";
+import type {
+  InitiativeResponsibilityRole,
+  OrganizationResponsibilityStore,
+} from "./organization-responsibilities.js";
 
 export interface EvaluationStandardStore {
   create(standard: EvaluationStandard): Promise<void>;
@@ -129,6 +133,10 @@ export class EvaluationService {
       tenancy: TenantStore;
       accessGrants?: TemporaryAccessGrantAuthorizer;
       notifications?: NotificationService;
+      responsibilities?: Pick<
+        OrganizationResponsibilityStore,
+        "hasActiveAssignment"
+      >;
       ids: EvaluationIdGenerator;
       clock: EvaluationClock;
     },
@@ -462,14 +470,19 @@ export class EvaluationService {
     reviewerActorId: string;
     correlationId: string;
   }): Promise<EvaluationReviewerAssignment> {
-    await this.assertOwner(input.actorId, input.organizationId);
-    await this.assertOrganizationManager(
-      input.reviewerActorId,
-      input.organizationId,
-    );
     const initiative = await this.requireInitiative(
       input.initiativeId,
       input.organizationId,
+    );
+    await this.assertCoordinatorOrManager(
+      input.actorId,
+      initiative.organizationId,
+      initiative.workspaceId,
+    );
+    await this.assertEvaluatorOrManager(
+      input.reviewerActorId,
+      initiative.organizationId,
+      initiative.workspaceId,
     );
     await assertWorkspaceWritable(
       this.dependencies.tenancy,
@@ -849,10 +862,15 @@ export class EvaluationService {
     recommendation?: string | null;
     draft?: { id: string; expectedVersion: number };
   }): Promise<InitiativeEvaluation> {
-    await this.assertOrganizationManager(input.actorId, input.organizationId);
     const initiative = await this.requireInitiative(
       input.initiativeId,
       input.organizationId,
+    );
+    await this.assertAssignedReviewer(
+      initiative.id,
+      input.actorId,
+      input.organizationId,
+      initiative.workspaceId,
     );
     await assertWorkspaceWritable(
       this.dependencies.tenancy,
@@ -1007,7 +1025,11 @@ export class EvaluationService {
       throw new EvaluationDomainError("EVALUATION_ANNULLED");
     if (evaluation.evaluatedByActorId === input.actorId)
       throw new EvaluationConflictOfInterestError();
-    await this.assertOwner(input.actorId, input.organizationId);
+    await this.assertApprover(
+      input.actorId,
+      input.organizationId,
+      initiative.workspaceId,
+    );
     await assertWorkspaceWritable(
       this.dependencies.tenancy,
       initiative.workspaceId,
@@ -1224,8 +1246,30 @@ export class EvaluationService {
     initiativeId: string,
     actorId: string,
     organizationId: string,
+    workspaceId?: string,
   ): Promise<void> {
-    await this.assertOrganizationManager(actorId, organizationId);
+    const initiative = workspaceId
+      ? null
+      : await this.requireInitiative(initiativeId, organizationId);
+    const scopeWorkspaceId = workspaceId ?? initiative!.workspaceId;
+    const [organizationRole, hasEvaluatorRole] = await Promise.all([
+      this.dependencies.tenancy.findOrganizationRole({
+        actorId,
+        organizationId,
+      }),
+      this.hasResponsibility(
+        actorId,
+        organizationId,
+        scopeWorkspaceId,
+        "initiative_evaluator",
+      ),
+    ]);
+    const canEvaluate = this.dependencies.responsibilities
+      ? organizationRole === "owner" ||
+        organizationRole === "admin" ||
+        hasEvaluatorRole
+      : organizationRole === "owner" || organizationRole === "admin";
+    if (!canEvaluate) throw new AccessDeniedError("organization:manage");
     const assignment =
       await this.dependencies.evaluations.findActiveReviewerAssignment(
         initiativeId,
@@ -1244,6 +1288,84 @@ export class EvaluationService {
     });
     if (role === "owner") return;
     await this.assertAssignedReviewer(initiativeId, actorId, organizationId);
+  }
+  private async assertCoordinatorOrManager(
+    actorId: string,
+    organizationId: string,
+    workspaceId: string,
+  ): Promise<void> {
+    const role = await this.dependencies.tenancy.findOrganizationRole({
+      actorId,
+      organizationId,
+    });
+    if (role === "owner" || role === "admin") return;
+    if (
+      await this.hasResponsibility(
+        actorId,
+        organizationId,
+        workspaceId,
+        "initiative_coordinator",
+      )
+    )
+      return;
+    throw new AccessDeniedError("organization:manage");
+  }
+  private async assertEvaluatorOrManager(
+    actorId: string,
+    organizationId: string,
+    workspaceId: string,
+  ): Promise<void> {
+    const role = await this.dependencies.tenancy.findOrganizationRole({
+      actorId,
+      organizationId,
+    });
+    if (role === "owner" || role === "admin") return;
+    if (
+      await this.hasResponsibility(
+        actorId,
+        organizationId,
+        workspaceId,
+        "initiative_evaluator",
+      )
+    )
+      return;
+    throw new AccessDeniedError("organization:manage");
+  }
+  private async assertApprover(
+    actorId: string,
+    organizationId: string,
+    workspaceId: string,
+  ): Promise<void> {
+    const role = await this.dependencies.tenancy.findOrganizationRole({
+      actorId,
+      organizationId,
+    });
+    if (role === "owner") return;
+    if (
+      await this.hasResponsibility(
+        actorId,
+        organizationId,
+        workspaceId,
+        "initiative_approver",
+      )
+    )
+      return;
+    throw new AccessDeniedError("organization:manage");
+  }
+  private hasResponsibility(
+    actorId: string,
+    organizationId: string,
+    workspaceId: string,
+    roleKey: InitiativeResponsibilityRole,
+  ): Promise<boolean> {
+    return (
+      this.dependencies.responsibilities?.hasActiveAssignment({
+        actorId,
+        organizationId,
+        workspaceId,
+        roleKey,
+      }) ?? Promise.resolve(false)
+    );
   }
   private async persistDraft(
     draft: InitiativeEvaluationDraft,

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   AuthorizationMatrix,
+  allowedInitiativeActions,
   calculateCapabilities,
   isActionAllowed,
   isRoleAllowed,
@@ -12,6 +13,32 @@ import {
 } from "./access.js";
 
 describe("AuthorizationMatrix", () => {
+  it("grants initiative workflow actions only through their scoped responsibilities", () => {
+    const base = {
+      organizationRole: "member" as const,
+      workspaceRole: "member" as const,
+      actorId: "coordinator",
+      createdByActorId: "author",
+    };
+    expect(
+      allowedInitiativeActions({
+        ...base,
+        status: "presented",
+        initiativeCoordinator: true,
+      }),
+    ).toContain("review");
+    expect(
+      allowedInitiativeActions({
+        ...base,
+        status: "under_review",
+        initiativeApprover: true,
+      }),
+    ).toContain("decide");
+    expect(
+      allowedInitiativeActions({ ...base, status: "under_review" }),
+    ).not.toContain("decide");
+  });
+
   it.each<{
     organizationRole: OrganizationRole | null;
     workspaceRole: WorkspaceRole | null;

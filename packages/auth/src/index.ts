@@ -55,6 +55,7 @@ export interface AuthStore {
     issuer: string;
     subject: string;
     email: string | null;
+    name?: string | null;
     authenticatedAt: Date;
   }): Promise<{ actorId: string }>;
   createSession(session: AuthSession): Promise<void>;
@@ -114,7 +115,12 @@ export interface OidcProvider {
     state: string;
     nonce: string;
     codeVerifier: string;
-  }): Promise<{ subject: string; email: string | null }>;
+  }): Promise<{
+    subject: string;
+    email: string | null;
+    name?: string | null;
+    idToken?: string;
+  }>;
 }
 
 export type AuthServiceOptions = Readonly<{
@@ -136,7 +142,10 @@ export type LoginStart = Readonly<{
 export type LoginCompletion = Readonly<{
   sessionToken: string;
   session: AuthSession;
+  logoutHint?: string;
 }>;
+
+export const DEFAULT_LOGIN_TRANSACTION_TTL_SECONDS = 3600;
 
 /** Coordina OIDC y sólo entrega al navegador identificadores opacos. */
 export class AuthService {
@@ -144,7 +153,9 @@ export class AuthService {
   private readonly now: () => Date;
 
   constructor(private readonly options: AuthServiceOptions) {
-    this.loginTransactionTtlSeconds = options.loginTransactionTtlSeconds ?? 600;
+    this.loginTransactionTtlSeconds =
+      options.loginTransactionTtlSeconds ??
+      DEFAULT_LOGIN_TRANSACTION_TTL_SECONDS;
     this.now = options.now ?? (() => new Date());
   }
 
@@ -206,6 +217,7 @@ export class AuthService {
       issuer: this.options.issuer,
       subject: identity.subject,
       email: identity.email,
+      name: identity.name?.trim().slice(0, 120) || null,
       authenticatedAt: now,
     });
     const sessionToken = randomOpaqueToken();
@@ -221,7 +233,22 @@ export class AuthService {
       revokedAt: null,
     };
     await this.options.store.createSession(session);
-    return { sessionToken, session };
+    return {
+      sessionToken,
+      session,
+      ...(identity.idToken
+        ? { logoutHint: this.options.cipher.encrypt(identity.idToken) }
+        : {}),
+    };
+  }
+
+  readLogoutHint(encryptedHint: string | undefined): string | undefined {
+    if (!encryptedHint) return undefined;
+    try {
+      return this.options.cipher.decrypt(encryptedHint);
+    } catch {
+      return undefined;
+    }
   }
 
   async authenticate(
@@ -520,12 +547,40 @@ export function createKeycloakOidcProvider(config: {
         if (typeof subject !== "string" || subject.length === 0)
           throw new Error("OIDC subject missing");
         const email = tokens.claims()?.email;
-        return { subject, email: typeof email === "string" ? email : null };
+        const nameFromToken = oidcDisplayName(tokens.claims());
+        let name = nameFromToken;
+        if (!name) {
+          try {
+            name = oidcDisplayName(
+              await oidc.fetchUserInfo(client, tokens.access_token, subject),
+            );
+          } catch {
+            // El nombre es opcional: un fallo de UserInfo no debe bloquear el acceso.
+          }
+        }
+        return {
+          subject,
+          email: typeof email === "string" ? email : null,
+          name,
+          ...(tokens.id_token ? { idToken: tokens.id_token } : {}),
+        };
       } catch (error) {
         throw oidcProviderError(error);
       }
     },
   };
+}
+
+function oidcDisplayName(
+  claims: Record<string, unknown> | undefined,
+): string | null {
+  if (!claims) return null;
+  const name = typeof claims.name === "string" ? claims.name.trim() : "";
+  const given =
+    typeof claims.given_name === "string" ? claims.given_name.trim() : "";
+  const family =
+    typeof claims.family_name === "string" ? claims.family_name.trim() : "";
+  return name || [given, family].filter(Boolean).join(" ") || null;
 }
 
 function oidcProviderError(error: unknown): unknown {

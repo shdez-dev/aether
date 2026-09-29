@@ -17,6 +17,7 @@ const contentSecurityPolicy = [
 ].join("; ");
 
 const config: NextConfig = {
+  ...(development ? { allowedDevOrigins: ["127.0.0.1"] } : {}),
   // Public first visits benefit from receiving the small stylesheet with HTML.
   experimental: { inlineCss: true },
   async headers() {

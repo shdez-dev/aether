@@ -3,8 +3,13 @@
 ## Modelo mínimo
 
 Una iniciativa describe una necesidad que la institución puede evaluar: título,
-problema, resultado esperado, clasificación, organización y workspace. El
-agregado conserva quién la creó, versión optimista y sus marcas de tiempo.
+problema, resultado esperado, clasificación, organización y workspace. La ficha
+de propuesta conserva además resumen, personas y cantidad impactada, impacto,
+solución, diferenciación, etapa y su justificación, plan y recursos de pilotaje.
+Estos detalles persisten como JSONB dentro del agregado y siguen la versión
+optimista de la iniciativa; los registros anteriores reciben valores vacíos y
+siguen siendo legibles. El agregado conserva quién la creó y sus marcas de
+tiempo.
 
 La prioridad solicitada (`low`, `medium` o `high`) se registra al crear la
 iniciativa y conserva la urgencia expresada por quien la propone. La prioridad
@@ -16,6 +21,22 @@ histórico.
 
 El workspace y la organización siempre se validan juntos; una iniciativa no
 puede leerse ni modificarse desde otro contexto.
+
+La bandeja de iniciativas se limita al workspace activo y al acceso efectivo
+del usuario. Los borradores, las iniciativas devueltas y las clasificadas como
+confidenciales sólo son visibles para quien las creó, los administradores del
+workspace, los propietarios o administradores de la organización, o una persona
+con una concesión de lectura explícita para esa iniciativa. Una asignación
+activa de atención también habilita la lectura a su responsable. La misma regla se
+aplica al detalle, la auditoría y las advertencias de coincidencias: una
+propuesta oculta no debe revelar su título a través de un duplicado. La vista
+«de mi autoría» es un filtro de la bandeja autorizada, no una autorización
+alternativa.
+
+La respuesta de la iniciativa incluye la identidad del creador y, cuando
+existe, el nombre de presentación. También informa la asignación activa de
+atención, responsable y próxima revisión. La ausencia de asignación se
+representa como dato faltante, no como una fecha o persona ficticia.
 
 ## Estados y transiciones
 

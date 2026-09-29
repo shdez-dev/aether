@@ -13,6 +13,31 @@ export const InitiativeStatusSchema = z.enum([
   "cancelled",
 ]);
 export const InitiativePrioritySchema = z.enum(["low", "medium", "high"]);
+export const InitiativeProjectStageSchema = z.enum([
+  "idea",
+  "prototype",
+  "in_development",
+  "operating",
+  "other",
+]);
+export const InitiativeProposalDetailsSchema = z.object({
+  summary: z.string().max(10_000).default(""),
+  impactedPeople: z.string().max(10_000).default(""),
+  impactedCount: z
+    .number()
+    .int()
+    .positive()
+    .max(1_000_000_000)
+    .nullable()
+    .default(null),
+  problemImpact: z.string().max(10_000).default(""),
+  solution: z.string().max(10_000).default(""),
+  differentiation: z.string().max(10_000).default(""),
+  projectStage: InitiativeProjectStageSchema.default("idea"),
+  stageRationale: z.string().max(10_000).default(""),
+  pilotPlan: z.string().max(10_000).default(""),
+  pilotResources: z.string().max(10_000).default(""),
+});
 
 export const CreateInitiativeDraftRequestSchema = z.object({
   organizationId: UuidSchema,
@@ -22,6 +47,18 @@ export const CreateInitiativeDraftRequestSchema = z.object({
   expectedOutcome: NonEmptyTextSchema.max(10_000),
   classification: z.enum(["internal", "confidential"]),
   requestedPriority: InitiativePrioritySchema,
+  proposalDetails: InitiativeProposalDetailsSchema.default({
+    summary: "",
+    impactedPeople: "",
+    impactedCount: null,
+    problemImpact: "",
+    solution: "",
+    differentiation: "",
+    projectStage: "idea",
+    stageRationale: "",
+    pilotPlan: "",
+    pilotResources: "",
+  }),
 });
 
 export const SetInitiativeOperationalPriorityRequestSchema = z.object({
@@ -40,6 +77,8 @@ export const UpdateInitiativeRequestSchema = z.object({
   problemStatement: NonEmptyTextSchema.max(10_000),
   expectedOutcome: NonEmptyTextSchema.max(10_000),
   classification: z.enum(["internal", "confidential"]),
+  requestedPriority: InitiativePrioritySchema.nullable().optional(),
+  proposalDetails: InitiativeProposalDetailsSchema.optional(),
 });
 
 export const StartReviewRequestSchema = z.object({
@@ -528,12 +567,23 @@ export const InitiativeResponseSchema = z.object({
   id: UuidSchema,
   organizationId: UuidSchema,
   workspaceId: UuidSchema,
+  createdByActorId: z.string().min(1),
+  createdByDisplayName: z.string().nullable().optional(),
   title: z.string(),
   problemStatement: z.string(),
   expectedOutcome: z.string(),
+  proposalDetails: InitiativeProposalDetailsSchema,
   classification: z.enum(["internal", "confidential"]),
   requestedPriority: InitiativePrioritySchema.nullable(),
   operationalPriority: InitiativePrioritySchema.nullable(),
+  intakeAssignment: z
+    .object({
+      responsibleActorId: z.string().min(1),
+      responsibleDisplayName: z.string().nullable(),
+      nextReviewOn: z.string().date(),
+      assignedAt: z.string().datetime(),
+    })
+    .nullable(),
   status: InitiativeStatusSchema,
   version: z.number().int().nonnegative(),
   createdAt: z.string().datetime(),
@@ -866,6 +916,9 @@ export const ProjectBaselineDifferenceResponseSchema = z.object({
 
 export type CreateInitiativeDraftRequest = z.infer<
   typeof CreateInitiativeDraftRequestSchema
+>;
+export type InitiativeProposalDetails = z.infer<
+  typeof InitiativeProposalDetailsSchema
 >;
 export type SubmitInitiativeRequest = z.infer<
   typeof SubmitInitiativeRequestSchema

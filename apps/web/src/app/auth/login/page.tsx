@@ -8,7 +8,12 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-export default function LoginPage() {
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ reason?: string }>;
+}) {
+  const { reason } = await searchParams;
   return (
     <AuthFrame mode="login">
       <div className="auth-heading">
@@ -21,6 +26,12 @@ export default function LoginPage() {
           donde los dejaste.
         </p>
       </div>
+      {reason === "session-expired" ? (
+        <p className="auth-expired-notice" role="alert">
+          Este intento de acceso ya no está disponible. Puede haber caducado o
+          haberse reemplazado; vuelve a iniciar sesión para continuar.
+        </p>
+      ) : null}
       <div className="auth-access-card">
         <div className="auth-access-card__icon">
           <LockKeyhole size={22} strokeWidth={1.7} aria-hidden="true" />

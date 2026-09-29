@@ -1,0 +1,72 @@
+.account-settings {
+  max-width: 1060px;
+}
+
+.account-settings .workspace-section-heading h1 {
+  color: var(--day-ink);
+}
+
+.account-settings .workspace-section-heading p:not(.workspace-kicker) {
+  color: var(--day-muted);
+}
+
+.account-settings .workspace-kicker {
+  color: var(--day-accent);
+}
+
+.account-settings__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+
+.account-settings__card {
+  display: flex;
+  min-height: 300px;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 28px !important;
+}
+
+.account-settings__icon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  margin-bottom: 20px;
+  place-items: center;
+  border: 1px solid var(--day-tint-line);
+  border-radius: 11px;
+  background: var(--day-tint);
+  color: var(--day-accent);
+}
+
+.account-settings__card > h2 {
+  margin-bottom: 6px;
+}
+
+.account-settings__card > p {
+  max-width: 44ch;
+  margin-bottom: 22px;
+  color: var(--day-muted);
+  line-height: 1.6;
+}
+
+.account-settings__card .day-appearance,
+.account-settings__card > .day-button {
+  margin-top: auto;
+}
+
+.account-settings__card > .account-settings__note {
+  margin: 14px 0 0;
+  font-size: 12px;
+}
+
+@media (max-width: 760px) {
+  .account-settings__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .account-settings__card {
+    min-height: 0;
+  }
+}

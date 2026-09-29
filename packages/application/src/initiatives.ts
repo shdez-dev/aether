@@ -1,4 +1,5 @@
 import {
+  emptyInitiativeProposalDetails,
   InitiativeDomainError,
   allowedInitiativeActions,
   canCreateInitiative,
@@ -13,7 +14,9 @@ import {
   type InitiativeAction,
   type InitiativeClassification,
   type InitiativePriority,
+  type InitiativeProposalDetails,
   type InitiativeStatus,
+  type IntakeResponsibility,
 } from "@aether/domain";
 
 import type { TenantStore } from "./tenancy.js";
@@ -23,6 +26,10 @@ import {
   ResourceNotFoundError,
 } from "./tenancy.js";
 import type { TemporaryAccessGrantAuthorizer } from "./access-grants.js";
+import type {
+  InitiativeResponsibilityRole,
+  OrganizationResponsibilityStore,
+} from "./organization-responsibilities.js";
 
 export type InitiativeAuditEvent = Readonly<{
   id: string;
@@ -68,6 +75,7 @@ export type InitiativeAccess = Readonly<{
   initiative: Initiative;
   allowedActions: readonly InitiativeAction[];
   duplicateWarnings: readonly import("@aether/domain").InitiativeDuplicateWarning[];
+  intakeAssignment: IntakeResponsibility | null;
 }>;
 
 export class InitiativeService {
@@ -77,6 +85,15 @@ export class InitiativeService {
       audit: InitiativeAuditStore;
       tenancy: TenantStore;
       accessGrants?: TemporaryAccessGrantAuthorizer;
+      intakeAssignments?: {
+        findActiveByInitiative(
+          initiativeId: string,
+        ): Promise<IntakeResponsibility | null>;
+      };
+      responsibilities?: Pick<
+        OrganizationResponsibilityStore,
+        "hasActiveAssignment"
+      >;
       ids: InitiativeIdGenerator;
       clock: InitiativeClock;
     },
@@ -90,6 +107,7 @@ export class InitiativeService {
     title: string;
     problemStatement: string;
     expectedOutcome: string;
+    proposalDetails?: InitiativeProposalDetails;
     classification: InitiativeClassification;
     requestedPriority: InitiativePriority;
   }): Promise<Initiative> {
@@ -109,6 +127,7 @@ export class InitiativeService {
       title: input.title,
       problemStatement: input.problemStatement,
       expectedOutcome: input.expectedOutcome,
+      proposalDetails: input.proposalDetails ?? emptyInitiativeProposalDetails,
       classification: input.classification,
       requestedPriority: input.requestedPriority,
       operationalPriority: null,
@@ -137,7 +156,9 @@ export class InitiativeService {
     title: string;
     problemStatement: string;
     expectedOutcome: string;
+    proposalDetails?: InitiativeProposalDetails;
     classification: InitiativeClassification;
+    requestedPriority?: InitiativePriority | null;
   }): Promise<Initiative> {
     const current = await this.requireInitiative(
       input.initiativeId,
@@ -161,6 +182,12 @@ export class InitiativeService {
         problemStatement: input.problemStatement,
         expectedOutcome: input.expectedOutcome,
         classification: input.classification,
+        ...(input.requestedPriority !== undefined
+          ? { requestedPriority: input.requestedPriority }
+          : {}),
+        ...(input.proposalDetails
+          ? { proposalDetails: input.proposalDetails }
+          : {}),
       },
       this.dependencies.clock.now(),
     );
@@ -178,6 +205,10 @@ export class InitiativeService {
           "problemStatement",
           "expectedOutcome",
           "classification",
+          ...(input.requestedPriority !== undefined
+            ? ["requestedPriority"]
+            : []),
+          ...(input.proposalDetails ? ["proposalDetails"] : []),
         ],
       },
     );
@@ -202,6 +233,8 @@ export class InitiativeService {
       initiative.id,
       input.correlationId,
     );
+    if (!(await this.canReadRestrictedInitiative(input.actorId, initiative)))
+      throw new ResourceNotFoundError("INITIATIVE_NOT_FOUND");
     return this.toInitiativeAccess(input.actorId, initiative);
   }
 
@@ -219,10 +252,16 @@ export class InitiativeService {
       input.workspaceId,
       input.correlationId,
     );
-    const initiatives = await this.dependencies.store.list({
+    const candidates = await this.dependencies.store.list({
       organizationId: input.organizationId,
       workspaceId: input.workspaceId,
     });
+    const visibility = await Promise.all(
+      candidates.map((initiative) =>
+        this.canReadRestrictedInitiative(input.actorId, initiative),
+      ),
+    );
+    const initiatives = candidates.filter((_, index) => visibility[index]);
     return Promise.all(
       initiatives.map((initiative) =>
         this.toInitiativeAccess(input.actorId, initiative, initiatives),
@@ -292,6 +331,8 @@ export class InitiativeService {
       initiative.id,
       input.correlationId,
     );
+    if (!(await this.canReadRestrictedInitiative(input.actorId, initiative)))
+      throw new ResourceNotFoundError("INITIATIVE_NOT_FOUND");
     return this.dependencies.audit.list({
       organizationId: input.organizationId,
       initiativeId: input.initiativeId,
@@ -492,9 +533,15 @@ export class InitiativeService {
       initiative.organizationId,
       initiative.workspaceId,
     );
+    const [initiativeCoordinator, initiativeApprover] = await Promise.all([
+      this.hasResponsibility(actorId, initiative, "initiative_coordinator"),
+      this.hasResponsibility(actorId, initiative, "initiative_approver"),
+    ]);
     return allowedInitiativeActions({
       organizationRole,
       workspaceRole,
+      initiativeCoordinator,
+      initiativeApprover,
       actorId,
       createdByActorId: initiative.createdByActorId,
       status: initiative.status,
@@ -511,14 +558,70 @@ export class InitiativeService {
         organizationId: initiative.organizationId,
         workspaceId: initiative.workspaceId,
       }));
+    const visibleCandidates =
+      candidates ??
+      (
+        await Promise.all(
+          workspaceInitiatives.map(async (candidate) =>
+            (await this.canReadRestrictedInitiative(actorId, candidate))
+              ? candidate
+              : null,
+          ),
+        )
+      ).filter((candidate): candidate is Initiative => candidate !== null);
     return {
       initiative,
       allowedActions: await this.actionsFor(actorId, initiative),
+      intakeAssignment:
+        (await this.dependencies.intakeAssignments?.findActiveByInitiative(
+          initiative.id,
+        )) ?? null,
       duplicateWarnings: findPotentialInitiativeDuplicates({
         reference: initiative,
-        candidates: workspaceInitiatives,
+        candidates: visibleCandidates,
       }),
     };
+  }
+
+  private async canReadRestrictedInitiative(
+    actorId: string,
+    initiative: Initiative,
+  ): Promise<boolean> {
+    if (
+      initiative.status !== "draft" &&
+      initiative.status !== "returned" &&
+      initiative.classification !== "confidential"
+    )
+      return true;
+    if (initiative.createdByActorId === actorId) return true;
+    const assignment =
+      await this.dependencies.intakeAssignments?.findActiveByInitiative(
+        initiative.id,
+      );
+    if (assignment?.responsibleActorId === actorId) return true;
+    const { organizationRole, workspaceRole } = await this.rolesFor(
+      actorId,
+      initiative.organizationId,
+      initiative.workspaceId,
+    );
+    if (
+      organizationRole === "owner" ||
+      organizationRole === "admin" ||
+      workspaceRole === "admin" ||
+      (await this.hasResponsibility(actorId, initiative, "initiative_mentor"))
+    )
+      return true;
+    return (
+      (await this.dependencies.accessGrants?.authorize({
+        actorId,
+        organizationId: initiative.organizationId,
+        workspaceId: initiative.workspaceId,
+        resourceType: "initiative",
+        resourceId: initiative.id,
+        action: "read",
+        correlationId: this.dependencies.ids.next(),
+      })) ?? false
+    );
   }
   private async rolesFor(
     actorId: string,
@@ -537,6 +640,21 @@ export class InitiativeService {
       this.dependencies.tenancy.findWorkspaceRole({ actorId, workspaceId }),
     ]);
     return { organizationRole, workspaceRole };
+  }
+  private hasResponsibility(
+    actorId: string,
+    initiative: Initiative,
+    roleKey: InitiativeResponsibilityRole,
+  ): Promise<boolean> {
+    return (
+      this.dependencies.responsibilities?.hasActiveAssignment({
+        actorId,
+        organizationId: initiative.organizationId,
+        workspaceId: initiative.workspaceId,
+        roleKey,
+        initiativeId: initiative.id,
+      }) ?? Promise.resolve(false)
+    );
   }
   private assertVersion(initiative: Initiative, expectedVersion: number): void {
     if (initiative.version !== expectedVersion)

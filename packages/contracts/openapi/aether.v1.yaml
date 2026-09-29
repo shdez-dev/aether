@@ -18,6 +18,8 @@ tags:
     description: Señales operacionales sin datos institucionales.
   - name: Authentication
     description: Inicio OIDC, sesión opaca y cierre de sesión.
+  - name: Profile
+    description: Información editable de la persona autenticada.
   - name: Organizations
     description: Contexto organizacional institucional.
   - name: Workspaces
@@ -138,6 +140,22 @@ paths:
               schema: { type: string, format: uri }
         "429":
           $ref: "#/components/responses/Problem"
+  /auth/identity-logout:
+    get:
+      tags: [Authentication]
+      operationId: closeIdentitySession
+      summary: Recuperar el cambio de cuenta cuando ya no hay sesión local
+      description: Redirige al cierre OIDC configurado; una sesión local activa vuelve al workspace para usar el cierre autenticado.
+      security: []
+      responses:
+        "302":
+          description: Redirección fija al proveedor OIDC o al workspace.
+          headers:
+            Location:
+              required: true
+              schema: { type: string, format: uri }
+        "429":
+          $ref: "#/components/responses/Problem"
   /auth/account-management/status:
     get:
       tags: [Authentication]
@@ -220,14 +238,21 @@ paths:
     post:
       tags: [Authentication]
       operationId: logout
-      summary: Revocar la sesión actual
+      summary: Revocar la sesión y continuar el cierre con el proveedor OIDC
       security: [{ cookieSession: [] }]
       parameters:
         - $ref: "#/components/parameters/CsrfToken"
         - $ref: "#/components/parameters/CorrelationId"
       responses:
-        "204":
-          description: Sesión revocada.
+        "200":
+          description: Sesión local revocada; el navegador debe abrir logoutUrl para cerrar la sesión SSO.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [logoutUrl]
+                properties:
+                  logoutUrl: { type: string, format: uri }
         "401":
           $ref: "#/components/responses/Problem"
         "403":
@@ -289,6 +314,40 @@ paths:
         "204": { description: Sesión revocada o ya inactiva. }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
+  /v1/me/profile:
+    get:
+      tags: [Profile]
+      operationId: getMyProfile
+      summary: Consultar el perfil de la sesión actual
+      security: [{ cookieSession: [] }]
+      responses:
+        "200":
+          description: Perfil de la persona autenticada.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserProfile" }
+        "401": { $ref: "#/components/responses/Problem" }
+    patch:
+      tags: [Profile]
+      operationId: updateMyProfile
+      summary: Actualizar el perfil de la sesión actual
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UserProfileInput" }
+      responses:
+        "200":
+          description: Perfil actualizado.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserProfile" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
   /v1/organizations:
     get:
       tags: [Organizations]
@@ -335,6 +394,108 @@ paths:
           $ref: "#/components/responses/Problem"
         default:
           $ref: "#/components/responses/Problem"
+  /v1/organizations/{organizationId}/role-profile:
+    get:
+      tags: [Organizations]
+      operationId: getOrganizationRoleProfile
+      summary: Consultar el perfil de roles asociado al tipo de organización
+      description: Devuelve los roles de acceso compartidos y las responsabilidades sugeridas por tipo. La persona debe pertenecer a la organización.
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationId"
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: Perfil versionado de roles de la organización.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrganizationRoleProfile" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/organizations/{organizationId}/responsibilities:
+    get:
+      tags: [Organizations]
+      operationId: listOrganizationResponsibilities
+      summary: Consultar personas y responsabilidades del espacio
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationId"
+        - name: workspaceId
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: Personas habilitadas y roles funcionales asignados en el espacio.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrganizationResponsibilities" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+    post:
+      tags: [Organizations]
+      operationId: assignOrganizationResponsibility
+      summary: Asignar una responsabilidad de iniciativa en un espacio
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationId"
+        - $ref: "#/components/parameters/CorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AssignOrganizationResponsibility" }
+      responses:
+        "201":
+          description: Asignación creada y auditada.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrganizationResponsibilityAssignment" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+  /v1/organizations/{organizationId}/responsibilities/{assignmentId}:
+    delete:
+      tags: [Organizations]
+      operationId: revokeOrganizationResponsibility
+      summary: Revocar una responsabilidad de iniciativa
+      security: [{ cookieSession: [] }]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationId"
+        - name: assignmentId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "204": { description: Asignación revocada y auditada. }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/organization-role-profiles/{organizationType}:
+    get:
+      tags: [Organizations]
+      operationId: getOrganizationRoleProfileForType
+      summary: Consultar el catálogo de roles para un tipo de organización
+      description: Permite mostrar el perfil sugerido al elegir el tipo durante la creación. No asigna roles ni cambia permisos.
+      security: [{ cookieSession: [] }]
+      parameters:
+        - name: organizationType
+          in: path
+          required: true
+          schema: { type: string, enum: [personal, business, institutional] }
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: Perfil versionado de roles sugeridos para el tipo.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrganizationRoleProfile" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
   /v1/organizations/{organizationId}/policy:
     get:
       tags: [Organizations]
@@ -3445,6 +3606,27 @@ components:
           schema:
             $ref: "#/components/schemas/ApiProblem"
   schemas:
+    UserProfileInput:
+      type: object
+      additionalProperties: false
+      required: [displayName, role, bio, avatarData]
+      properties:
+        displayName: { type: string, maxLength: 120 }
+        role: { type: string, maxLength: 120 }
+        bio: { type: string, maxLength: 600 }
+        avatarData:
+          type: [string, "null"]
+          description: Foto PNG, JPG o WebP codificada como data URL; máximo 500 KB.
+    UserProfile:
+      type: object
+      additionalProperties: false
+      required: [displayName, role, bio, avatarData, updatedAt]
+      properties:
+        displayName: { type: string, maxLength: 120 }
+        role: { type: string, maxLength: 120 }
+        bio: { type: string, maxLength: 600 }
+        avatarData: { type: [string, "null"] }
+        updatedAt: { type: [string, "null"], format: date-time }
     AccountManagementStatus:
       type: object
       additionalProperties: false
@@ -3477,6 +3659,150 @@ components:
         timezone: { type: string }
         locale: { type: string }
         version: { type: integer, minimum: 0 }
+    OrganizationRoleProfile:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          version,
+          organizationType,
+          profileKey,
+          profileLabel,
+          organizationAccessRoles,
+          workspaceAccessRoles,
+          initiativeResponsibilities,
+          projectResponsibilities,
+        ]
+      properties:
+        version: { type: integer, const: 1 }
+        organizationType:
+          {
+            type: [string, "null"],
+            enum: [personal, business, institutional, null],
+          }
+        profileKey:
+          {
+            type: string,
+            enum: [personal, business, institutional, unclassified],
+          }
+        profileLabel: { type: string }
+        organizationAccessRoles:
+          type: array
+          items:
+            { $ref: "#/components/schemas/OrganizationAccessRoleDefinition" }
+        workspaceAccessRoles:
+          type: array
+          items: { $ref: "#/components/schemas/WorkspaceAccessRoleDefinition" }
+        initiativeResponsibilities:
+          type: array
+          items: { $ref: "#/components/schemas/ResponsibilityRoleDefinition" }
+        projectResponsibilities:
+          type: array
+          items: { $ref: "#/components/schemas/ResponsibilityRoleDefinition" }
+    AssignOrganizationResponsibility:
+      type: object
+      additionalProperties: false
+      required: [workspaceId, actorId, roleKey]
+      properties:
+        workspaceId: { type: string, format: uuid }
+        actorId: { type: string, minLength: 1, maxLength: 255 }
+        roleKey:
+          { type: string, enum: [initiative_coordinator, initiative_evaluator, initiative_approver, initiative_mentor] }
+        initiativeId: { type: string, format: uuid }
+        validUntil: { type: string, format: date }
+    OrganizationResponsibilities:
+      type: object
+      additionalProperties: false
+      required: [members, initiatives, assignments]
+      properties:
+        members:
+          type: array
+          items: { $ref: "#/components/schemas/OrganizationResponsibilityMember" }
+        initiatives:
+          type: array
+          items: { $ref: "#/components/schemas/OrganizationResponsibilityInitiative" }
+        assignments:
+          type: array
+          items: { $ref: "#/components/schemas/OrganizationResponsibilityAssignment" }
+    OrganizationResponsibilityInitiative:
+      type: object
+      additionalProperties: false
+      required: [id, title, status]
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        status: { type: string }
+    OrganizationResponsibilityMember:
+      type: object
+      additionalProperties: false
+      required: [actorId, actorName, actorEmail, organizationRole, workspaceRole]
+      properties:
+        actorId: { type: string }
+        actorName: { type: string }
+        actorEmail: { type: [string, "null"], format: email }
+        organizationRole: { type: string, enum: [owner, admin, member] }
+        workspaceRole: { type: [string, "null"], enum: [admin, member, viewer, null] }
+    OrganizationResponsibilityAssignment:
+      type: object
+      additionalProperties: false
+      required: [id, organizationId, workspaceId, workspaceName, actorId, actorName, actorEmail, roleKey, initiativeId, initiativeTitle, validUntil, assignedByActorId, assignedAt]
+      properties:
+        id: { type: string, format: uuid }
+        organizationId: { type: string, format: uuid }
+        workspaceId: { type: string, format: uuid }
+        workspaceName: { type: string }
+        actorId: { type: string }
+        actorName: { type: string }
+        actorEmail: { type: [string, "null"], format: email }
+        roleKey: { type: string, enum: [initiative_coordinator, initiative_evaluator, initiative_approver, initiative_mentor] }
+        initiativeId: { type: [string, "null"], format: uuid }
+        initiativeTitle: { type: [string, "null"] }
+        validUntil: { type: [string, "null"], format: date-time }
+        assignedByActorId: { type: string }
+        assignedAt: { type: string, format: date-time }
+    OrganizationAccessRoleDefinition:
+      type: object
+      additionalProperties: false
+      required: [key, label, scope, description]
+      properties:
+        key: { type: string, enum: [owner, admin, member] }
+        label: { type: string }
+        scope: { type: string, const: organization }
+        description: { type: string }
+    WorkspaceAccessRoleDefinition:
+      type: object
+      additionalProperties: false
+      required: [key, label, scope, description]
+      properties:
+        key: { type: string, enum: [admin, member, viewer] }
+        label: { type: string }
+        scope: { type: string, const: workspace }
+        description: { type: string }
+    ResponsibilityRoleDefinition:
+      type: object
+      additionalProperties: false
+      required: [key, label, scope, description, implementationStatus]
+      properties:
+        key:
+          {
+            type: string,
+            enum:
+              [
+                initiative_coordinator,
+                initiative_evaluator,
+                initiative_approver,
+                initiative_mentor,
+                project_sponsor,
+                project_lead,
+                project_contributor,
+                project_observer,
+              ],
+          }
+        label: { type: string }
+        scope: { type: string, enum: [initiative, project] }
+        description: { type: string }
+        implementationStatus:
+          { type: string, enum: [implemented, restricted, planned] }
     RequestTemporaryAccessGrant:
       type: object
       additionalProperties: false
@@ -3905,6 +4231,38 @@ components:
           allOf:
             - $ref: "#/components/schemas/WorkspacePolicyOverride"
           nullable: true
+    InitiativeProposalDetails:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          summary,
+          impactedPeople,
+          impactedCount,
+          problemImpact,
+          solution,
+          differentiation,
+          projectStage,
+          stageRationale,
+          pilotPlan,
+          pilotResources,
+        ]
+      properties:
+        summary: { type: string, maxLength: 10000 }
+        impactedPeople: { type: string, maxLength: 10000 }
+        impactedCount:
+          { type: [integer, "null"], minimum: 1, maximum: 1000000000 }
+        problemImpact: { type: string, maxLength: 10000 }
+        solution: { type: string, maxLength: 10000 }
+        differentiation: { type: string, maxLength: 10000 }
+        projectStage:
+          {
+            type: string,
+            enum: [idea, prototype, in_development, operating, other],
+          }
+        stageRationale: { type: string, maxLength: 10000 }
+        pilotPlan: { type: string, maxLength: 10000 }
+        pilotResources: { type: string, maxLength: 10000 }
     CreateInitiativeDraftRequest:
       type: object
       additionalProperties: false
@@ -3917,6 +4275,7 @@ components:
           expectedOutcome,
           classification,
           requestedPriority,
+          proposalDetails,
         ]
       properties:
         organizationId: { type: string, format: uuid }
@@ -3926,6 +4285,8 @@ components:
         expectedOutcome: { type: string, minLength: 1, maxLength: 10000 }
         classification: { type: string, enum: [internal, confidential] }
         requestedPriority: { type: string, enum: [low, medium, high] }
+        proposalDetails:
+          { $ref: "#/components/schemas/InitiativeProposalDetails" }
     SetInitiativeOperationalPriorityRequest:
       type: object
       additionalProperties: false
@@ -3965,8 +4326,6 @@ components:
           problemStatement,
           expectedOutcome,
           classification,
-          requestedPriority,
-          operationalPriority,
         ]
       properties:
         expectedVersion: { type: integer, minimum: 0 }
@@ -3974,8 +4333,9 @@ components:
         problemStatement: { type: string, minLength: 1, maxLength: 10000 }
         expectedOutcome: { type: string, minLength: 1, maxLength: 10000 }
         classification: { type: string, enum: [internal, confidential] }
-        requestedPriority: { type: string, enum: [low, medium, high] }
-        operationalPriority:
+        proposalDetails:
+          { $ref: "#/components/schemas/InitiativeProposalDetails" }
+        requestedPriority:
           { type: [string, "null"], enum: [low, medium, high, null] }
     StartReviewRequest:
       type: object
@@ -5554,12 +5914,15 @@ components:
           id,
           organizationId,
           workspaceId,
+          createdByActorId,
           title,
           problemStatement,
           expectedOutcome,
+          proposalDetails,
           classification,
           requestedPriority,
           operationalPriority,
+          intakeAssignment,
           status,
           version,
           createdAt,
@@ -5571,14 +5934,34 @@ components:
         id: { type: string, format: uuid }
         organizationId: { type: string, format: uuid }
         workspaceId: { type: string, format: uuid }
+        createdByActorId: { type: string }
+        createdByDisplayName: { type: [string, "null"] }
         title: { type: string }
         problemStatement: { type: string }
         expectedOutcome: { type: string }
+        proposalDetails:
+          { $ref: "#/components/schemas/InitiativeProposalDetails" }
         classification: { type: string, enum: [internal, confidential] }
         requestedPriority:
           { type: [string, "null"], enum: [low, medium, high, null] }
         operationalPriority:
           { type: [string, "null"], enum: [low, medium, high, null] }
+        intakeAssignment:
+          oneOf:
+            - type: "null"
+            - type: object
+              required:
+                [
+                  responsibleActorId,
+                  responsibleDisplayName,
+                  nextReviewOn,
+                  assignedAt,
+                ]
+              properties:
+                responsibleActorId: { type: string }
+                responsibleDisplayName: { type: [string, "null"] }
+                nextReviewOn: { type: string, format: date }
+                assignedAt: { type: string, format: date-time }
         status:
           type: string
           enum:

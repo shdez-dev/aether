@@ -221,6 +221,8 @@ export function canCreateInitiative(input: {
 export function allowedInitiativeActions(input: {
   organizationRole: OrganizationRole | null;
   workspaceRole: WorkspaceRole | null;
+  initiativeCoordinator?: boolean;
+  initiativeApprover?: boolean;
   actorId: string;
   createdByActorId: string;
   status: import("./initiative.js").InitiativeStatus;
@@ -238,9 +240,15 @@ export function allowedInitiativeActions(input: {
     authorOrManager
   )
     actions.push("edit", "present");
-  if (input.status === "presented" && organizationManager)
+  if (
+    input.status === "presented" &&
+    (organizationManager || input.initiativeCoordinator === true)
+  )
     actions.push("review");
-  if (input.status === "under_review" && input.organizationRole === "owner")
+  if (
+    input.status === "under_review" &&
+    (input.organizationRole === "owner" || input.initiativeApprover === true)
+  )
     actions.push("decide");
   return actions;
 }

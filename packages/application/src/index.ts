@@ -1,6 +1,7 @@
 /** Casos de uso, puertos y fronteras transaccionales. */
 
 export * from "./tenancy.js";
+export * from "./organization-responsibilities.js";
 export * from "./initiatives.js";
 export * from "./initiative-relationships.js";
 export * from "./diagnostics.js";

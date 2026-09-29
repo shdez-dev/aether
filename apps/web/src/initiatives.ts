@@ -2,8 +2,8 @@ import type { InitiativeResponse } from "@aether/contracts";
 
 const statusLabels: Record<InitiativeResponse["status"], string> = {
   draft: "Borrador",
-  presented: "Presentada",
-  under_review: "En revisión",
+  presented: "Por revisar",
+  under_review: "Por decidir",
   approved: "Aprobada",
   rejected: "Rechazada",
   returned: "Devuelta",

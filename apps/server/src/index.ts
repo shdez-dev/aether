@@ -20,6 +20,7 @@ import {
   SupportAccessService,
   ExportService,
   CapacityService,
+  OrganizationResponsibilityService,
 } from "@aether/application";
 import {
   AuthService,
@@ -58,6 +59,8 @@ import {
   PostgresSupportAccessGrantStore,
   PostgresExportJobStore,
   PostgresCapacityStore,
+  PostgresUserProfileStore,
+  PostgresOrganizationResponsibilityStore,
 } from "@aether/database";
 import {
   createOperationalMetrics,
@@ -119,11 +122,21 @@ const tenants = new TenantService({
   clock: { now: () => new Date() },
   accessGrants,
 });
+const organizationResponsibilityStore =
+  new PostgresOrganizationResponsibilityStore(pool);
+const responsibilities = new OrganizationResponsibilityService({
+  store: organizationResponsibilityStore,
+  tenancy: new PostgresTenantStore(pool),
+  ids: { next: randomUUID },
+  clock: { now: () => new Date() },
+});
 const initiatives = new InitiativeService({
   store: new PostgresInitiativeStore(pool),
   audit: new PostgresInitiativeAuditStore(pool),
   tenancy: new PostgresTenantStore(pool),
   accessGrants,
+  intakeAssignments: new PostgresIntakeAssignmentStore(pool),
+  responsibilities: organizationResponsibilityStore,
   ids: { next: randomUUID },
   clock: { now: () => new Date() },
 });
@@ -131,6 +144,7 @@ const intake = new IntakeService({
   assignments: new PostgresIntakeAssignmentStore(pool),
   initiatives: new PostgresInitiativeStore(pool),
   tenancy: new PostgresTenantStore(pool),
+  responsibilities: organizationResponsibilityStore,
   ids: { next: randomUUID },
   clock: { now: () => new Date() },
 });
@@ -141,6 +155,7 @@ const evaluations = new EvaluationService({
   audit: new PostgresInitiativeAuditStore(pool),
   tenancy: new PostgresTenantStore(pool),
   accessGrants,
+  responsibilities: organizationResponsibilityStore,
   ids: { next: randomUUID },
   clock: { now: () => new Date() },
 });
@@ -260,6 +275,7 @@ const app = await buildServer({
   supportAccess,
   initiatives,
   intake,
+  responsibilities,
   evaluations,
   triage,
   relationships,
@@ -276,6 +292,7 @@ const app = await buildServer({
   outboxAdministration,
   exports,
   capacity,
+  userProfiles: new PostgresUserProfileStore(pool),
   metrics,
   readinessCheck: async () => {
     await pool.query("SELECT 1");

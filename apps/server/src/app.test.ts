@@ -30,6 +30,9 @@ import {
   SupportAccessService,
   TenantService,
   CapacityService,
+  OrganizationResponsibilityService,
+  type OrganizationResponsibilityAssignment,
+  type OrganizationResponsibilityStore,
 } from "@aether/application";
 import {
   InMemoryEvaluationStandardStore,
@@ -55,6 +58,113 @@ import { buildServer, PublicHttpRoutes } from "./app.js";
 import type { ServerConfig } from "./config.js";
 
 const testSessionEncryptionKey = Buffer.alloc(32).toString("base64");
+
+describe("perfil personal", () => {
+  it("guarda solo los datos de la sesión y valida la foto", async () => {
+    const authStore = new InMemoryAuthStore();
+    const auth = new AuthService({
+      store: authStore,
+      cipher: createAesGcmCipher(config.sessionEncryptionKey),
+      oidc,
+      issuer: config.oidcIssuerUrl,
+      sessionTtlSeconds: config.sessionTtlSeconds,
+      sessionRenewalWindowSeconds: config.sessionRenewalWindowSeconds,
+    });
+    const blank: {
+      displayName: string;
+      role: string;
+      bio: string;
+      avatarData: string | null;
+      updatedAt: string | null;
+    } = {
+      displayName: "",
+      role: "",
+      bio: "",
+      avatarData: null,
+      updatedAt: null,
+    };
+    const profiles = new Map<string, typeof blank>();
+    const app = await buildServer({
+      config,
+      auth,
+      tenants: {} as TenantService,
+      initiatives: {} as InitiativeService,
+      evaluations: {} as EvaluationService,
+      projects: {} as ProjectService,
+      idempotency: new InMemoryIdempotencyStore(),
+      userProfiles: {
+        get: async (actorId) => profiles.get(actorId) ?? blank,
+        save: async (actorId, profile) => {
+          const saved = { ...profile, updatedAt: new Date().toISOString() };
+          profiles.set(actorId, saved);
+          return saved;
+        },
+      },
+    });
+    await createAuthenticatedSession(authStore, {
+      token: "profile-a",
+      actorId: "actor-a",
+      actorEmail: "a@example.test",
+    });
+    await createAuthenticatedSession(authStore, {
+      token: "profile-b",
+      actorId: "actor-b",
+      actorEmail: "b@example.test",
+    });
+    const cookies = "aether_session=profile-a; aether_csrf=profile-csrf";
+    const valid = {
+      displayName: "Alex",
+      role: "Desarrollador frontend",
+      bio: "Construyo interfaces.",
+      avatarData: null,
+    };
+    const saved = await app.inject({
+      method: "PATCH",
+      url: "/v1/me/profile",
+      headers: {
+        cookie: cookies,
+        origin: config.webOrigin,
+        "x-csrf-token": "profile-csrf",
+      },
+      payload: valid,
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json()).toMatchObject(valid);
+    expect(
+      (
+        await app.inject({
+          method: "GET",
+          url: "/v1/me/profile",
+          headers: { cookie: cookies },
+        })
+      ).json(),
+    ).toMatchObject(valid);
+    expect(
+      (
+        await app.inject({
+          method: "GET",
+          url: "/v1/me/profile",
+          headers: { cookie: "aether_session=profile-b" },
+        })
+      ).json(),
+    ).toEqual(blank);
+    const invalid = await app.inject({
+      method: "PATCH",
+      url: "/v1/me/profile",
+      headers: {
+        cookie: cookies,
+        origin: config.webOrigin,
+        "x-csrf-token": "profile-csrf",
+      },
+      payload: {
+        ...valid,
+        avatarData: `data:image/png;base64,${Buffer.from("not a PNG").toString("base64")}`,
+      },
+    });
+    expect(invalid.statusCode).toBe(400);
+    await app.close();
+  });
+});
 class InMemoryAuthStore implements AuthStore {
   private readonly sessions = new Map<string, AuthSession>();
   private readonly transactions = new Map<string, LoginTransaction>();
@@ -202,7 +312,11 @@ const oidc: OidcProvider = {
     return `https://identity.example/authorize?state=${state}`;
   },
   async exchangeAuthorizationCode() {
-    return { subject: "actor-123", email: "actor@example.test" };
+    return {
+      subject: "actor-123",
+      email: "actor@example.test",
+      idToken: "signed.identity.token",
+    };
   },
 };
 
@@ -558,8 +672,9 @@ describe("HTTP authentication boundary", () => {
     const securityAuditEvents: Array<
       Parameters<SecurityAuditStore["record"]>[0]
     > = [];
+    const tenantStore = new InMemoryTenantStore();
     const tenants = new TenantService({
-      store: new InMemoryTenantStore(),
+      store: tenantStore,
       ids: { next: () => crypto.randomUUID() },
       tokens: {
         generate: () => "x".repeat(43),
@@ -1049,8 +1164,9 @@ describe("HTTP authentication boundary", () => {
       sessionTtlSeconds: 3600,
       sessionRenewalWindowSeconds: 600,
     });
+    const tenantStore = new InMemoryTenantStore();
     const tenants = new TenantService({
-      store: new InMemoryTenantStore(),
+      store: tenantStore,
       ids: { next: () => crypto.randomUUID() },
       tokens: {
         generate: () => "x".repeat(43),
@@ -1058,10 +1174,68 @@ describe("HTTP authentication boundary", () => {
       },
       clock: { now: () => new Date("2026-09-08T12:00:00.000Z") },
     });
+    const roleAssignments: OrganizationResponsibilityAssignment[] = [];
+    const responsibilityStore: OrganizationResponsibilityStore = {
+      async listMembers() {
+        return [
+          {
+            actorId: "actor-123",
+            actorName: "Propietario",
+            actorEmail: "actor@example.test",
+            organizationRole: "owner",
+            workspaceRole: null,
+          },
+        ];
+      },
+      async listInitiatives() {
+        return [];
+      },
+      async findInitiative() {
+        return null;
+      },
+      async listAssignments({ organizationId, workspaceId }) {
+        return roleAssignments.filter(
+          (assignment) =>
+            assignment.organizationId === organizationId &&
+            assignment.workspaceId === workspaceId,
+        );
+      },
+      async findAssignment({ organizationId, assignmentId }) {
+        return (
+          roleAssignments.find(
+            (assignment) =>
+              assignment.organizationId === organizationId &&
+              assignment.id === assignmentId,
+          ) ?? null
+        );
+      },
+      async createAssignment({ assignment }) {
+        roleAssignments.push(assignment);
+        return "created";
+      },
+      async revokeAssignment() {
+        return "not_found";
+      },
+      async hasActiveAssignment({ actorId, roleKey, workspaceId }) {
+        return roleAssignments.some(
+          (assignment) =>
+            assignment.actorId === actorId &&
+            assignment.roleKey === roleKey &&
+            assignment.workspaceId === workspaceId,
+        );
+      },
+    };
+    const responsibilities = new OrganizationResponsibilityService({
+      store: responsibilityStore,
+      tenancy: tenantStore,
+      ids: { next: () => crypto.randomUUID() },
+      clock: { now: () => new Date("2026-09-29T12:00:00.000Z") },
+    });
     const app = await buildServer({
       config,
       auth,
       tenants,
+      responsibilities,
       initiatives: {} as InitiativeService,
       evaluations: {} as EvaluationService,
       projects: {} as ProjectService,
@@ -1085,7 +1259,18 @@ describe("HTTP authentication boundary", () => {
     expect(
       loginCookies.find((cookie) => cookie.startsWith("aether_oidc_tx=")),
     ).toContain("SameSite=Lax");
+    expect(
+      loginCookies.find((cookie) => cookie.startsWith("aether_oidc_tx=")),
+    ).toContain("Max-Age=3600");
     const state = new URL(login.headers.location!).searchParams.get("state")!;
+    const missingTransaction = await app.inject({
+      method: "GET",
+      url: `/auth/callback?code=code&state=${state}`,
+    });
+    expect(missingTransaction.statusCode).toBe(302);
+    expect(missingTransaction.headers.location).toBe(
+      `${config.webOrigin}/auth/login?reason=session-expired`,
+    );
     const callback = await app.inject({
       method: "GET",
       url: `/auth/callback?code=code&state=${state}`,
@@ -1094,6 +1279,17 @@ describe("HTTP authentication boundary", () => {
       },
     });
     expect(callback.headers.location).toBe(`${config.webOrigin}/workspace`);
+    const expiredOrReplayedTransaction = await app.inject({
+      method: "GET",
+      url: `/auth/callback?code=code&state=${state}`,
+      headers: {
+        cookie: `aether_oidc_tx=${cookieValue(loginCookies, "aether_oidc_tx")}`,
+      },
+    });
+    expect(expiredOrReplayedTransaction.statusCode).toBe(302);
+    expect(expiredOrReplayedTransaction.headers.location).toBe(
+      `${config.webOrigin}/auth/login?reason=session-expired`,
+    );
     const callbackCookies = responseCookies(callback);
     const sessionHeader = callbackCookies.find((cookie) =>
       cookie.startsWith("aether_session="),
@@ -1103,6 +1299,13 @@ describe("HTTP authentication boundary", () => {
     expect(sessionHeader).not.toContain("access_token");
     const session = cookieValue(callbackCookies, "aether_session");
     const csrf = cookieValue(callbackCookies, "aether_csrf");
+    const logoutHint = cookieValue(callbackCookies, "aether_oidc_logout");
+    expect(logoutHint).not.toContain("signed.identity.token");
+    expect(
+      callbackCookies.find((cookie) =>
+        cookie.startsWith("aether_oidc_logout="),
+      ),
+    ).toContain("HttpOnly");
     const authenticatedActorId = (
       await app.inject({
         method: "GET",
@@ -1164,6 +1367,49 @@ describe("HTTP authentication boundary", () => {
     expect(organization.json()).toMatchObject({
       organizationType: "institutional",
     });
+    const institutionRoleProfilePreview = await app.inject({
+      method: "GET",
+      url: "/v1/organization-role-profiles/institutional",
+      headers: { cookie: `aether_session=${session}` },
+    });
+    expect(institutionRoleProfilePreview.statusCode).toBe(200);
+    expect(institutionRoleProfilePreview.json()).toMatchObject({
+      organizationType: "institutional",
+      initiativeResponsibilities: [
+        { key: "initiative_coordinator", implementationStatus: "implemented" },
+        { key: "initiative_evaluator", implementationStatus: "implemented" },
+        { key: "initiative_approver", implementationStatus: "implemented" },
+        { key: "initiative_mentor", implementationStatus: "implemented" },
+      ],
+    });
+    const roleProfile = await app.inject({
+      method: "GET",
+      url: `/v1/organizations/${organization.json().id}/role-profile`,
+      headers: { cookie: `aether_session=${session}` },
+    });
+    expect(roleProfile.statusCode).toBe(200);
+    expect(roleProfile.json()).toMatchObject({
+      version: 1,
+      organizationType: "institutional",
+      profileKey: "institutional",
+      organizationAccessRoles: [
+        { key: "owner", scope: "organization" },
+        { key: "admin", scope: "organization" },
+        { key: "member", scope: "organization" },
+      ],
+      initiativeResponsibilities: [
+        { key: "initiative_coordinator", implementationStatus: "implemented" },
+        { key: "initiative_evaluator", implementationStatus: "implemented" },
+        { key: "initiative_approver", implementationStatus: "implemented" },
+        { key: "initiative_mentor", implementationStatus: "implemented" },
+      ],
+    });
+    const inaccessibleRoleProfile = await app.inject({
+      method: "GET",
+      url: "/v1/organizations/00000000-0000-4000-8000-000000000099/role-profile",
+      headers: { cookie: `aether_session=${session}` },
+    });
+    expect(inaccessibleRoleProfile.statusCode).toBe(404);
     const workspace = await app.inject({
       method: "POST",
       url: "/v1/workspaces",
@@ -1179,6 +1425,46 @@ describe("HTTP authentication boundary", () => {
       },
     });
     expect(workspace.statusCode).toBe(201);
+    const assignedResponsibility = await app.inject({
+      method: "POST",
+      url: `/v1/organizations/${organization.json().id}/responsibilities`,
+      headers: {
+        origin: config.webOrigin,
+        "x-csrf-token": csrf,
+        "idempotency-key": "assign-initiative-coordinator-key",
+        cookie: `aether_session=${session}; aether_csrf=${csrf}`,
+      },
+      payload: {
+        workspaceId: workspace.json().id,
+        actorId: authenticatedActorId,
+        roleKey: "initiative_coordinator",
+      },
+    });
+    expect(assignedResponsibility.statusCode).toBe(201);
+    expect(assignedResponsibility.json()).toMatchObject({
+      organizationId: organization.json().id,
+      workspaceId: workspace.json().id,
+      actorId: authenticatedActorId,
+      roleKey: "initiative_coordinator",
+      initiativeId: null,
+      validUntil: null,
+    });
+    const organizationResponsibilities = await app.inject({
+      method: "GET",
+      url: `/v1/organizations/${organization.json().id}/responsibilities?workspaceId=${workspace.json().id}`,
+      headers: { cookie: `aether_session=${session}` },
+    });
+    expect(organizationResponsibilities.statusCode).toBe(200);
+    expect(organizationResponsibilities.json()).toMatchObject({
+      initiatives: [],
+      assignments: [
+        expect.objectContaining({
+          roleKey: "initiative_coordinator",
+          actorId: authenticatedActorId,
+          workspaceId: workspace.json().id,
+        }),
+      ],
+    });
     const effectivePolicy = await app.inject({
       method: "GET",
       url: `/v1/organizations/${organization.json().id}/policy?workspaceId=${workspace.json().id}`,
@@ -1556,10 +1842,27 @@ describe("HTTP authentication boundary", () => {
       headers: {
         origin: config.webOrigin,
         "x-csrf-token": csrf,
-        cookie: `aether_session=${session}; aether_csrf=${csrf}`,
+        cookie: `aether_session=${session}; aether_csrf=${csrf}; aether_oidc_logout=${logoutHint}`,
       },
     });
-    expect(logout.statusCode).toBe(204);
+    expect(logout.statusCode).toBe(200);
+    const logoutUrl = new URL(logout.json().logoutUrl);
+    expect(logoutUrl.origin).toBe(new URL(config.oidcIssuerUrl).origin);
+    expect(logoutUrl.pathname).toBe("/protocol/openid-connect/logout");
+    expect(logoutUrl.searchParams.get("client_id")).toBe(config.oidcClientId);
+    expect(logoutUrl.searchParams.get("id_token_hint")).toBe(
+      "signed.identity.token",
+    );
+    expect(logoutUrl.searchParams.get("post_logout_redirect_uri")).toBe(
+      `${config.webOrigin}/workspace?logged_out=1`,
+    );
+    const recoverIdentity = await app.inject({
+      method: "GET",
+      url: "/auth/identity-logout",
+      headers: { cookie: `aether_oidc_logout=${logoutHint}` },
+    });
+    expect(recoverIdentity.statusCode).toBe(302);
+    expect(recoverIdentity.headers.location).toBe(logoutUrl.href);
     const afterLogout = await app.inject({
       method: "GET",
       url: "/auth/session",
@@ -1933,7 +2236,7 @@ describe("HTTP authentication boundary", () => {
       }),
     ]);
     expect(foreignRequests.map((response) => response.statusCode)).toEqual([
-      403, 404, 403,
+      403, 404, 404,
     ]);
     const organizationsResponse = await app.inject({
       method: "GET",
@@ -1990,12 +2293,37 @@ describe("HTTP authentication boundary", () => {
         title: "Reducir tiempos de espera",
         problemStatement: "La atención tarda demasiado.",
         expectedOutcome: "Reducir la mediana de espera en el piloto.",
+        proposalDetails: {
+          summary: "Mejorar el primer contacto de atención.",
+          impactedPeople: "Personas usuarias y agentes de atención.",
+          impactedCount: 120,
+          problemImpact: "Abandono de solicitudes y sobrecarga del equipo.",
+          solution: "Orientación de solicitudes según capacidad disponible.",
+          differentiation: "Se ajusta al ritmo diario del equipo.",
+          projectStage: "prototype",
+          stageRationale: "El flujo ya fue probado con usuarios.",
+          pilotPlan: "Probar cuatro semanas en una sede.",
+          pilotResources: "Dos agentes y métricas de atención.",
+        },
         classification: "internal",
         requestedPriority: "high",
       },
     });
     expect(createdResponse.statusCode).toBe(201);
-    const created = createdResponse.json() as { id: string; version: number };
+    const created = createdResponse.json() as {
+      id: string;
+      version: number;
+      proposalDetails: {
+        impactedCount: number;
+        pilotPlan: string;
+        stageRationale: string;
+      };
+    };
+    expect(created.proposalDetails).toMatchObject({
+      impactedCount: 120,
+      pilotPlan: "Probar cuatro semanas en una sede.",
+      stageRationale: "El flujo ya fue probado con usuarios.",
+    });
     const replayedCreate = await app.inject({
       method: "POST",
       url: "/v1/initiatives",
@@ -2006,6 +2334,18 @@ describe("HTTP authentication boundary", () => {
         title: "Reducir tiempos de espera",
         problemStatement: "La atención tarda demasiado.",
         expectedOutcome: "Reducir la mediana de espera en el piloto.",
+        proposalDetails: {
+          summary: "Mejorar el primer contacto de atención.",
+          impactedPeople: "Personas usuarias y agentes de atención.",
+          impactedCount: 120,
+          problemImpact: "Abandono de solicitudes y sobrecarga del equipo.",
+          solution: "Orientación de solicitudes según capacidad disponible.",
+          differentiation: "Se ajusta al ritmo diario del equipo.",
+          projectStage: "prototype",
+          stageRationale: "El flujo ya fue probado con usuarios.",
+          pilotPlan: "Probar cuatro semanas en una sede.",
+          pilotResources: "Dos agentes y métricas de atención.",
+        },
         classification: "internal",
         requestedPriority: "high",
       },
@@ -2057,6 +2397,7 @@ describe("HTTP authentication boundary", () => {
       problemStatement: "La atención tarda demasiado.",
       expectedOutcome: "Reducir la mediana de espera en el piloto.",
       classification: "internal",
+      requestedPriority: "low",
     };
     const concurrentEdits = await Promise.all(
       [crypto.randomUUID(), crypto.randomUUID()].map((idempotencyKey) =>
@@ -2076,7 +2417,8 @@ describe("HTTP authentication boundary", () => {
     ).toMatchObject({ code: "CONFLICT" });
     const edited = concurrentEdits
       .find((response) => response.statusCode === 200)!
-      .json() as { version: number };
+      .json() as { version: number; requestedPriority: string | null };
+    expect(edited.requestedPriority).toBe("low");
 
     const presentedResponse = await app.inject({
       method: "POST",

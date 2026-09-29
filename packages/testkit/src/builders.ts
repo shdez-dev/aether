@@ -45,6 +45,18 @@ export function initiativeDraftBuilder(
       "Reducir el tiempo mediano de espera en un piloto verificable.",
     classification: "internal",
     requestedPriority: "medium",
+    proposalDetails: {
+      summary: "Resumen de la propuesta",
+      impactedPeople: "Personas usuarias",
+      impactedCount: 10,
+      problemImpact: "Impacto operativo medible",
+      solution: "Solución propuesta",
+      differentiation: "Enfoque diferente",
+      projectStage: "idea",
+      stageRationale: "La idea requiere validación inicial.",
+      pilotPlan: "Pilotaje con grupo acotado",
+      pilotResources: "Equipo y herramientas",
+    },
     ...overrides,
   };
 }

@@ -24,7 +24,8 @@
     "db:migrate": "pnpm --filter @aether/database migrate",
     "local:up": "docker compose -f infra/compose.yaml up -d",
     "local:down": "docker compose -f infra/compose.yaml down",
-    "local:email:brevo": "node scripts/configure-keycloak-brevo.mjs"
+    "local:email:brevo": "node scripts/configure-keycloak-brevo.mjs",
+    "local:auth:logout": "node scripts/configure-keycloak-logout.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

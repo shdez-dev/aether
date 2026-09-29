@@ -159,8 +159,7 @@
   font-size: 12px;
   font-weight: 700;
 }
-.first-steps__form input,
-.first-steps__form select {
+.first-steps__form input {
   width: 100%;
   min-height: 51px;
   padding: 12px 14px;
@@ -171,8 +170,150 @@
   font: inherit;
   font-size: 14px;
 }
+.first-steps__picker {
+  position: relative;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.first-steps__picker.is-open {
+  z-index: 5;
+}
+.first-steps__picker-trigger {
+  display: flex;
+  width: 100%;
+  min-height: 51px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+  border: 1px solid #dce4f4;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #fff, #fcfdff);
+  color: #17274f;
+  cursor: pointer;
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    background-color 180ms ease;
+}
+.first-steps__picker-trigger:hover,
+.first-steps__picker-trigger[aria-expanded="true"] {
+  border-color: #98adea;
+  background: #fff;
+  box-shadow: 0 0 0 3px rgb(52 87 193 / 8%);
+}
+.first-steps__picker-trigger > .first-steps__picker-label {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  min-height: 1.2em;
+  flex: 1;
+  align-items: center;
+  overflow: hidden;
+}
+.first-steps__picker-label > span {
+  grid-area: 1 / 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.first-steps__picker-chevron {
+  flex: none;
+  color: #526791;
+  transition:
+    transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    color 180ms ease;
+}
+.first-steps__picker-trigger[aria-expanded="true"]
+  .first-steps__picker-chevron {
+  transform: rotate(180deg);
+  color: #2547b5;
+}
+.first-steps__picker-menu {
+  position: absolute;
+  z-index: 6;
+  top: calc(100% + 8px);
+  left: 0;
+  width: 100%;
+  overflow: hidden;
+  padding: 7px;
+  border: 1px solid #dce4f4;
+  border-radius: 11px;
+  background:
+    radial-gradient(ellipse at 100% 0, rgb(232 239 255 / 70%), transparent 48%),
+    #fff;
+  box-shadow:
+    0 16px 36px rgb(25 47 95 / 11%),
+    0 2px 7px rgb(25 47 95 / 5%);
+  transform-origin: top center;
+  will-change: opacity, transform;
+}
+.first-steps__picker-caption {
+  padding: 8px 10px 7px;
+  color: #7786a2 !important;
+  font-size: 9px !important;
+  font-weight: 800;
+  letter-spacing: 0.15em;
+}
+.first-steps__picker-option {
+  display: flex;
+  width: 100%;
+  min-height: 57px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: #17274f;
+  cursor: pointer;
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease,
+    transform 150ms ease;
+}
+.first-steps__picker-option:hover,
+.first-steps__picker-option[data-active="true"] {
+  transform: translateX(2px);
+  border-color: #e6ecfa;
+  background: #f4f7ff;
+}
+.first-steps__picker-option[aria-selected="true"] {
+  border-color: #dce5ff;
+  background: #eef3ff;
+}
+.first-steps__picker-option-copy {
+  display: grid;
+  gap: 3px;
+}
+.first-steps__picker-option-copy strong {
+  font-size: 12px;
+  font-weight: 700;
+}
+.first-steps__picker-option-copy > span {
+  color: #71809a;
+  font-size: 10px;
+  line-height: 1.4;
+}
+.first-steps__picker-check {
+  flex: none;
+  color: #2547b5;
+  opacity: 0;
+  transform: scale(0.8);
+  transition:
+    opacity 150ms ease,
+    transform 150ms ease;
+}
+.first-steps__picker-option[aria-selected="true"] .first-steps__picker-check {
+  opacity: 1;
+  transform: scale(1);
+}
 .first-steps__form input:focus-visible,
-.first-steps__form select:focus-visible,
+.first-steps__picker-trigger:focus-visible,
 .first-steps button:focus-visible {
   outline: 3px solid #90aaff;
   outline-offset: 3px;
@@ -274,5 +415,15 @@
   }
   .first-steps__back:hover {
     gap: 8px;
+  }
+  .first-steps__picker-trigger,
+  .first-steps__picker-chevron,
+  .first-steps__picker-option,
+  .first-steps__picker-check {
+    transition: none;
+  }
+  .first-steps__picker-option:hover,
+  .first-steps__picker-option[data-active="true"] {
+    transform: none;
   }
 }

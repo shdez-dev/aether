@@ -35,7 +35,10 @@
       "serviceAccountsEnabled": false,
       "redirectUris": ["http://127.0.0.1:4000/auth/callback"],
       "webOrigins": ["http://127.0.0.1:3000"],
-      "attributes": { "pkce.code.challenge.method": "S256" }
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://127.0.0.1:3000/workspace?logged_out=1"
+      }
     }
   ],
   "users": [

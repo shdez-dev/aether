@@ -43,6 +43,22 @@ y requieren autorización de servidor, CSRF en mutaciones y auditoría
 correlacionada. No se asignan valores por defecto a organizaciones antiguas que
 aún no tengan política configurada.
 
+## Capacidades de producto
+
+El espacio autenticado incluye una bandeja personal en «Mi día», preferencias
+de apariencia claro/oscuro/sistema, perfil de usuario editable y una
+administración de organización dividida en vistas de usuarios, política y
+espacios. Las invitaciones separan la pertenencia a la organización del acceso
+a cada espacio; las responsabilidades funcionales de iniciativas se asignan
+por organización, espacio y, cuando corresponde, iniciativa.
+
+Las iniciativas contienen un expediente de propuesta con contexto, resumen,
+problema, personas e impacto, propuesta de valor, solución, diferenciación,
+etapa y pilotaje. Se crean y editan como formularios completos; los estándares
+de evaluación se configuran por organización y las revisiones y decisiones
+conservan su trazabilidad. Los campos nuevos son compatibles con iniciativas
+anteriores.
+
 ## Gobierno de ingeniería
 
 - [Estado y alcance del repositorio](docs/governance/repository-baseline.md)
@@ -58,6 +74,7 @@ aún no tengan política configurada.
 - [OpenAPI 3.1 inicial](packages/contracts/openapi/aether.v1.yaml)
 - [Autenticación OIDC y sesiones](docs/architecture/authentication-and-sessions.md)
 - [Organizaciones, workspaces y autorización](docs/architecture/tenancy-and-authorization.md)
+- [Roles organizacionales y perfiles de usuario](docs/architecture/organization-roles-and-user-profiles.md)
 - [Ciclo de vida de iniciativas institucionales](docs/architecture/initiative-lifecycle.md)
 - [Evaluación y decisión institucional](docs/architecture/evaluation-and-decision.md)
 - [Proyecto y ejecución](docs/architecture/project-execution.md)

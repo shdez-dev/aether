@@ -17,13 +17,19 @@ class InMemoryAuthStore implements AuthStore {
   readonly transactions = new Map<string, LoginTransaction>();
   readonly identities = new Map<
     string,
-    { actorId: string; email: string | null; authenticatedAt: Date }
+    {
+      actorId: string;
+      email: string | null;
+      name: string | null;
+      authenticatedAt: Date;
+    }
   >();
   async resolveIdentity(input: {
     id: string;
     issuer: string;
     subject: string;
     email: string | null;
+    name?: string | null;
     authenticatedAt: Date;
   }): Promise<{ actorId: string }> {
     const key = `${input.issuer}:${input.subject}`;
@@ -31,6 +37,7 @@ class InMemoryAuthStore implements AuthStore {
     const identity = {
       actorId: existing?.actorId ?? input.id,
       email: input.email,
+      name: input.name ?? null,
       authenticatedAt: input.authenticatedAt,
     };
     this.identities.set(key, identity);
@@ -138,11 +145,43 @@ const fakeOidc: OidcProvider = {
     return `https://identity.example/authorize?state=${state}`;
   },
   async exchangeAuthorizationCode() {
-    return { subject: "actor-123", email: "actor@example.test" };
+    return {
+      subject: "actor-123",
+      email: "actor@example.test",
+      name: "Alex Registrado",
+    };
   },
 };
 
 describe("AuthService", () => {
+  it("mantiene el intento de acceso durante una hora y rechaza el retorno tardío", async () => {
+    const store = new InMemoryAuthStore();
+    let now = new Date("2026-09-26T12:00:00.000Z");
+    const auth = new AuthService({
+      store,
+      cipher: createAesGcmCipher(testSessionEncryptionKey),
+      oidc: fakeOidc,
+      issuer: "https://identity.example",
+      sessionTtlSeconds: 3600,
+      sessionRenewalWindowSeconds: 600,
+      now: () => now,
+    });
+    const started = await auth.beginLogin();
+    const transaction = [...store.transactions.values()][0];
+    expect(transaction?.expiresAt.toISOString()).toBe(
+      "2026-09-26T13:00:00.000Z",
+    );
+    const state = new URL(started.authorizationUrl).searchParams.get("state")!;
+    now = new Date("2026-09-26T13:00:01.000Z");
+    await expect(
+      auth.completeLogin({
+        transactionHandle: started.transactionHandle,
+        state,
+        callbackUrl: `https://app.example/auth/callback?code=late&state=${state}`,
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_LOGIN_TRANSACTION" });
+  });
+
   it("conserva la intención de registro dentro del flujo OIDC protegido", async () => {
     const intents: Array<"login" | "register" | undefined> = [];
     const auth = new AuthService({
@@ -271,6 +310,7 @@ describe("AuthService", () => {
     expect(completed.sessionToken).not.toContain(".");
     expect(completed.session.actorId).not.toBe("actor-123");
     expect(store.identities).toHaveLength(1);
+    expect([...store.identities.values()][0]?.name).toBe("Alex Registrado");
     expect([...store.sessions.values()][0]?.tokenHash).toBe(
       hashOpaqueToken(completed.sessionToken),
     );

@@ -1,30 +1,85 @@
 import {
-  ArrowUpRight,
   Boxes,
+  Clock3,
   House,
-  Landmark,
+  ListTodo,
   LogOut,
   PanelsTopLeft,
+  Settings2,
+  UserRound,
 } from "lucide-react";
+import type { ReactNode } from "react";
 
 export type WorkspaceView =
-  "overview" | "initiatives" | "projects" | "organization";
+  | "overview"
+  | "my-work"
+  | "initiatives"
+  | "initiative-new"
+  | "initiative-edit"
+  | "projects"
+  | "recent"
+  | "settings"
+  | "profile"
+  | "organization"
+  | "organization-new";
 
-const destinations = [
+const personalDestinations = [
   { id: "overview", label: "Mi día", icon: House },
+] as const;
+const workDestinations = [
+  { id: "my-work", label: "Mis tareas", icon: ListTodo },
+] as const;
+const spaceDestinations = [
   { id: "initiatives", label: "Iniciativas", icon: PanelsTopLeft },
   { id: "projects", label: "Proyectos", icon: Boxes },
-  { id: "organization", label: "Organización", icon: Landmark },
+  { id: "recent", label: "Recientes", icon: Clock3 },
 ] as const;
+
+function NavigationLinks({
+  destinations,
+  activeView,
+  onNavigate,
+}: {
+  destinations: ReadonlyArray<{
+    id: WorkspaceView;
+    label: string;
+    icon: typeof House;
+  }>;
+  activeView: WorkspaceView;
+  onNavigate: (view: WorkspaceView) => void;
+}) {
+  return destinations.map(({ id, label, icon: Icon }) => (
+    <a
+      key={id}
+      href={`#${id}`}
+      className={
+        activeView === id
+          ? "workspace-sidebar__link is-active"
+          : "workspace-sidebar__link"
+      }
+      aria-current={activeView === id ? "page" : undefined}
+      onClick={(event) => {
+        event.preventDefault();
+        onNavigate(id);
+      }}
+    >
+      <Icon size={18} strokeWidth={1.8} aria-hidden="true" />
+      <span className="workspace-sidebar__label">{label}</span>
+      {activeView === id ? (
+        <span className="workspace-sidebar__active-dot" aria-hidden="true" />
+      ) : null}
+    </a>
+  ));
+}
 
 export function WorkspaceNavigation({
   activeView,
-  organizationName,
+  contextSwitcher,
   onNavigate,
   onLogout,
 }: {
   activeView: WorkspaceView;
-  organizationName: string;
+  contextSwitcher: ReactNode;
   onNavigate: (view: WorkspaceView) => void;
   onLogout: () => void;
 }) {
@@ -49,51 +104,75 @@ export function WorkspaceNavigation({
         <span>AETHER</span>
       </a>
 
-      <div className="workspace-sidebar__context">
-        <span>ESPACIO ACTIVO</span>
-        <strong title={organizationName}>{organizationName}</strong>
-      </div>
+      {contextSwitcher}
 
       <nav className="workspace-sidebar__nav" aria-label="Navegación principal">
-        <span className="workspace-sidebar__caption">EXPLORAR</span>
-        {destinations.map(({ id, label, icon: Icon }) => (
-          <a
-            key={id}
-            href={`#${id}`}
-            className={
-              activeView === id
-                ? "workspace-sidebar__link is-active"
-                : "workspace-sidebar__link"
-            }
-            aria-current={activeView === id ? "page" : undefined}
-            onClick={(event) => {
-              event.preventDefault();
-              onNavigate(id);
-            }}
-          >
-            <Icon size={18} strokeWidth={1.8} aria-hidden="true" />
-            <span>{label}</span>
-            {activeView === id ? (
-              <span
-                className="workspace-sidebar__active-dot"
-                aria-hidden="true"
-              />
-            ) : null}
-          </a>
-        ))}
+        <div className="workspace-sidebar__group">
+          <span className="workspace-sidebar__caption">TU TRABAJO</span>
+          <NavigationLinks
+            destinations={personalDestinations}
+            activeView={activeView}
+            onNavigate={onNavigate}
+          />
+          <NavigationLinks
+            destinations={workDestinations}
+            activeView={activeView}
+            onNavigate={onNavigate}
+          />
+        </div>
+        <div className="workspace-sidebar__group">
+          <span className="workspace-sidebar__caption">ESPACIO</span>
+          <NavigationLinks
+            destinations={spaceDestinations}
+            activeView={activeView}
+            onNavigate={onNavigate}
+          />
+        </div>
       </nav>
 
       <div className="workspace-sidebar__bottom">
-        <a href="/" className="workspace-sidebar__site-link">
-          Ver sitio público <ArrowUpRight size={15} aria-hidden="true" />
+        <a
+          href="#profile"
+          className={
+            activeView === "profile"
+              ? "workspace-sidebar__utility is-active"
+              : "workspace-sidebar__utility"
+          }
+          aria-label="Perfil"
+          title="Perfil"
+          aria-current={activeView === "profile" ? "page" : undefined}
+          onClick={(event) => {
+            event.preventDefault();
+            onNavigate("profile");
+          }}
+        >
+          <UserRound size={19} strokeWidth={1.8} aria-hidden="true" />
+        </a>
+        <a
+          href="#settings"
+          className={
+            activeView === "settings"
+              ? "workspace-sidebar__utility is-active"
+              : "workspace-sidebar__utility"
+          }
+          aria-label="Configuración"
+          title="Configuración"
+          aria-current={activeView === "settings" ? "page" : undefined}
+          onClick={(event) => {
+            event.preventDefault();
+            onNavigate("settings");
+          }}
+        >
+          <Settings2 size={19} strokeWidth={1.8} aria-hidden="true" />
         </a>
         <button
           type="button"
           onClick={onLogout}
-          className="workspace-sidebar__logout"
+          className="workspace-sidebar__utility"
+          aria-label="Cerrar sesión"
+          title="Cerrar sesión"
         >
-          <LogOut size={17} strokeWidth={1.8} aria-hidden="true" /> Cerrar
-          sesión
+          <LogOut size={19} strokeWidth={1.8} aria-hidden="true" />
         </button>
       </div>
     </aside>

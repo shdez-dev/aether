@@ -13,6 +13,7 @@ export * from "./metrics.js";
 export * from "./access-grants.js";
 export * from "./support-access.js";
 export * from "./account-management.js";
+export * from "./user-profile.js";
 export * from "./outbox.js";
 export * from "./exports.js";
 export * from "./capacity.js";

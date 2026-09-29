@@ -18,6 +18,11 @@ const IanaTimezoneSchema = z
     },
     { message: "Debe ser una zona horaria IANA válida." },
   );
+export const OrganizationTypeSchema = z.enum([
+  "personal",
+  "business",
+  "institutional",
+]);
 
 export const BusinessHoursPolicySchema = z
   .object({
@@ -63,7 +68,7 @@ export const TenancyPolicyValuesSchema = z.object({
 
 export const CreateOrganizationRequestSchema = z.object({
   name: NonEmptyTextSchema.max(255),
-  organizationType: z.enum(["personal", "business", "institutional"]),
+  organizationType: OrganizationTypeSchema,
   timezone: z.string().trim().min(1).max(64),
   locale: z.string().trim().min(2).max(16),
   policy: TenancyPolicyValuesSchema,
@@ -72,9 +77,7 @@ export const CreateOrganizationRequestSchema = z.object({
 export const OrganizationResponseSchema = z.object({
   id: UuidSchema,
   name: z.string(),
-  organizationType: z
-    .enum(["personal", "business", "institutional"])
-    .nullable(),
+  organizationType: OrganizationTypeSchema.nullable(),
   timezone: z.string(),
   locale: z.string(),
   version: z.number().int().nonnegative(),
@@ -118,6 +121,96 @@ export const ReplaceTeamMembersRequestSchema = z.object({
 
 export const OrganizationRoleSchema = z.enum(["owner", "admin", "member"]);
 export const WorkspaceRoleSchema = z.enum(["admin", "member", "viewer"]);
+export const OrganizationResponsibilityRoleSchema = z.enum([
+  "initiative_coordinator",
+  "initiative_evaluator",
+  "initiative_approver",
+  "initiative_mentor",
+  "project_sponsor",
+  "project_lead",
+  "project_contributor",
+  "project_observer",
+]);
+export const RoleImplementationStatusSchema = z.enum([
+  "implemented",
+  "restricted",
+  "planned",
+]);
+const OrganizationAccessRoleDefinitionSchema = z.object({
+  key: OrganizationRoleSchema,
+  label: z.string(),
+  scope: z.literal("organization"),
+  description: z.string(),
+});
+const WorkspaceAccessRoleDefinitionSchema = z.object({
+  key: WorkspaceRoleSchema,
+  label: z.string(),
+  scope: z.literal("workspace"),
+  description: z.string(),
+});
+const ResponsibilityRoleDefinitionSchema = z.object({
+  key: OrganizationResponsibilityRoleSchema,
+  label: z.string(),
+  scope: z.enum(["initiative", "project"]),
+  description: z.string(),
+  implementationStatus: RoleImplementationStatusSchema,
+});
+export const OrganizationRoleProfileResponseSchema = z.object({
+  version: z.literal(1),
+  organizationType: OrganizationTypeSchema.nullable(),
+  profileKey: z.enum(["personal", "business", "institutional", "unclassified"]),
+  profileLabel: z.string(),
+  organizationAccessRoles: z.array(OrganizationAccessRoleDefinitionSchema),
+  workspaceAccessRoles: z.array(WorkspaceAccessRoleDefinitionSchema),
+  initiativeResponsibilities: z.array(ResponsibilityRoleDefinitionSchema),
+  projectResponsibilities: z.array(ResponsibilityRoleDefinitionSchema),
+});
+
+export const InitiativeResponsibilityRoleSchema = z.enum([
+  "initiative_coordinator",
+  "initiative_evaluator",
+  "initiative_approver",
+  "initiative_mentor",
+]);
+export const AssignOrganizationResponsibilityRequestSchema = z.object({
+  workspaceId: UuidSchema,
+  actorId: z.string().trim().min(1).max(255),
+  roleKey: InitiativeResponsibilityRoleSchema,
+  initiativeId: UuidSchema.optional(),
+  validUntil: z.string().date().optional(),
+});
+export const OrganizationResponsibilityInitiativeSchema = z.object({
+  id: UuidSchema,
+  title: z.string(),
+  status: z.string(),
+});
+export const OrganizationResponsibilityAssignmentSchema = z.object({
+  id: UuidSchema,
+  organizationId: UuidSchema,
+  workspaceId: UuidSchema,
+  workspaceName: z.string(),
+  actorId: z.string(),
+  actorName: z.string(),
+  actorEmail: z.string().email().nullable(),
+  roleKey: InitiativeResponsibilityRoleSchema,
+  initiativeId: UuidSchema.nullable(),
+  initiativeTitle: z.string().nullable(),
+  validUntil: z.string().datetime().nullable(),
+  assignedByActorId: z.string(),
+  assignedAt: z.string().datetime(),
+});
+export const OrganizationResponsibilityMemberSchema = z.object({
+  actorId: z.string(),
+  actorName: z.string(),
+  actorEmail: z.string().email().nullable(),
+  organizationRole: OrganizationRoleSchema,
+  workspaceRole: WorkspaceRoleSchema.nullable(),
+});
+export const OrganizationResponsibilitiesResponseSchema = z.object({
+  members: z.array(OrganizationResponsibilityMemberSchema),
+  initiatives: z.array(OrganizationResponsibilityInitiativeSchema),
+  assignments: z.array(OrganizationResponsibilityAssignmentSchema),
+});
 
 export const CreateInvitationRequestSchema = z.object({
   email: z.string().trim().email().max(320),
@@ -252,4 +345,31 @@ export type WorkspacePolicyOverrideRequest = z.infer<
 >;
 export type EffectiveTenancyPolicyResponse = z.infer<
   typeof EffectiveTenancyPolicyResponseSchema
+>;
+export type OrganizationResponsibilityRole = z.infer<
+  typeof OrganizationResponsibilityRoleSchema
+>;
+export type RoleImplementationStatus = z.infer<
+  typeof RoleImplementationStatusSchema
+>;
+export type OrganizationRoleProfileResponse = z.infer<
+  typeof OrganizationRoleProfileResponseSchema
+>;
+export type InitiativeResponsibilityRole = z.infer<
+  typeof InitiativeResponsibilityRoleSchema
+>;
+export type AssignOrganizationResponsibilityRequest = z.infer<
+  typeof AssignOrganizationResponsibilityRequestSchema
+>;
+export type OrganizationResponsibilityAssignment = z.infer<
+  typeof OrganizationResponsibilityAssignmentSchema
+>;
+export type OrganizationResponsibilityMember = z.infer<
+  typeof OrganizationResponsibilityMemberSchema
+>;
+export type OrganizationResponsibilityInitiative = z.infer<
+  typeof OrganizationResponsibilityInitiativeSchema
+>;
+export type OrganizationResponsibilitiesResponse = z.infer<
+  typeof OrganizationResponsibilitiesResponseSchema
 >;

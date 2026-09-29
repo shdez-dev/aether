@@ -11,6 +11,40 @@ export type InitiativeStatus = (typeof InitiativeStatuses)[number];
 export type InitiativeClassification = "internal" | "confidential";
 export const InitiativePriorities = ["low", "medium", "high"] as const;
 export type InitiativePriority = (typeof InitiativePriorities)[number];
+export const InitiativeProjectStages = [
+  "idea",
+  "prototype",
+  "in_development",
+  "operating",
+  "other",
+] as const;
+export type InitiativeProjectStage = (typeof InitiativeProjectStages)[number];
+
+export type InitiativeProposalDetails = Readonly<{
+  summary: string;
+  impactedPeople: string;
+  impactedCount: number | null;
+  problemImpact: string;
+  solution: string;
+  differentiation: string;
+  projectStage: InitiativeProjectStage;
+  stageRationale: string;
+  pilotPlan: string;
+  pilotResources: string;
+}>;
+
+export const emptyInitiativeProposalDetails: InitiativeProposalDetails = {
+  summary: "",
+  impactedPeople: "",
+  impactedCount: null,
+  problemImpact: "",
+  solution: "",
+  differentiation: "",
+  projectStage: "idea",
+  stageRationale: "",
+  pilotPlan: "",
+  pilotResources: "",
+};
 
 export type Initiative = Readonly<{
   id: string;
@@ -20,6 +54,7 @@ export type Initiative = Readonly<{
   title: string;
   problemStatement: string;
   expectedOutcome: string;
+  proposalDetails?: InitiativeProposalDetails;
   classification: InitiativeClassification;
   /** La urgencia declarada por quien plantea la iniciativa; no la modifica gestión. */
   requestedPriority: InitiativePriority | null;
@@ -50,9 +85,16 @@ const transitions: Readonly<
 };
 
 export function createInitiative(
-  input: Omit<Initiative, "status" | "version">,
+  input: Omit<Initiative, "status" | "version"> & {
+    proposalDetails?: InitiativeProposalDetails;
+  },
 ): Initiative {
-  return { ...input, status: "draft", version: 0 };
+  return {
+    ...input,
+    proposalDetails: input.proposalDetails ?? emptyInitiativeProposalDetails,
+    status: "draft",
+    version: 0,
+  };
 }
 
 export function editInitiative(
@@ -60,7 +102,10 @@ export function editInitiative(
   patch: Pick<
     Initiative,
     "title" | "problemStatement" | "expectedOutcome" | "classification"
-  >,
+  > & {
+    proposalDetails?: InitiativeProposalDetails;
+    requestedPriority?: InitiativePriority | null;
+  },
   updatedAt: Date,
 ): Initiative {
   if (initiative.status !== "draft" && initiative.status !== "returned")
@@ -129,9 +174,7 @@ export function findPotentialInitiativeDuplicates(input: {
         normalizeInitiativeContent(candidate.problemStatement) ===
           referenceProblem,
     )
-    .sort(
-      (left, right) => left.createdAt.getTime() - right.createdAt.getTime(),
-    )
+    .sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime())
     .map((candidate) => ({
       initiativeId: candidate.id,
       title: candidate.title,

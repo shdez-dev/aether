@@ -10,6 +10,7 @@ import {
   InitiativeRelationshipService,
   InitiativeVersionConflictError,
   NotificationService,
+  ResourceNotFoundError,
   TenantService,
   WorkspaceArchivedError,
 } from "@aether/application";
@@ -28,6 +29,167 @@ import { InMemoryNotificationStore } from "./notifications.js";
 import { InMemoryTenantStore } from "./tenancy.js";
 
 describe("initiative vertical slice", () => {
+  it("mantiene privados los borradores y expedientes confidenciales en la bandeja, el detalle y la auditoría", async () => {
+    const ids = { next: () => crypto.randomUUID() };
+    const clock = { now: () => new Date("2026-09-28T12:00:00.000Z") };
+    const tenantStore = new InMemoryTenantStore();
+    const tenants = new TenantService({
+      store: tenantStore,
+      ids,
+      tokens: {
+        generate: () => crypto.randomUUID().padEnd(43, "x"),
+        hash: (value: string) => `hash:${value}`,
+      },
+      clock,
+    });
+    const organization = await tenants.createOrganization({
+      actorId: "owner",
+      actorEmail: "owner@example.test",
+      name: "Equipo",
+      timezone: "UTC",
+      locale: "es-CL",
+    });
+    const workspace = await tenants.createWorkspace({
+      actorId: "owner",
+      organizationId: organization.id,
+      name: "Ideas",
+      mode: "team",
+    });
+    for (const actorId of ["author", "reader"]) {
+      const invite = await tenants.invite({
+        actorId: "owner",
+        organizationId: organization.id,
+        email: `${actorId}@example.test`,
+        organizationRole: "member",
+        workspaceIds: [workspace.id],
+        workspaceRole: "member",
+        expiresInDays: 7,
+      });
+      await tenants.acceptInvitation({
+        token: invite.deliveryToken,
+        actorId,
+        actorEmail: `${actorId}@example.test`,
+      });
+    }
+    const initiativeStore = new InMemoryInitiativeStore();
+    const auditStore = new InMemoryInitiativeAuditStore();
+    const intakeAssignments = new InMemoryIntakeAssignmentStore(
+      initiativeStore,
+      auditStore,
+    );
+    const initiatives = new InitiativeService({
+      store: initiativeStore,
+      audit: auditStore,
+      tenancy: tenantStore,
+      intakeAssignments,
+      ids,
+      clock,
+    });
+    const draft = await initiatives.create({
+      actorId: "author",
+      organizationId: organization.id,
+      workspaceId: workspace.id,
+      correlationId: ids.next(),
+      title: "Propuesta compartida",
+      problemStatement: "Problema abierto",
+      expectedOutcome: "Resultado",
+      classification: "internal",
+      requestedPriority: "medium",
+    });
+    const confidential = await initiatives.create({
+      actorId: "author",
+      organizationId: organization.id,
+      workspaceId: workspace.id,
+      correlationId: ids.next(),
+      title: "Propuesta reservada",
+      problemStatement: "Problema reservado",
+      expectedOutcome: "Resultado",
+      classification: "confidential",
+      requestedPriority: "medium",
+    });
+    await initiatives.present({
+      actorId: "author",
+      organizationId: organization.id,
+      initiativeId: confidential.id,
+      correlationId: ids.next(),
+      expectedVersion: confidential.version,
+    });
+    const shared = await initiatives.create({
+      actorId: "author",
+      organizationId: organization.id,
+      workspaceId: workspace.id,
+      correlationId: ids.next(),
+      title: "Propuesta compartida",
+      problemStatement: "Problema abierto",
+      expectedOutcome: "Resultado",
+      classification: "internal",
+      requestedPriority: "medium",
+    });
+    await initiatives.present({
+      actorId: "author",
+      organizationId: organization.id,
+      initiativeId: shared.id,
+      correlationId: ids.next(),
+      expectedVersion: shared.version,
+    });
+    const scope = {
+      organizationId: organization.id,
+      workspaceId: workspace.id,
+    };
+    const readerList = await initiatives.list({ actorId: "reader", ...scope });
+    expect(readerList.map(({ initiative }) => initiative.id)).toEqual([
+      shared.id,
+    ]);
+    expect(readerList[0]?.duplicateWarnings).toEqual([]);
+    expect(await initiatives.list({ actorId: "owner", ...scope })).toHaveLength(
+      3,
+    );
+    await expect(
+      initiatives.detail({
+        actorId: "reader",
+        organizationId: organization.id,
+        initiativeId: draft.id,
+      }),
+    ).rejects.toBeInstanceOf(ResourceNotFoundError);
+    await expect(
+      initiatives.auditTrail({
+        actorId: "reader",
+        organizationId: organization.id,
+        initiativeId: confidential.id,
+      }),
+    ).rejects.toBeInstanceOf(ResourceNotFoundError);
+    const intake = new IntakeService({
+      assignments: intakeAssignments,
+      initiatives: initiativeStore,
+      tenancy: tenantStore,
+      ids,
+      clock,
+    });
+    await intake.assign({
+      actorId: "owner",
+      organizationId: organization.id,
+      initiativeId: confidential.id,
+      expectedVersion: 1,
+      responsibleActorId: "reader",
+      nextReviewOn: "2026-10-01",
+      correlationId: ids.next(),
+    });
+    expect(
+      (await initiatives.list({ actorId: "reader", ...scope })).map(
+        ({ initiative }) => initiative.id,
+      ),
+    ).toEqual([confidential.id, shared.id]);
+    await expect(
+      initiatives.detail({
+        actorId: "reader",
+        organizationId: organization.id,
+        initiativeId: confidential.id,
+      }),
+    ).resolves.toMatchObject({
+      intakeAssignment: { responsibleActorId: "reader" },
+    });
+  });
+
   it("publica, adopta y aplica un triage versionado antes de la evaluación formal", async () => {
     const ids = { next: () => crypto.randomUUID() };
     const clock = { now: () => new Date("2026-09-19T00:00:00.000Z") };

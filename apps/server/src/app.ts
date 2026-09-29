@@ -1,7 +1,9 @@
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 
 import {
+  AuthenticationError,
   AuthService,
+  DEFAULT_LOGIN_TRANSACTION_TTL_SECONDS,
   OidcProviderUnavailableError,
   randomOpaqueToken,
   type AuthSession,
@@ -58,8 +60,11 @@ import {
   ExportService,
   CapacityDomainError,
   CapacityService,
+  OrganizationResponsibilityError,
+  OrganizationResponsibilityService,
 } from "@aether/application";
 import {
+  AssignOrganizationResponsibilityRequestSchema,
   CreateInvitationRequestSchema,
   InvitationTokenRequestSchema,
   TransferOrganizationOwnershipRequestSchema,
@@ -68,6 +73,7 @@ import {
   CreateInitiativeDraftRequestSchema,
   SetInitiativeOperationalPriorityRequestSchema,
   CreateOrganizationRequestSchema,
+  OrganizationTypeSchema,
   CreateWorkspaceRequestSchema,
   CreateTeamRequestSchema,
   ReplaceTeamMembersRequestSchema,
@@ -148,6 +154,9 @@ import {
   CapacityBalanceQuerySchema,
   DeclareCapacityAvailabilityRequestSchema,
   DeclareProjectCapacityAllocationRequestSchema,
+  UserProfileInputSchema,
+  type UserProfileInput,
+  type UserProfileResponse,
 } from "@aether/contracts";
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
@@ -165,6 +174,19 @@ import type { ServerConfig } from "./config.js";
 const sessionCookie = "aether_session";
 const transactionCookie = "aether_oidc_tx";
 const csrfCookie = "aether_csrf";
+const logoutHintCookie = "aether_oidc_logout";
+function oidcLogoutUrl(config: ServerConfig, idTokenHint?: string): string {
+  const logoutUrl = new URL(
+    `${config.oidcIssuerUrl.replace(/\/$/, "")}/protocol/openid-connect/logout`,
+  );
+  logoutUrl.searchParams.set("client_id", config.oidcClientId);
+  logoutUrl.searchParams.set(
+    "post_logout_redirect_uri",
+    new URL("/workspace?logged_out=1", config.webOrigin).href,
+  );
+  if (idTokenHint) logoutUrl.searchParams.set("id_token_hint", idTokenHint);
+  return logoutUrl.href;
+}
 const authenticatedRequestSessions = new WeakMap<FastifyRequest, AuthSession>();
 const callbackQuery = z.object({
   code: z.string().min(1),
@@ -177,6 +199,7 @@ export const PublicHttpRoutes = [
   "/ready",
   "/auth/login",
   "/auth/register",
+  "/auth/identity-logout",
   "/auth/account-management/status",
   "/auth/account-management",
   "/auth/callback",
@@ -191,6 +214,7 @@ export async function buildServer(input: {
   supportAccess?: SupportAccessService;
   initiatives: InitiativeService;
   intake?: IntakeService;
+  responsibilities?: OrganizationResponsibilityService;
   evaluations: EvaluationService;
   triage?: TriageService;
   relationships?: InitiativeRelationshipService;
@@ -207,6 +231,14 @@ export async function buildServer(input: {
   outboxAdministration?: OutboxAdministrationService;
   exports?: ExportService;
   capacity?: CapacityService;
+  userProfiles?: {
+    get(actorId: string): Promise<UserProfileResponse>;
+    getName?(actorId: string): Promise<string | null>;
+    save(
+      actorId: string,
+      profile: UserProfileInput,
+    ): Promise<UserProfileResponse>;
+  };
   readinessCheck?: () => Promise<void>;
   metrics?: OperationalMetrics;
 }): Promise<FastifyInstance> {
@@ -399,6 +431,8 @@ export async function buildServer(input: {
                       error.code === "ACTOR_MUST_BE_OWNER") ||
                     (error instanceof MembershipStatusError &&
                       error.code === "actor_not_manager") ||
+                    (error instanceof OrganizationResponsibilityError &&
+                      error.code === "MEMBER_NOT_IN_WORKSPACE") ||
                     (error instanceof TemporaryAccessGrantError &&
                       error.code === "GRANT_SEPARATION_OF_DUTIES") ||
                     (error instanceof SupportAccessGrantError &&
@@ -417,7 +451,9 @@ export async function buildServer(input: {
                       error instanceof PolicyNotConfiguredError ||
                       error instanceof AccountManagementUnavailableError ||
                       (error instanceof TemporaryAccessGrantError &&
-                        error.code === "GRANT_RESOURCE_NOT_FOUND")
+                        error.code === "GRANT_RESOURCE_NOT_FOUND") ||
+                      (error instanceof OrganizationResponsibilityError &&
+                        error.code === "ASSIGNMENT_NOT_FOUND")
                     ? 404
                     : error instanceof InitiativeVersionConflictError ||
                         error instanceof ProjectVersionConflictError ||
@@ -428,7 +464,9 @@ export async function buildServer(input: {
                             "EVALUATION_DRAFT_EXISTS",
                           ].includes(error.code)) ||
                         (error instanceof IntakeDomainError &&
-                          error.code === "INTAKE_ALREADY_ASSIGNED")
+                          error.code === "INTAKE_ALREADY_ASSIGNED") ||
+                        (error instanceof OrganizationResponsibilityError &&
+                          error.code === "ALREADY_ASSIGNED")
                       ? 409
                       : 400;
     if (input.securityAudit && (status === 401 || status === 403)) {
@@ -627,6 +665,16 @@ export async function buildServer(input: {
     );
     return reply.redirect(registration.authorizationUrl);
   });
+  app.get("/auth/identity-logout", async (request, reply) => {
+    const session = await input.auth.authenticate(
+      request.cookies[sessionCookie],
+    );
+    if (session)
+      return reply.redirect(new URL("/workspace", input.config.webOrigin).href);
+    const hint = input.auth.readLogoutHint(request.cookies[logoutHintCookie]);
+    reply.clearCookie(logoutHintCookie, sessionCookieOptions(input.config));
+    return reply.redirect(oidcLogoutUrl(input.config, hint));
+  });
   app.get("/auth/account-management/status", async () => ({
     available: Boolean(input.config.oidcAccountManagementUrl),
     authority: "oidc-provider" as const,
@@ -640,7 +688,13 @@ export async function buildServer(input: {
     const query = callbackQuery.parse(request.query);
     if (query.error) throw new Error("OIDC authorization was denied");
     const transactionHandle = request.cookies[transactionCookie];
-    if (!transactionHandle) throw new Error("Missing OIDC transaction cookie");
+    if (!transactionHandle) {
+      reply.clearCookie(
+        transactionCookie,
+        transientCookieOptions(input.config),
+      );
+      return reply.redirect(expiredLoginUrl(input.config));
+    }
     try {
       const callbackUrl = new URL(request.url, input.config.serverPublicUrl)
         .href;
@@ -659,6 +713,12 @@ export async function buildServer(input: {
         randomUUID(),
         csrfCookieOptions(input.config),
       );
+      if (completed.logoutHint)
+        reply.setCookie(
+          logoutHintCookie,
+          completed.logoutHint,
+          sessionCookieOptions(input.config),
+        );
       reply.clearCookie(
         transactionCookie,
         transientCookieOptions(input.config),
@@ -669,6 +729,11 @@ export async function buildServer(input: {
         transactionCookie,
         transientCookieOptions(input.config),
       );
+      if (
+        error instanceof AuthenticationError &&
+        error.code === "INVALID_LOGIN_TRANSACTION"
+      )
+        return reply.redirect(expiredLoginUrl(input.config));
       throw error;
     }
   });
@@ -684,6 +749,48 @@ export async function buildServer(input: {
       expiresAt: session.expiresAt.toISOString(),
     };
   });
+  if (input.userProfiles) {
+    app.get("/v1/me/profile", async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      return input.userProfiles!.get(session.actorId);
+    });
+    app.patch("/v1/me/profile", async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      const profile = UserProfileInputSchema.parse(request.body);
+      if (profile.avatarData) {
+        const [, mime, encoded] =
+          /^data:image\/(png|jpeg|webp);base64,(.+)$/.exec(profile.avatarData)!;
+        const bytes = Buffer.from(encoded!, "base64");
+        const valid =
+          bytes.length <= 500_000 &&
+          bytes.length > 0 &&
+          ((mime === "png" &&
+            bytes
+              .subarray(0, 8)
+              .equals(Buffer.from("89504e470d0a1a0a", "hex"))) ||
+            (mime === "jpeg" &&
+              bytes.subarray(0, 3).equals(Buffer.from("ffd8ff", "hex"))) ||
+            (mime === "webp" &&
+              bytes.subarray(0, 4).toString() === "RIFF" &&
+              bytes.subarray(8, 12).toString() === "WEBP"));
+        if (!valid)
+          throw new Error(
+            "La foto debe ser PNG, JPG o WebP y pesar menos de 500 KB.",
+          );
+      }
+      return input.userProfiles!.save(session.actorId, profile);
+    });
+  }
   app.post("/auth/logout", async (request, reply) => {
     const session = await requireSession(
       request,
@@ -691,10 +798,12 @@ export async function buildServer(input: {
       input.auth,
       input.config,
     );
+    const hint = input.auth.readLogoutHint(request.cookies[logoutHintCookie]);
     await input.auth.logoutSession(session, correlationId(reply));
     reply.clearCookie(sessionCookie, sessionCookieOptions(input.config));
     reply.clearCookie(csrfCookie, csrfCookieOptions(input.config));
-    return reply.code(204).send();
+    reply.clearCookie(logoutHintCookie, sessionCookieOptions(input.config));
+    return reply.send({ logoutUrl: oidcLogoutUrl(input.config, hint) });
   });
   app.get("/auth/sessions", async (request, reply) => {
     const session = await requireSession(
@@ -784,6 +893,156 @@ export async function buildServer(input: {
     );
     return input.tenants.listOrganizations(session.actorId);
   });
+  app.get(
+    "/v1/organization-role-profiles/:organizationType",
+    async (request, reply) => {
+      await requireSession(request, reply, input.auth, input.config);
+      const { organizationType } = z
+        .object({ organizationType: OrganizationTypeSchema })
+        .parse(request.params);
+      return input.tenants.organizationRoleProfileForType(organizationType);
+    },
+  );
+  app.get(
+    "/v1/organizations/:organizationId/role-profile",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      const params = z
+        .object({ organizationId: z.string().uuid() })
+        .parse(request.params);
+      return input.tenants.organizationRoleProfile({
+        actorId: session.actorId,
+        ...params,
+      });
+    },
+  );
+  app.get(
+    "/v1/organizations/:organizationId/responsibilities",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      if (!input.responsibilities)
+        throw new Error(
+          "Organization responsibility service is not configured",
+        );
+      const params = z
+        .object({ organizationId: z.string().uuid() })
+        .parse(request.params);
+      const query = z
+        .object({ workspaceId: z.string().uuid() })
+        .parse(request.query);
+      const result = await input.responsibilities.list({
+        actorId: session.actorId,
+        ...params,
+        ...query,
+      });
+      return {
+        members: result.members,
+        initiatives: result.initiatives,
+        assignments: result.assignments.map((assignment) => ({
+          ...assignment,
+          assignedAt: assignment.assignedAt.toISOString(),
+          validUntil: assignment.validUntil?.toISOString() ?? null,
+        })),
+      };
+    },
+  );
+  app.post(
+    "/v1/organizations/:organizationId/responsibilities",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      if (!input.responsibilities)
+        throw new Error(
+          "Organization responsibility service is not configured",
+        );
+      const params = z
+        .object({ organizationId: z.string().uuid() })
+        .parse(request.params);
+      const body = AssignOrganizationResponsibilityRequestSchema.parse(
+        request.body,
+      );
+      return respondIdempotently({
+        request,
+        reply,
+        store: input.idempotency,
+        actorId: session.actorId,
+        operation: `organization.responsibility.assign:${params.organizationId}:${body.workspaceId}`,
+        requestPayload: { params, body },
+        execute: async () => {
+          const assignment = await input.responsibilities!.assign({
+            actorId: session.actorId,
+            correlationId: correlationId(reply),
+            organizationId: params.organizationId,
+            workspaceId: body.workspaceId,
+            targetActorId: body.actorId,
+            roleKey: body.roleKey,
+            ...(body.initiativeId ? { initiativeId: body.initiativeId } : {}),
+            ...(body.validUntil ? { validUntil: body.validUntil } : {}),
+          });
+          return {
+            statusCode: 201,
+            body: {
+              ...assignment,
+              assignedAt: assignment.assignedAt.toISOString(),
+              validUntil: assignment.validUntil?.toISOString() ?? null,
+            },
+          };
+        },
+      });
+    },
+  );
+  app.delete(
+    "/v1/organizations/:organizationId/responsibilities/:assignmentId",
+    async (request, reply) => {
+      const session = await requireSession(
+        request,
+        reply,
+        input.auth,
+        input.config,
+      );
+      if (!input.responsibilities)
+        throw new Error(
+          "Organization responsibility service is not configured",
+        );
+      assertRecentAuthentication(session, input.config);
+      const params = z
+        .object({
+          organizationId: z.string().uuid(),
+          assignmentId: z.string().uuid(),
+        })
+        .parse(request.params);
+      return respondIdempotently({
+        request,
+        reply,
+        store: input.idempotency,
+        actorId: session.actorId,
+        operation: `organization.responsibility.revoke:${params.organizationId}:${params.assignmentId}`,
+        requestPayload: params,
+        execute: async () => {
+          await input.responsibilities!.revoke({
+            actorId: session.actorId,
+            correlationId: correlationId(reply),
+            ...params,
+          });
+          return { statusCode: 204, body: {} };
+        },
+      });
+    },
+  );
   app.get(
     "/v1/organizations/:organizationId/policy",
     async (request, reply) => {
@@ -1996,6 +2255,12 @@ export async function buildServer(input: {
       organizationId,
       evaluationId,
     });
+    await input.initiatives.detail({
+      actorId: session.actorId,
+      organizationId,
+      initiativeId: evaluation.initiativeId,
+      correlationId: correlationId(reply),
+    });
     return toEvaluationResponse(evaluation);
   });
   app.post(
@@ -2256,6 +2521,12 @@ export async function buildServer(input: {
       correlationId: correlationId(reply),
       organizationId,
       decisionId,
+    });
+    await input.initiatives.detail({
+      actorId: session.actorId,
+      organizationId,
+      initiativeId: decision.initiativeId,
+      correlationId: correlationId(reply),
     });
     return toDecisionResponse(decision);
   });
@@ -4057,7 +4328,27 @@ export async function buildServer(input: {
       correlationId: correlationId(reply),
       ...query,
     });
-    return Promise.all(initiatives.map(toInitiativeResponse));
+    const names = new Map<string, Promise<string | null>>();
+    const resolveName = (actorId: string) => {
+      if (!names.has(actorId))
+        names.set(
+          actorId,
+          input.userProfiles?.getName?.(actorId).catch(() => null) ??
+            Promise.resolve(null),
+        );
+      return names.get(actorId)!;
+    };
+    return Promise.all(
+      initiatives.map(async (detail) => {
+        const [authorName, responsibleName] = await Promise.all([
+          resolveName(detail.initiative.createdByActorId),
+          detail.intakeAssignment
+            ? resolveName(detail.intakeAssignment.responsibleActorId)
+            : Promise.resolve(null),
+        ]);
+        return toInitiativeResponse(detail, authorName, responsibleName);
+      }),
+    );
   });
   app.get("/v1/initiatives/:initiativeId", async (request, reply) => {
     const session = await requireSession(
@@ -4072,14 +4363,23 @@ export async function buildServer(input: {
     const query = z
       .object({ organizationId: z.string().uuid() })
       .parse(request.query);
-    return toInitiativeResponse(
-      await input.initiatives.detail({
-        actorId: session.actorId,
-        correlationId: correlationId(reply),
-        ...params,
-        ...query,
-      }),
-    );
+    const detail = await input.initiatives.detail({
+      actorId: session.actorId,
+      correlationId: correlationId(reply),
+      ...params,
+      ...query,
+    });
+    const [authorName, responsibleName] = await Promise.all([
+      input.userProfiles
+        ?.getName?.(detail.initiative.createdByActorId)
+        .catch(() => null) ?? Promise.resolve(null),
+      detail.intakeAssignment
+        ? (input.userProfiles
+            ?.getName?.(detail.intakeAssignment.responsibleActorId)
+            .catch(() => null) ?? Promise.resolve(null))
+        : Promise.resolve(null),
+    ]);
+    return toInitiativeResponse(detail, authorName, responsibleName);
   });
   app.patch("/v1/initiatives/:initiativeId", async (request, reply) => {
     const session = await requireSession(
@@ -4095,6 +4395,7 @@ export async function buildServer(input: {
       .object({ organizationId: z.string().uuid() })
       .parse(request.query);
     const body = UpdateInitiativeRequestSchema.parse(request.body);
+    const { proposalDetails, requestedPriority, ...initiativeFields } = body;
     return respondIdempotently({
       request,
       reply,
@@ -4108,7 +4409,9 @@ export async function buildServer(input: {
           correlationId: correlationId(reply),
           ...params,
           ...query,
-          ...body,
+          ...initiativeFields,
+          ...(requestedPriority !== undefined ? { requestedPriority } : {}),
+          ...(proposalDetails ? { proposalDetails } : {}),
         });
         return {
           statusCode: 200,
@@ -4299,13 +4602,40 @@ export async function buildServer(input: {
       const query = z
         .object({ organizationId: z.string().uuid() })
         .parse(request.query);
-      return (
-        await input.relationships.list({
-          actorId: session.actorId,
-          ...params,
-          ...query,
-        })
-      ).map(toInitiativeRelationshipResponse);
+      await input.initiatives.detail({
+        actorId: session.actorId,
+        correlationId: correlationId(reply),
+        ...params,
+        ...query,
+      });
+      const relationships = await input.relationships.list({
+        actorId: session.actorId,
+        ...params,
+        ...query,
+      });
+      const visible = await Promise.all(
+        relationships.map(async (relationship) => {
+          try {
+            await input.initiatives.detail({
+              actorId: session.actorId,
+              organizationId: query.organizationId,
+              initiativeId: relationship.targetInitiativeId,
+              correlationId: correlationId(reply),
+            });
+            return relationship;
+          } catch (error) {
+            if (
+              error instanceof ResourceNotFoundError ||
+              error instanceof AccessDeniedError
+            )
+              return null;
+            throw error;
+          }
+        }),
+      );
+      return visible
+        .filter((relationship) => relationship !== null)
+        .map(toInitiativeRelationshipResponse);
     },
   );
   app.get(
@@ -4325,6 +4655,12 @@ export async function buildServer(input: {
       const query = z
         .object({ organizationId: z.string().uuid() })
         .parse(request.query);
+      await input.initiatives.detail({
+        actorId: session.actorId,
+        correlationId: correlationId(reply),
+        ...params,
+        ...query,
+      });
       const diagnostic = await input.diagnostics.get({
         actorId: session.actorId,
         ...params,
@@ -4664,6 +5000,13 @@ export async function buildServer(input: {
     );
     if (!input.auditHistory) throw new Error("Audit history is not configured");
     const query = AuditHistoryQuerySchema.parse(request.query);
+    if (query.resourceType === "initiative")
+      await input.initiatives.detail({
+        actorId: session.actorId,
+        organizationId: query.organizationId,
+        initiativeId: query.resourceId,
+        correlationId: correlationId(reply),
+      });
     const events = await input.auditHistory.history({
       actorId: session.actorId,
       ...query,
@@ -4859,10 +5202,22 @@ export async function buildServer(input: {
 
 async function toInitiativeResponse(
   detail: Awaited<ReturnType<InitiativeService["detail"]>>,
+  createdByDisplayName: string | null = null,
+  responsibleDisplayName: string | null = null,
 ) {
-  const { initiative, allowedActions, duplicateWarnings } = detail;
+  const { initiative, allowedActions, duplicateWarnings, intakeAssignment } =
+    detail;
   return {
     ...initiative,
+    createdByDisplayName,
+    intakeAssignment: intakeAssignment
+      ? {
+          responsibleActorId: intakeAssignment.responsibleActorId,
+          responsibleDisplayName,
+          nextReviewOn: intakeAssignment.nextReviewOn,
+          assignedAt: intakeAssignment.assignedAt.toISOString(),
+        }
+      : null,
     createdAt: initiative.createdAt.toISOString(),
     updatedAt: initiative.updatedAt.toISOString(),
     allowedActions,
@@ -5264,8 +5619,12 @@ function transientCookieOptions(config: ServerConfig) {
     secure: config.secureCookies,
     sameSite: "lax" as const,
     path: "/",
-    maxAge: 600,
+    maxAge: DEFAULT_LOGIN_TRANSACTION_TTL_SECONDS,
   };
+}
+
+function expiredLoginUrl(config: ServerConfig): string {
+  return new URL("/auth/login?reason=session-expired", config.webOrigin).href;
 }
 function csrfCookieOptions(config: ServerConfig) {
   return {

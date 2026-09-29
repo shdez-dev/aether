@@ -260,6 +260,16 @@
     font-size: 15px;
     line-height: 1.7;
   }
+  .auth-expired-notice {
+    margin: 24px 0 -22px;
+    padding: 14px 16px;
+    border: 1px solid #d5e1fa;
+    border-radius: 10px;
+    background: #f0f5ff;
+    color: #25427f;
+    font-size: 13px;
+    line-height: 1.55;
+  }
   .auth-access-card {
     display: grid;
     grid-template-columns: 48px 1fr;

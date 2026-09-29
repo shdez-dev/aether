@@ -1,0 +1,8 @@
+CREATE TABLE user_profiles (
+  actor_id UUID PRIMARY KEY REFERENCES actor_identities(id) ON DELETE CASCADE,
+  display_name VARCHAR(120) NOT NULL DEFAULT '',
+  role VARCHAR(120) NOT NULL DEFAULT '',
+  bio VARCHAR(600) NOT NULL DEFAULT '',
+  avatar_data TEXT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

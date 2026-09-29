@@ -1,5 +1,6 @@
 /** Reglas, valores e invariantes libres de infraestructura. */
 export * from "./access.js";
+export * from "./organization-role-profile.js";
 export * from "./initiative.js";
 export * from "./initiative-relationship.js";
 export * from "./diagnostic.js";

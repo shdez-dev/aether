@@ -48,6 +48,8 @@ if (!client) throw new Error("The aether-local OIDC client was not found");
 client.secret = clientSecret;
 client.redirectUris = [`${publicUrl}/auth/callback`];
 client.webOrigins = [publicUrl];
+client.attributes["post.logout.redirect.uris"] =
+  `${publicUrl}/workspace?logged_out=1`;
 
 await writeFile(outputPath, `${JSON.stringify(realm, null, 2)}\n`, {
   mode: 0o600,
