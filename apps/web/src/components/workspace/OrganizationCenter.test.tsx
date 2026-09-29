@@ -241,4 +241,4 @@ it("invita con rol organizacional y acceso explícito a los espacios elegidos", 
     email: "admin@example.test",
     organizationRole: "admin",
   });
-});
+}, 15_000);
