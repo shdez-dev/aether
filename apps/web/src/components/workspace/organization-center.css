@@ -1731,6 +1731,394 @@
   grid-template-columns: minmax(0, 1fr);
 }
 
+.first-steps__form .organization-role-profile-preview--compact {
+  gap: 12px;
+  padding: 17px;
+  border-radius: 12px;
+  background: var(--day-tint);
+}
+
+.first-steps__form
+  .organization-role-profile-preview--compact
+  .organization-role-profile-preview__heading {
+  display: block;
+}
+
+.organization-role-profile-preview--compact
+  .organization-role-profile-preview__heading
+  h3 {
+  margin-bottom: 3px;
+  font-size: 16px;
+  line-height: 1.25;
+}
+
+.organization-role-profile-preview--compact
+  .organization-role-profile-preview__heading
+  p:not(.organization-role-profile-preview__eyebrow) {
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.organization-role-profile-preview--compact
+  .organization-role-profile-preview__eyebrow {
+  margin-bottom: 5px;
+  font-size: 9px;
+}
+
+.organization-role-profile-preview__overview {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding-block: 13px;
+  border-top: 1px solid var(--day-tint-line);
+  border-bottom: 1px solid var(--day-tint-line);
+}
+
+.organization-role-profile-preview__overview-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  min-width: 0;
+  padding-inline: 14px;
+}
+
+.organization-role-profile-preview__overview-item:first-child {
+  padding-left: 0;
+}
+
+.organization-role-profile-preview__overview-item
+  + .organization-role-profile-preview__overview-item {
+  border-left: 1px solid var(--day-tint-line);
+}
+
+.organization-role-profile-preview__overview-icon {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  place-items: center;
+  border: 1px solid var(--day-tint-line);
+  border-radius: 9px;
+  background: var(--day-surface);
+  color: var(--day-accent);
+}
+
+.organization-role-profile-preview__overview-item > div {
+  min-width: 0;
+}
+
+.organization-role-profile-preview__overview-item strong {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.first-steps__form .organization-role-profile-preview__overview-item p {
+  margin: 0;
+  color: var(--day-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.organization-role-profile-preview__details-trigger {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  justify-self: end;
+  padding: 7px 12px;
+  border: 1px solid var(--day-tint-line);
+  border-radius: 8px;
+  background: var(--day-surface);
+  color: var(--day-accent);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease,
+    color 180ms ease;
+}
+
+.organization-role-profile-preview__details-trigger:hover {
+  border-color: var(--day-accent);
+  background: var(--day-tint);
+}
+
+.organization-role-profile-preview__details-trigger:focus-visible,
+.organization-role-profile-preview__dialog-close:focus-visible {
+  outline: 3px solid var(--day-accent);
+  outline-offset: 3px;
+}
+
+.organization-role-profile-preview__dialog {
+  position: fixed;
+  width: min(820px, calc(100vw - 32px));
+  height: min(760px, calc(100dvh - 32px));
+  max-width: none;
+  margin: auto;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--day-line);
+  border-radius: 18px;
+  background: var(--day-surface);
+  box-shadow: 0 26px 80px rgb(9 25 65 / 22%);
+  color: var(--day-ink);
+  font: inherit;
+}
+
+.organization-role-profile-preview__dialog::backdrop {
+  background: rgb(9 20 48 / 55%);
+  backdrop-filter: blur(3px);
+}
+
+.organization-role-profile-preview__dialog[open] {
+  animation: organization-role-dialog-enter 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.organization-role-profile-preview__dialog-shell {
+  display: grid;
+  height: 100%;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.organization-role-profile-preview__dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid var(--day-line);
+  background: var(--day-tint);
+}
+
+.organization-role-profile-preview__dialog-header h3 {
+  margin: 0 0 5px;
+  font-size: 24px;
+  letter-spacing: -0.04em;
+  line-height: 1.15;
+}
+
+.first-steps__form
+  .organization-role-profile-preview__dialog-header
+  p:not(.organization-role-profile-preview__eyebrow) {
+  margin: 0;
+  color: var(--day-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.organization-role-profile-preview__dialog-close {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  place-items: center;
+  border: 1px solid var(--day-line);
+  border-radius: 10px;
+  background: var(--day-surface);
+  color: var(--day-ink);
+  cursor: pointer;
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease,
+    transform 180ms ease;
+}
+
+.organization-role-profile-preview__dialog-close:hover {
+  transform: rotate(8deg);
+  border-color: var(--day-tint-line);
+  background: var(--day-tint);
+}
+
+.organization-role-profile-preview__dialog-body {
+  display: grid;
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  min-height: 0;
+  padding: 20px 24px 24px;
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+
+.organization-role-profile-preview__access-groups,
+.organization-role-profile-preview__dialog-responsibilities {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: minmax(0, 1fr);
+  gap: 12px;
+  min-height: 0;
+}
+
+.organization-role-profile-preview__access-group,
+.organization-role-profile-preview__dialog-responsibilities
+  .organization-role-profile-preview__group {
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+  flex-direction: column;
+  padding: 16px;
+  border: 1px solid var(--day-line);
+  border-radius: 12px;
+  background: var(--day-surface);
+}
+
+.organization-role-profile-preview__access-group h4 {
+  margin: 0 0 10px;
+  font-size: 14px;
+}
+
+.organization-role-profile-preview__access-group ul {
+  display: grid;
+  min-height: 0;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.organization-role-profile-preview__access-group ul,
+.organization-role-profile-preview__dialog-responsibilities
+  .organization-role-profile-preview__group
+  ul {
+  min-height: 0;
+  flex: 1;
+  align-content: start;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: var(--day-tint-line) transparent;
+  scrollbar-width: thin;
+}
+
+.organization-role-profile-preview__access-group li {
+  display: grid;
+  gap: 3px;
+  padding-top: 9px;
+  border-top: 1px solid var(--day-line);
+}
+
+.organization-role-profile-preview__access-group li strong {
+  font-size: 12px;
+}
+
+.organization-role-profile-preview__access-group li span {
+  color: var(--day-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.organization-role-profile-preview__dialog-responsibilities
+  .organization-role-profile-preview__group {
+  border-radius: 12px;
+}
+
+.organization-role-profile-preview__dialog-responsibilities
+  .organization-role-profile-preview__group
+  h4 {
+  font-size: 14px;
+}
+
+.organization-role-profile-preview__dialog-responsibilities
+  .organization-role-profile-preview__role-copy
+  strong {
+  font-size: 12px;
+}
+
+.organization-role-profile-preview__dialog-responsibilities
+  .organization-role-profile-preview__role-copy
+  > span {
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.organization-role-profile-preview__dialog-responsibilities
+  .organization-role-profile-preview__status {
+  font-size: 9px;
+}
+
+@keyframes organization-role-dialog-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (max-width: 520px) {
+  .organization-role-profile-preview__overview {
+    grid-template-columns: minmax(0, 1fr);
+    padding-block: 5px;
+  }
+
+  .organization-role-profile-preview__overview-item {
+    display: block;
+    padding: 8px 0;
+  }
+
+  .organization-role-profile-preview__overview-icon {
+    display: none;
+  }
+
+  .organization-role-profile-preview__overview-item > div {
+    display: grid;
+    grid-template-columns: 80px minmax(0, 1fr);
+    align-items: baseline;
+    gap: 9px;
+  }
+
+  .organization-role-profile-preview__overview-item strong {
+    margin: 0;
+  }
+
+  .organization-role-profile-preview__overview-item
+    + .organization-role-profile-preview__overview-item {
+    border-top: 1px solid var(--day-tint-line);
+    border-left: 0;
+  }
+}
+
+@media (max-width: 620px) {
+  .organization-role-profile-preview__dialog {
+    width: calc(100vw - 24px);
+    height: calc(100dvh - 24px);
+  }
+
+  .organization-role-profile-preview__access-groups,
+  .organization-role-profile-preview__dialog-responsibilities {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: repeat(2, minmax(0, 1fr));
+  }
+
+  .organization-role-profile-preview__dialog-header {
+    padding: 18px;
+  }
+
+  .organization-role-profile-preview__dialog-body {
+    padding: 16px 18px 20px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .organization-role-profile-preview__dialog[open] {
+    animation: none;
+  }
+
+  .organization-role-profile-preview__details-trigger,
+  .organization-role-profile-preview__dialog-close {
+    transition: none;
+  }
+
+  .organization-role-profile-preview__dialog-close:hover {
+    transform: none;
+  }
+}
+
 @media (max-width: 640px) {
   .organization-role-profile-preview__groups {
     grid-template-columns: minmax(0, 1fr);

@@ -302,93 +302,124 @@ export function FirstSteps({
   const title = organization
     ? "Dale forma a tu primer espacio."
     : choice === "create"
-      ? "Crea el espacio de tu equipo."
+      ? "Crea tu organización."
       : choice === "join"
         ? "Tu equipo ya te espera."
         : "Empecemos por lo que te une.";
   const intro = organization
     ? `Ya estás en ${organization.name}. Prepara un espacio para organizar el trabajo de tu equipo.`
     : choice === "create"
-      ? "Define el nombre y el tipo de organización. Podrás invitar a tu equipo después."
+      ? "Elige un nombre y un tipo de colaboración. Podrás invitar a tu equipo después."
       : choice === "join"
         ? "Ingresa el código de invitación que recibiste para conectar tu cuenta con el equipo."
         : "Tu cuenta ya está lista. Elige cómo quieres comenzar; tu identidad seguirá siendo la misma en cada equipo.";
 
-  const form = (
-    <form className="first-steps__form" onSubmit={submit}>
-      <label htmlFor="first-steps-field">
-        {choice === "join"
-          ? "Código de invitación"
+  const isCreatingOrganization = choice === "create" && !organization;
+  const submitButton = (
+    <button className="first-steps__submit" type="submit" disabled={busy}>
+      {busy
+        ? "Preparando tu espacio…"
+        : choice === "join"
+          ? "Aceptar invitación"
           : organization
-            ? "Nombre del espacio de trabajo"
-            : "Nombre de la organización"}
-      </label>
-      <input
-        id="first-steps-field"
-        value={choice === "join" ? token : organization ? workspaceName : name}
-        onChange={(event) =>
-          choice === "join"
-            ? setToken(event.target.value)
-            : organization
-              ? setWorkspaceName(event.target.value)
-              : setName(event.target.value)
-        }
-        placeholder={
-          choice === "join"
-            ? "Pega el código recibido"
-            : organization
-              ? "Por ejemplo, Equipo central"
-              : "Por ejemplo, Equipo Aurora"
-        }
-        autoComplete="off"
-        autoFocus={!organization}
-        minLength={choice === "join" ? 10 : 2}
-        required
-      />
-      {choice === "create" && !organization ? (
+            ? "Crear espacio"
+            : "Crear organización"}
+      <ArrowRight size={19} aria-hidden="true" />
+    </button>
+  );
+  const form = (
+    <form
+      className={`first-steps__form${isCreatingOrganization ? " first-steps__form--organization" : ""}`}
+      onSubmit={submit}
+    >
+      {isCreatingOrganization ? (
         <>
-          <label htmlFor="first-steps-type">Tipo de organización</label>
-          <OrganizationTypePicker
-            value={organizationType}
-            onChange={setOrganizationType}
-          />
+          <div className="first-steps__organization-fields">
+            <div className="first-steps__field">
+              <label htmlFor="first-steps-field">
+                Nombre de la organización
+              </label>
+              <input
+                id="first-steps-field"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                placeholder="Por ejemplo, Equipo Aurora"
+                autoComplete="organization"
+                autoFocus
+                minLength={2}
+                required
+              />
+            </div>
+            <div className="first-steps__field">
+              <label htmlFor="first-steps-type">Tipo de organización</label>
+              <OrganizationTypePicker
+                value={organizationType}
+                onChange={setOrganizationType}
+              />
+            </div>
+          </div>
           <OrganizationRoleProfilePreview
             organizationType={organizationType}
             request={request}
+            compact
           />
-          <p>
-            En esta instalación local, los datos permanecen en el entorno de
-            desarrollo.
-          </p>
         </>
-      ) : null}
-      {choice === "join" ? (
-        <p>
-          La invitación debe corresponder al correo con el que creaste tu
-          cuenta.
-        </p>
-      ) : null}
+      ) : (
+        <>
+          <label htmlFor="first-steps-field">
+            {choice === "join"
+              ? "Código de invitación"
+              : "Nombre del espacio de trabajo"}
+          </label>
+          <input
+            id="first-steps-field"
+            value={choice === "join" ? token : workspaceName}
+            onChange={(event) =>
+              choice === "join"
+                ? setToken(event.target.value)
+                : setWorkspaceName(event.target.value)
+            }
+            placeholder={
+              choice === "join"
+                ? "Pega el código recibido"
+                : "Por ejemplo, Equipo central"
+            }
+            autoComplete="off"
+            autoFocus={!organization}
+            minLength={choice === "join" ? 10 : 2}
+            required
+          />
+          {choice === "join" ? (
+            <p>
+              La invitación debe corresponder al correo con el que creaste tu
+              cuenta.
+            </p>
+          ) : null}
+        </>
+      )}
       {error ? (
         <p className="first-steps__error" role="alert">
           {error}
         </p>
       ) : null}
-      <button className="first-steps__submit" type="submit" disabled={busy}>
-        {busy
-          ? "Preparando tu espacio…"
-          : choice === "join"
-            ? "Aceptar invitación"
-            : organization
-              ? "Crear espacio"
-              : "Crear organización"}
-        <ArrowRight size={19} aria-hidden="true" />
-      </button>
+      {isCreatingOrganization ? (
+        <div className="first-steps__organization-footer">
+          <p className="first-steps__organization-note">
+            Los datos permanecerán en esta instalación de desarrollo.
+          </p>
+          {submitButton}
+        </div>
+      ) : (
+        submitButton
+      )}
     </form>
   );
 
   return (
     <MotionConfig reducedMotion="user">
-      <main className="first-steps">
+      <main
+        className={`first-steps${isCreatingOrganization ? " first-steps--organization-create" : ""}`}
+      >
         <header className="first-steps__header">
           <Brand />
           <button type="button" onClick={onLogout}>
@@ -465,34 +496,36 @@ export function FirstSteps({
             {!organization && choice ? (
               <motion.div
                 key={`selected-${choice}`}
-                className="first-steps__stage first-steps__stage--selected"
+                className={`first-steps__stage first-steps__stage--selected${isCreatingOrganization ? " first-steps__stage--organization" : ""}`}
                 initial={{ opacity: 0, y: 16, scale: 0.99 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: -8, scale: 0.99 }}
                 transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
               >
-                <button
-                  className="first-steps__back"
-                  type="button"
-                  onClick={() => {
-                    setChoice(null);
-                    setError("");
-                  }}
-                >
-                  <ArrowLeft size={16} aria-hidden="true" />
-                  Volver a las opciones
-                </button>
-                <div className="first-steps__selected-label">
-                  {choice === "create" ? (
-                    <Building2 size={18} aria-hidden="true" />
-                  ) : (
-                    <KeyRound size={18} aria-hidden="true" />
-                  )}
-                  <span>
-                    {choice === "create"
-                      ? "NUEVA ORGANIZACIÓN"
-                      : "ACCESO POR INVITACIÓN"}
-                  </span>
+                <div className="first-steps__stage-toolbar">
+                  <div className="first-steps__selected-label">
+                    {choice === "create" ? (
+                      <Building2 size={18} aria-hidden="true" />
+                    ) : (
+                      <KeyRound size={18} aria-hidden="true" />
+                    )}
+                    <span>
+                      {choice === "create"
+                        ? "NUEVA ORGANIZACIÓN"
+                        : "ACCESO POR INVITACIÓN"}
+                    </span>
+                  </div>
+                  <button
+                    className="first-steps__back"
+                    type="button"
+                    onClick={() => {
+                      setChoice(null);
+                      setError("");
+                    }}
+                  >
+                    <ArrowLeft size={16} aria-hidden="true" />
+                    Volver a las opciones
+                  </button>
                 </div>
                 {form}
               </motion.div>

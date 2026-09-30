@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { Plus, Search } from "lucide-react";
 
 import type {
   AccessCapabilitiesResponse,
@@ -176,6 +177,7 @@ export default function AetherPage() {
   const [initiativeOwnership, setInitiativeOwnership] = useState<
     "workspace" | "mine"
   >("workspace");
+  const initiativeDetailSelection = useRef<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -1060,6 +1062,20 @@ export default function AetherPage() {
       null;
     if (next?.id !== selected?.id) setSelected(next);
   }, [activeView, filteredInitiatives, loading, selected?.id]);
+  useEffect(() => {
+    if (activeView !== "initiatives") return;
+    const nextId = selected?.id ?? null;
+    const previousId = initiativeDetailSelection.current;
+    if (previousId !== null && nextId !== previousId) {
+      window.requestAnimationFrame(() => {
+        document.getElementById("detail")?.scrollIntoView({
+          behavior: prefersReducedMotion ? "auto" : "smooth",
+          block: "start",
+        });
+      });
+    }
+    initiativeDetailSelection.current = nextId;
+  }, [activeView, prefersReducedMotion, selected?.id]);
   const selectedInitiativeProject = projects.find(
     (project) => project.sourceInitiativeId === selected?.id,
   );
@@ -1337,21 +1353,24 @@ export default function AetherPage() {
               ) : null}
               {activeView === "initiatives" ? (
                 <div className="initiative-page">
-                  <div className="workspace-section-heading">
+                  <header className="initiative-page__heading">
                     <div>
-                      <p className="workspace-kicker">
-                        DEL CONTEXTO A LA DECISIÓN
-                      </p>
+                      <p className="workspace-kicker">{activeWorkspaceName}</p>
                       <h1>Iniciativas</h1>
                       <p>
-                        Convierte una necesidad en una propuesta clara, y
-                        acompáñala hasta una decisión informada.
+                        Propuestas del espacio, desde su presentación hasta la
+                        decisión.
                       </p>
                     </div>
-                    <button type="button" onClick={openInitiativeForm}>
-                      + Nueva iniciativa
+                    <button
+                      className="initiative-page__create"
+                      type="button"
+                      onClick={openInitiativeForm}
+                    >
+                      <Plus size={16} aria-hidden="true" />
+                      Nueva iniciativa
                     </button>
-                  </div>
+                  </header>
                   <section
                     className="initiative-journey"
                     aria-label="Estado de las iniciativas visibles"
@@ -1415,13 +1434,10 @@ export default function AetherPage() {
                     <section id="initiatives" className="initiative-inbox">
                       <div className="initiative-inbox__heading">
                         <div>
-                          <p className="workspace-kicker">
-                            BANDEJA DEL ESPACIO
-                          </p>
-                          <h2>Iniciativas del espacio</h2>
+                          <p className="workspace-kicker">BANDEJA DEL EQUIPO</p>
+                          <h2>Propuestas del equipo</h2>
                           <p>
-                            Explora las propuestas del equipo y sigue su avance
-                            hasta una decisión.
+                            Ideas compartidas y su avance hasta una decisión.
                           </p>
                         </div>
                         <span className="initiative-total">
@@ -1463,7 +1479,7 @@ export default function AetherPage() {
                             className="initiative-search__icon"
                             aria-hidden="true"
                           >
-                            ⌕
+                            <Search size={16} />
                           </span>
                           <span className="sr-only">Buscar iniciativas</span>
                           <input
@@ -1484,7 +1500,7 @@ export default function AetherPage() {
                           ) : null}
                         </label>
                         <div
-                          className="initiative-filters"
+                          className="initiative-filters initiative-filters--status"
                           role="group"
                           aria-label="Filtrar iniciativas"
                         >
@@ -1505,32 +1521,32 @@ export default function AetherPage() {
                               onClick={() => setInitiativeFilter(key)}
                             >
                               {label}
+                              <span>
+                                {key === "all"
+                                  ? initiatives.length
+                                  : key === "closed"
+                                    ? initiatives.filter((item) =>
+                                        [
+                                          "approved",
+                                          "rejected",
+                                          "cancelled",
+                                        ].includes(item.status),
+                                      ).length
+                                    : initiatives.filter(
+                                        (item) => item.status === key,
+                                      ).length}
+                              </span>
                             </button>
                           ))}
                         </div>
                       </div>
                       {!loading && !error && initiatives.length === 0 ? (
                         <div className="initiative-empty">
-                          <span
-                            className="initiative-empty__mark"
-                            aria-hidden="true"
-                          >
-                            ✳
-                          </span>
-                          <h3>Toda buena mejora empieza con una pregunta.</h3>
+                          <h3>Aún no hay propuestas en este espacio</h3>
                           <p>
-                            Describe qué problema quieres resolver y qué cambio
-                            esperas conseguir. El equipo tendrá el contexto para
-                            evaluarlo.
+                            Las iniciativas que propongan sus miembros
+                            aparecerán aquí con su estado y avance.
                           </p>
-                          <button
-                            type="button"
-                            className="initiative-inline-action"
-                            onClick={openInitiativeForm}
-                          >
-                            Plantear la primera idea{" "}
-                            <span aria-hidden="true">→</span>
-                          </button>
                         </div>
                       ) : null}
                       {!loading && error && initiatives.length === 0 ? (
@@ -1635,17 +1651,6 @@ export default function AetherPage() {
                                   </span>
                                 ) : null}
                               </span>
-                              <span className="initiative-row__next">
-                                {initiativeNextStep(initiative.status)}
-                                {initiative.intakeAssignment ? (
-                                  <>
-                                    {" · "}Revisión{" "}
-                                    {formatInitiativeDay(
-                                      initiative.intakeAssignment.nextReviewOn,
-                                    )}
-                                  </>
-                                ) : null}
-                              </span>
                             </span>
                             <span
                               className="initiative-row__open"
@@ -1656,15 +1661,6 @@ export default function AetherPage() {
                           </button>
                         ))}
                       </div>
-                      {initiatives.length > 0 ? (
-                        <button
-                          type="button"
-                          className="initiative-inline-action initiative-inbox__new"
-                          onClick={openInitiativeForm}
-                        >
-                          + Plantear una iniciativa
-                        </button>
-                      ) : null}
                     </section>
                     <aside id="detail" aria-label="Detalle de iniciativa">
                       <Card>
@@ -1673,7 +1669,7 @@ export default function AetherPage() {
                             <header className="initiative-detail__hero">
                               <div className="initiative-detail__topline">
                                 <span className="workspace-kicker">
-                                  INICIATIVA
+                                  PROPUESTA DEL EQUIPO
                                 </span>
                                 <Status>
                                   {initiativeStatusLabel(selected.status)}
@@ -1741,20 +1737,32 @@ export default function AetherPage() {
                                   </dd>
                                 </div>
                               </dl>
-                              <p className="initiative-detail__responsibility">
+                              <div className="initiative-detail__responsibility">
+                                <span className="initiative-detail__responsibility-label">
+                                  SIGUIENTE PASO
+                                </span>
                                 <strong>
-                                  {initiativeNextStep(selected.status)}
+                                  {initiativeNextStep(selected.status).replace(
+                                    "Siguiente paso: ",
+                                    "",
+                                  )}
                                 </strong>
                                 {selected.intakeAssignment ? (
-                                  <>
-                                    {" · "}Atiende{" "}
+                                  <span>
+                                    Responsable:{" "}
                                     {selected.intakeAssignment
                                       .responsibleActorId === session?.actorId
                                       ? "tú"
                                       : (selected.intakeAssignment
                                           .responsibleDisplayName ??
-                                        "una persona asignada")}
-                                    {" · "}Próxima revisión{" "}
+                                        "persona asignada")}
+                                  </span>
+                                ) : selected.status === "presented" ? (
+                                  <span>Sin responsable asignado</span>
+                                ) : null}
+                                {selected.intakeAssignment ? (
+                                  <span>
+                                    Revisión:{" "}
                                     <time
                                       dateTime={
                                         selected.intakeAssignment.nextReviewOn
@@ -1764,11 +1772,9 @@ export default function AetherPage() {
                                         selected.intakeAssignment.nextReviewOn,
                                       )}
                                     </time>
-                                  </>
-                                ) : selected.status === "presented" ? (
-                                  <> · Sin responsable de atención asignado</>
+                                  </span>
                                 ) : null}
-                              </p>
+                              </div>
                             </header>
                             {canRenderInitiativeAction(selected, "edit") ||
                             canRenderInitiativeAction(selected, "present") ? (
@@ -1802,7 +1808,7 @@ export default function AetherPage() {
                               aria-labelledby="initiative-detail-journey-title"
                             >
                               <h3 id="initiative-detail-journey-title">
-                                Recorrido
+                                Flujo de la iniciativa
                               </h3>
                               <JourneyProgress status={selected.status} />
                             </section>
@@ -1847,11 +1853,29 @@ export default function AetherPage() {
                                 </ul>
                               </Notice>
                             ) : null}
+                            <nav
+                              className="initiative-detail__nav"
+                              aria-label="Secciones de la iniciativa"
+                            >
+                              <a href="#initiative-proposal-problem">
+                                Problema e impacto
+                              </a>
+                              <a href="#initiative-proposal-response">
+                                Respuesta
+                              </a>
+                              <a href="#initiative-proposal-pilotage">
+                                Pilotaje
+                              </a>
+                              <a href="#initiative-history-title">Actividad</a>
+                            </nav>
                             <section
                               className="initiative-proposal-detail"
                               aria-label="Contenido de la propuesta"
                             >
-                              <div className="initiative-proposal-detail__group">
+                              <div
+                                id="initiative-proposal-problem"
+                                className="initiative-proposal-detail__group"
+                              >
                                 <h3>Problema e impacto</h3>
                                 <dl className="initiative-proposal-detail__grid">
                                   <ProposalDetail
@@ -1873,8 +1897,11 @@ export default function AetherPage() {
                                   />
                                 </dl>
                               </div>
-                              <div className="initiative-proposal-detail__group">
-                                <h3>Propuesta</h3>
+                              <div
+                                id="initiative-proposal-response"
+                                className="initiative-proposal-detail__group"
+                              >
+                                <h3>Respuesta propuesta</h3>
                                 <dl className="initiative-proposal-detail__grid">
                                   <ProposalDetail
                                     label="Propuesta de valor"
@@ -1893,7 +1920,10 @@ export default function AetherPage() {
                                   />
                                 </dl>
                               </div>
-                              <div className="initiative-proposal-detail__group">
+                              <div
+                                id="initiative-proposal-pilotage"
+                                className="initiative-proposal-detail__group"
+                              >
                                 <h3>Estado y pilotaje</h3>
                                 <dl className="initiative-proposal-detail__grid">
                                   <ProposalDetail
@@ -2121,10 +2151,35 @@ export default function AetherPage() {
                           </>
                         ) : (
                           <div className="initiative-detail__empty">
-                            <h2>Detalle de iniciativa</h2>
-                            <p>
-                              Selecciona una iniciativa para revisar su detalle.
-                            </p>
+                            {loading ? (
+                              <div
+                                className="initiative-detail__empty-loading"
+                                aria-busy="true"
+                              >
+                                <span className="initiative-loading__dot" />
+                                Cargando iniciativas…
+                              </div>
+                            ) : (
+                              <div className="initiative-detail__empty-copy">
+                                <p className="workspace-kicker">
+                                  DETALLE DE INICIATIVA
+                                </p>
+                                <h2>
+                                  {error
+                                    ? "No se pudo cargar la bandeja."
+                                    : initiatives.length === 0
+                                      ? "El detalle aparecerá aquí."
+                                      : "No hay resultados para esta vista."}
+                                </h2>
+                                <p>
+                                  {error
+                                    ? "La información de las propuestas estará disponible cuando se restablezca la conexión."
+                                    : initiatives.length === 0
+                                      ? "Selecciona una propuesta para revisar su contexto, evaluación, decisión e historial."
+                                      : "Prueba con otra búsqueda o ajusta los filtros de la bandeja."}
+                                </p>
+                              </div>
+                            )}
                           </div>
                         )}
                       </Card>

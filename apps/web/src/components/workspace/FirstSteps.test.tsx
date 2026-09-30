@@ -66,7 +66,15 @@ it("permite crear una organización con la política requerida", async () => {
     }),
   );
   expect(request).toHaveBeenCalledWith("organization-role-profiles/business");
-  expect(await screen.findByText("Coordinación de iniciativas")).toBeTruthy();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Ver permisos y funciones" }),
+  );
+  expect(screen.getByRole("dialog", { name: "Roles y permisos" })).toBeTruthy();
+  expect(await screen.findByText("Organiza el ingreso de ideas.")).toBeTruthy();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Cerrar roles y permisos" }),
+  );
+  expect(screen.queryByRole("dialog", { name: "Roles y permisos" })).toBeNull();
   const organizationRequest = request.mock.calls.find(
     ([url, init]) => url === "organizations" && init?.method === "POST",
   );
@@ -76,6 +84,51 @@ it("permite crear una organización con la política requerida", async () => {
     organizationType: "business",
     policy: { dataResidencyRegion: "local", retentionDays: 365 },
   });
+});
+
+it("explica las funciones del tipo personal sin mostrar contadores vacíos", async () => {
+  const request = vi.fn(
+    async (url: string) =>
+      new Response(
+        JSON.stringify({
+          organizationType: url.split("/").at(-1),
+          profileLabel: "Trabajo personal",
+          organizationAccessRoles: [],
+          workspaceAccessRoles: [],
+          initiativeResponsibilities: [],
+          projectResponsibilities: [
+            {
+              key: "project_leader",
+              label: "Líder del proyecto",
+              description: "Coordina el proyecto.",
+              implementationStatus: "implemented",
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+  );
+
+  render(
+    <FirstSteps
+      organization={null}
+      request={request}
+      onOrganizationReady={vi.fn(async () => {})}
+      onWorkspaceReady={vi.fn()}
+      onLogout={vi.fn()}
+    />,
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: /^Crear organización/ }));
+  fireEvent.click(
+    await screen.findByRole("combobox", { name: "Tipo de organización" }),
+  );
+  fireEvent.click(screen.getByRole("option", { name: /Uso personal/ }));
+
+  expect(
+    await screen.findByText("Proyectos; sin funciones de iniciativas."),
+  ).toBeTruthy();
+  expect(screen.queryByText("Sin funciones adicionales")).toBeNull();
 });
 
 it("acepta una invitación sin conceder acceso sólo por tener cuenta", async () => {

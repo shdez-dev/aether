@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { ArrowUpRight, Layers3, ShieldCheck, X } from "lucide-react";
 import type {
   OrganizationResponse,
   OrganizationRoleProfileResponse,
@@ -27,9 +28,11 @@ function responsibilityLabel(
 export function OrganizationRoleProfilePreview({
   organizationType,
   request,
+  compact = false,
 }: {
   organizationType: OrganizationKind;
   request: Request;
+  compact?: boolean;
 }) {
   const [profile, setProfile] =
     useState<OrganizationRoleProfileResponse | null>(null);
@@ -37,6 +40,8 @@ export function OrganizationRoleProfilePreview({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [retryKey, setRetryKey] = useState(0);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const detailsTriggerRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     let active = true;
@@ -70,29 +75,46 @@ export function OrganizationRoleProfilePreview({
 
   const currentProfile = loadedType === organizationType ? profile : null;
 
+  function openDetails() {
+    const dialog = dialogRef.current;
+    if (!dialog || dialog.open) return;
+    if (typeof dialog.showModal === "function") dialog.showModal();
+    else dialog.setAttribute("open", "");
+  }
+
+  function closeDetails() {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    if (typeof dialog.close === "function") dialog.close();
+    else dialog.removeAttribute("open");
+    detailsTriggerRef.current?.focus();
+  }
+
   return (
     <section
-      className="organization-role-profile-preview"
+      className={`organization-role-profile-preview${compact ? " organization-role-profile-preview--compact" : ""}`}
       aria-labelledby="organization-role-profile-heading"
       aria-busy={loading}
     >
       <div className="organization-role-profile-preview__heading">
         <div>
           <p className="organization-role-profile-preview__eyebrow">
-            PERFIL DEL TIPO
+            {compact ? "SEGÚN EL TIPO ELEGIDO" : "PERFIL DEL TIPO"}
           </p>
           <h3 id="organization-role-profile-heading">
-            Responsabilidades disponibles
+            {compact ? "Accesos y funciones" : "Responsabilidades disponibles"}
           </h3>
           <p>
-            {currentProfile?.profileLabel ?? "Según el tipo que elijas"}. El
-            tipo define qué roles se pueden asignar; cada asignación requiere
-            acceso al espacio correspondiente.
+            {compact
+              ? "Estos accesos y funciones estarán disponibles después de crear la organización."
+              : `${currentProfile?.profileLabel ?? "Según el tipo que elijas"}. El tipo define qué roles se pueden asignar; cada asignación requiere acceso al espacio correspondiente.`}
           </p>
         </div>
-        <span className="organization-role-profile-preview__version">
-          Catálogo base
-        </span>
+        {!compact ? (
+          <span className="organization-role-profile-preview__version">
+            Catálogo base
+          </span>
+        ) : null}
       </div>
 
       {loading && !currentProfile ? (
@@ -117,34 +139,148 @@ export function OrganizationRoleProfilePreview({
       ) : null}
 
       {currentProfile ? (
-        <>
-          <div className="organization-role-profile-preview__access">
-            <strong>Permisos de acceso comunes</strong>
-            <span>
-              {currentProfile.organizationAccessRoles
-                .map((role) => role.label.toLocaleLowerCase("es-CL"))
-                .join(" · ")}{" "}
-              <span aria-hidden="true">/</span>{" "}
-              {currentProfile.workspaceAccessRoles
-                .map((role) => role.label.toLocaleLowerCase("es-CL"))
-                .join(" · ")}
-            </span>
-            <small>Se mantienen iguales para todos los tipos.</small>
-          </div>
+        compact ? (
+          <>
+            <div className="organization-role-profile-preview__overview">
+              <div className="organization-role-profile-preview__overview-item">
+                <span className="organization-role-profile-preview__overview-icon">
+                  <ShieldCheck size={18} aria-hidden="true" />
+                </span>
+                <div>
+                  <strong>Acceso</strong>
+                  <p>Organización y espacios con permisos independientes.</p>
+                </div>
+              </div>
+              <div className="organization-role-profile-preview__overview-item">
+                <span className="organization-role-profile-preview__overview-icon">
+                  <Layers3 size={18} aria-hidden="true" />
+                </span>
+                <div>
+                  <strong>Funciones</strong>
+                  <p>
+                    {currentProfile.initiativeResponsibilities.length
+                      ? "Responsabilidades en iniciativas y proyectos."
+                      : "Proyectos; sin funciones de iniciativas."}
+                  </p>
+                </div>
+              </div>
+            </div>
+            <button
+              ref={detailsTriggerRef}
+              className="organization-role-profile-preview__details-trigger"
+              type="button"
+              onClick={openDetails}
+            >
+              Ver permisos y funciones
+              <ArrowUpRight size={16} aria-hidden="true" />
+            </button>
+            <dialog
+              ref={dialogRef}
+              className="organization-role-profile-preview__dialog"
+              aria-labelledby="organization-role-profile-dialog-heading"
+              aria-modal="true"
+              onClose={() => detailsTriggerRef.current?.focus()}
+            >
+              <div className="organization-role-profile-preview__dialog-shell">
+                <div className="organization-role-profile-preview__dialog-header">
+                  <div>
+                    <p className="organization-role-profile-preview__eyebrow">
+                      {currentProfile.profileLabel.toLocaleUpperCase("es-CL")}
+                    </p>
+                    <h3 id="organization-role-profile-dialog-heading">
+                      Roles y permisos
+                    </h3>
+                    <p>
+                      Consulta qué acceso y responsabilidades podrás asignar.
+                    </p>
+                  </div>
+                  <button
+                    className="organization-role-profile-preview__dialog-close"
+                    type="button"
+                    onClick={closeDetails}
+                    aria-label="Cerrar roles y permisos"
+                  >
+                    <X size={20} aria-hidden="true" />
+                  </button>
+                </div>
+                <div className="organization-role-profile-preview__dialog-body">
+                  <div className="organization-role-profile-preview__access-groups">
+                    <AccessRoleGroup
+                      title="Acceso a la organización"
+                      roles={currentProfile.organizationAccessRoles}
+                    />
+                    <AccessRoleGroup
+                      title="Acceso al espacio"
+                      roles={currentProfile.workspaceAccessRoles}
+                    />
+                  </div>
+                  <div className="organization-role-profile-preview__dialog-responsibilities">
+                    <RoleGroup
+                      title="Iniciativas"
+                      roles={currentProfile.initiativeResponsibilities}
+                      emptyMessage="Este tipo no agrega responsabilidades de iniciativas."
+                    />
+                    <RoleGroup
+                      title="Proyectos"
+                      roles={currentProfile.projectResponsibilities}
+                    />
+                  </div>
+                </div>
+              </div>
+            </dialog>
+          </>
+        ) : (
+          <>
+            <div className="organization-role-profile-preview__access">
+              <strong>Permisos de acceso comunes</strong>
+              <span>
+                {currentProfile.organizationAccessRoles
+                  .map((role) => role.label.toLocaleLowerCase("es-CL"))
+                  .join(" · ")}{" "}
+                <span aria-hidden="true">/</span>{" "}
+                {currentProfile.workspaceAccessRoles
+                  .map((role) => role.label.toLocaleLowerCase("es-CL"))
+                  .join(" · ")}
+              </span>
+              <small>Se mantienen iguales para todos los tipos.</small>
+            </div>
 
-          <div className="organization-role-profile-preview__groups">
-            <RoleGroup
-              title="Iniciativas"
-              roles={currentProfile.initiativeResponsibilities}
-              emptyMessage="Este tipo no agrega responsabilidades de revisión de iniciativas."
-            />
-            <RoleGroup
-              title="Proyectos"
-              roles={currentProfile.projectResponsibilities}
-            />
-          </div>
-        </>
+            <div className="organization-role-profile-preview__groups">
+              <RoleGroup
+                title="Iniciativas"
+                roles={currentProfile.initiativeResponsibilities}
+                emptyMessage="Este tipo no agrega responsabilidades de revisión de iniciativas."
+              />
+              <RoleGroup
+                title="Proyectos"
+                roles={currentProfile.projectResponsibilities}
+              />
+            </div>
+          </>
+        )
       ) : null}
+    </section>
+  );
+}
+
+function AccessRoleGroup({
+  title,
+  roles,
+}: {
+  title: string;
+  roles: readonly { key: string; label: string; description: string }[];
+}) {
+  return (
+    <section className="organization-role-profile-preview__access-group">
+      <h4>{title}</h4>
+      <ul>
+        {roles.map((role) => (
+          <li key={role.key}>
+            <strong>{role.label}</strong>
+            <span>{role.description}</span>
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }

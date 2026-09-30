@@ -47,20 +47,26 @@ export function InitiativeProposalWizard({
       proposalDetails: { ...draft.proposalDetails, ...change },
     });
   const visibleSections = mode === "edit" ? [0, 1, 2, 3] : [step];
+  const backLink = (
+    <button
+      type="button"
+      className="initiative-wizard__back-link"
+      onClick={onCancel}
+    >
+      <span aria-hidden="true">←</span>{" "}
+      {mode === "edit" ? "Volver al detalle" : "Volver a iniciativas"}
+    </button>
+  );
 
   return (
     <div
       className={`initiative-wizard${mode === "edit" ? " initiative-wizard--edit" : ""}`}
     >
+      {mode === "create" ? (
+        <div className="initiative-wizard__back-row">{backLink}</div>
+      ) : null}
       <header className="initiative-wizard__header">
-        <button
-          type="button"
-          className="initiative-wizard__back-link"
-          onClick={onCancel}
-        >
-          <span aria-hidden="true">←</span>{" "}
-          {mode === "edit" ? "Volver al detalle" : "Volver a iniciativas"}
-        </button>
+        {mode === "edit" ? backLink : null}
         {mode === "create" ? (
           <p className="workspace-kicker">PLANTEA UNA IDEA</p>
         ) : null}

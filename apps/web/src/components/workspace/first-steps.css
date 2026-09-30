@@ -1,4 +1,13 @@
 .first-steps {
+  --day-surface: #ffffff;
+  --day-ink: #15234b;
+  --day-muted: #596985;
+  --day-line: #dfe6f3;
+  --day-accent: #2244b5;
+  --day-tint: #edf3ff;
+  --day-tint-line: #d5e2ff;
+  --day-warning: #973c4d;
+  --day-warning-bg: #fff0f2;
   display: flex;
   flex-direction: column;
   min-height: 100svh;
@@ -96,6 +105,17 @@
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.15em;
+}
+.first-steps__stage-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  flex-wrap: wrap;
+}
+.first-steps__stage-toolbar .first-steps__back {
+  min-height: 38px;
+  margin: 0;
 }
 .first-steps__stage--selected .first-steps__form {
   margin-top: 14px;
@@ -424,6 +444,287 @@
   }
   .first-steps__picker-option:hover,
   .first-steps__picker-option[data-active="true"] {
+    transform: none;
+  }
+}
+
+/* Organization creation keeps the essentials visible in one balanced view. */
+.first-steps--organization-create {
+  min-height: 100svh;
+  padding: 14px clamp(18px, 4vw, 56px) 12px !important;
+}
+
+.first-steps--organization-create .first-steps__header {
+  flex: none;
+  min-height: 32px;
+}
+
+@media (min-width: 921px) and (min-height: 651px) {
+  .first-steps--organization-create .first-steps__header {
+    transform: translateY(clamp(16px, 2.4svh, 26px));
+  }
+}
+
+.first-steps--organization-create .first-steps__content {
+  display: grid;
+  width: min(100%, 1180px);
+  flex: 1;
+  grid-template-columns: minmax(220px, 0.72fr) minmax(0, 1.5fr);
+  align-items: center;
+  gap: clamp(28px, 5vw, 76px);
+  margin: 0 auto;
+  padding: 20px 0;
+}
+
+.first-steps--organization-create .first-steps__eyebrow {
+  margin-bottom: 13px !important;
+}
+
+.first-steps--organization-create h1 {
+  margin-bottom: 12px;
+  font-size: clamp(38px, 4.2vw, 58px);
+}
+
+.first-steps--organization-create .first-steps__intro {
+  max-width: 34ch;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.first-steps--organization-create .first-steps__stage--organization {
+  max-width: none;
+  min-width: 0;
+}
+
+.first-steps--organization-create .first-steps__stage-toolbar {
+  margin-bottom: 10px;
+}
+
+.first-steps--organization-create .first-steps__selected-label {
+  font-size: 10px;
+}
+
+.first-steps--organization-create
+  .first-steps__stage--selected
+  .first-steps__form {
+  max-width: none;
+  margin-top: 0;
+}
+
+.workspace-shell
+  .first-steps--organization-create
+  .first-steps__form--organization {
+  display: grid;
+  gap: 16px;
+  max-width: none;
+  margin: 0;
+  padding: clamp(16px, 2vw, 23px);
+  border-radius: 16px;
+  box-shadow: 0 18px 48px rgb(32 61 125 / 7%);
+}
+
+.first-steps__organization-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  min-width: 0;
+}
+
+.first-steps__organization-fields .first-steps__field {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.first-steps__organization-fields .first-steps__field label {
+  color: #243454;
+  font-size: 12px;
+}
+
+.first-steps__organization-fields input,
+.first-steps--organization-create .first-steps__picker-trigger {
+  min-height: 48px;
+  border-radius: 9px;
+  font-size: 14px;
+}
+
+.first-steps--organization-create .organization-role-profile-preview {
+  min-width: 0;
+  margin: 0;
+}
+
+.first-steps__organization-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.first-steps__organization-note {
+  max-width: 32ch;
+  color: #66738e;
+  font-size: 11px !important;
+  line-height: 1.45 !important;
+}
+
+.first-steps--organization-create .first-steps__submit {
+  min-width: 220px;
+  min-height: 48px;
+  flex: none;
+  margin-top: 0;
+  border-radius: 10px;
+  transition:
+    background-color 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms ease;
+}
+
+.first-steps--organization-create .first-steps__submit:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgb(34 68 181 / 17%);
+}
+
+.first-steps--organization-create .first-steps__footer {
+  display: none;
+}
+
+@media (max-width: 920px) {
+  .first-steps--organization-create .first-steps__content {
+    width: min(100%, 700px);
+    grid-template-columns: minmax(0, 1fr);
+    align-content: center;
+    gap: 15px;
+    padding: 14px 0;
+  }
+
+  .first-steps--organization-create h1 {
+    font-size: clamp(34px, 6vw, 48px);
+  }
+
+  .first-steps--organization-create .first-steps__intro {
+    max-width: 55ch;
+    font-size: 13px;
+  }
+}
+
+@media (max-width: 600px) {
+  .first-steps--organization-create {
+    padding: 10px 14px !important;
+  }
+
+  .first-steps--organization-create .first-steps__content {
+    align-content: start;
+    gap: 10px;
+    padding: 10px 0 8px;
+  }
+
+  .first-steps--organization-create .first-steps__stage-toolbar {
+    gap: 8px;
+    flex-wrap: nowrap;
+  }
+
+  .first-steps--organization-create .first-steps__selected-label {
+    font-size: 9px;
+    letter-spacing: 0.1em;
+  }
+
+  .first-steps--organization-create .first-steps__eyebrow {
+    margin-bottom: 8px !important;
+  }
+
+  .first-steps--organization-create h1 {
+    margin-bottom: 6px;
+    font-size: clamp(32px, 9vw, 40px);
+  }
+
+  .first-steps--organization-create .first-steps__intro {
+    font-size: 12px;
+    line-height: 1.45;
+  }
+
+  .workspace-shell
+    .first-steps--organization-create
+    .first-steps__form--organization {
+    gap: 12px;
+    padding: 14px;
+    border-radius: 13px;
+  }
+
+  .first-steps__organization-fields {
+    gap: 10px;
+  }
+
+  .first-steps__organization-fields input,
+  .first-steps--organization-create .first-steps__picker-trigger {
+    min-height: 44px;
+    padding: 9px 10px;
+    font-size: 13px;
+  }
+
+  .first-steps__organization-footer {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .first-steps__organization-note {
+    max-width: none;
+  }
+
+  .first-steps--organization-create .first-steps__submit {
+    width: 100%;
+    min-height: 46px;
+  }
+}
+
+@media (max-width: 520px) {
+  .first-steps__organization-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-height: 650px) and (min-width: 601px) {
+  .first-steps--organization-create {
+    padding-top: 8px !important;
+    padding-bottom: 8px !important;
+  }
+
+  .first-steps--organization-create .first-steps__content {
+    padding-block: 8px;
+  }
+
+  .first-steps--organization-create .first-steps__eyebrow {
+    margin-bottom: 8px !important;
+  }
+
+  .first-steps--organization-create h1 {
+    margin-bottom: 7px;
+    font-size: clamp(34px, 4vw, 48px);
+  }
+
+  .first-steps--organization-create .first-steps__intro {
+    font-size: 12px;
+  }
+
+  .workspace-shell
+    .first-steps--organization-create
+    .first-steps__form--organization {
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .first-steps__organization-fields input,
+  .first-steps--organization-create .first-steps__picker-trigger {
+    min-height: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .first-steps--organization-create .first-steps__submit {
+    transition: none;
+  }
+
+  .first-steps--organization-create .first-steps__submit:hover:not(:disabled) {
     transform: none;
   }
 }
